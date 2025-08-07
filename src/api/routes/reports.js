@@ -7,5 +7,6 @@ router.get('/attendance-stats', reportController.getAttendanceStats);
 router.get('/popular-classes', reportController.getPopularClasses);
 router.get('/revenue-stats', reportController.getRevenueStats);
 router.get('/summary', reportController.getSummaryStats);
+router.get('/financial-summary', reportController.getFinancialSummary);
 
 module.exports = router;

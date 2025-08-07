@@ -19,6 +19,7 @@ const createTables = async () => {
       id SERIAL PRIMARY KEY,
       name VARCHAR(100) NOT NULL,
       email VARCHAR(100) UNIQUE NOT NULL,
+      membership_type VARCHAR(100),
       membership_plan_id INTEGER REFERENCES membership_plans(id),
       join_date DATE DEFAULT CURRENT_DATE
     );
@@ -27,13 +28,18 @@ const createTables = async () => {
   const settingsTable = `
     CREATE TABLE IF NOT EXISTS settings (
       key VARCHAR(50) PRIMARY KEY,
-      value VARCHAR(100)
+      value TEXT
     );
   `;
 
   const insertDefaultSettings = `
     INSERT INTO settings (key, value) VALUES ('currency', 'INR') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('membership_types', '["Weight Training", "Cardio", "Cardio & Weights Training"]') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('gym_name', 'My Gym') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('gym_logo', 'logo.svg') ON CONFLICT (key) DO NOTHING;
   `;
+
+
 
   const attendanceTable = `
     CREATE TABLE IF NOT EXISTS attendance (

@@ -27,11 +27,11 @@ exports.getMemberById = async (req, res) => {
 
 // Create a new member
 exports.createMember = async (req, res) => {
-    const { name, email, membership_type } = req.body;
+    const { name, email, membership_type, membership_plan_id } = req.body;
     try {
         const newMember = await pool.query(
-            'INSERT INTO members (name, email, membership_type) VALUES ($1, $2, $3) RETURNING *',
-            [name, email, membership_type]
+            'INSERT INTO members (name, email, membership_type, membership_plan_id) VALUES ($1, $2, $3, $4) RETURNING *',
+            [name, email, membership_type, membership_plan_id]
         );
         
         // Send welcome email

@@ -111,3 +111,47 @@ exports.getSummaryStats = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// Get financial summary
+exports.getFinancialSummary = async (req, res) => {
+    try {
+        const outstandingInvoices = await pool.query(`
+            SELECT i.id, m.name as member_name, i.amount, i.due_date
+            FROM invoices i
+            JOIN members m ON i.member_id = m.id
+            WHERE i.status = 'unpaid'
+            ORDER BY i.due_date ASC
+        `);
+
+        const paymentHistory = await pool.query(`
+            SELECT p.id, m.name as member_name, p.amount, p.payment_date
+            FROM payments p
+            JOIN invoices i ON p.invoice_id = i.id
+            JOIN members m ON i.member_id = m.id
+            ORDER BY p.payment_date DESC
+            LIMIT 20
+        `);
+
+        const memberPaymentStatus = await pool.query(`
+            SELECT 
+                m.id, 
+                m.name, 
+                m.email,
+                MAX(p.payment_date) as last_payment_date,
+                (SELECT i.status FROM invoices i WHERE i.member_id = m.id ORDER BY i.due_date DESC LIMIT 1) as last_invoice_status
+            FROM members m
+            LEFT JOIN invoices i ON m.id = i.member_id
+            LEFT JOIN payments p ON i.id = p.invoice_id
+            GROUP BY m.id
+            ORDER BY m.name ASC
+        `);
+
+        res.json({
+            outstandingInvoices: outstandingInvoices.rows,
+            paymentHistory: paymentHistory.rows,
+            memberPaymentStatus: memberPaymentStatus.rows
+        });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};

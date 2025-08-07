@@ -14,7 +14,9 @@ const reportRoutes = require('./api/routes/reports');
 const settingsRoutes = require('./api/routes/settings');
 
 
+
 app.use(express.json());
+app.use('/uploads', express.static('public/uploads'));
 
 app.get('/', (req, res) => {
     res.send('Gym Management API is running...');
@@ -30,6 +32,7 @@ app.use('/api/plans', planRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingsRoutes);
+
 
 
 const PORT = process.env.PORT || 3000;
