@@ -1,5 +1,5 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const pool = require('../config/database');
+const pool = require('../../config/database');
 const { sendEmail } = require('../../services/emailService');
 
 // Process a payment for an invoice
@@ -10,7 +10,7 @@ exports.processPayment = async (req, res) => {
         // Create a PaymentIntent with Stripe
         const paymentIntent = await stripe.paymentIntents.create({
             amount: amount * 100, // Amount in cents
-            currency: 'usd',
+            currency: 'inr',
             payment_method: payment_method_id,
             confirm: true,
         });

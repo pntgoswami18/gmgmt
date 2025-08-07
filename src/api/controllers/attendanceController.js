@@ -1,4 +1,4 @@
-const pool = require('../config/database');
+const pool = require('../../config/database');
 
 // This endpoint would be called by the biometric device
 exports.checkIn = async (req, res) => {

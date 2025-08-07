@@ -98,6 +98,13 @@ EMAIL_PASS=your_app_password
 
 **Note for Email Setup:** For Gmail, you'll need to use an "App Password" instead of your regular password. Enable 2-factor authentication and generate an app password in your Google Account settings.
 
+**Note for JWT Secret:** It is critical to use a strong, randomly-generated secret for your JWT key. You can generate one from your terminal with the following command:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+**Note for Stripe Setup:** To get a Stripe secret key, you need a Stripe account. From the Stripe Developer Dashboard, find your "secret key" for test mode (it will start with `sk_test_`).
+
 The application will automatically create the required tables when it first connects to the database.
 
 ---

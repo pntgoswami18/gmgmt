@@ -19,9 +19,20 @@ const createTables = async () => {
       id SERIAL PRIMARY KEY,
       name VARCHAR(100) NOT NULL,
       email VARCHAR(100) UNIQUE NOT NULL,
-      membership_plan_id INTEGER,
+      membership_plan_id INTEGER REFERENCES membership_plans(id),
       join_date DATE DEFAULT CURRENT_DATE
     );
+  `;
+
+  const settingsTable = `
+    CREATE TABLE IF NOT EXISTS settings (
+      key VARCHAR(50) PRIMARY KEY,
+      value VARCHAR(100)
+    );
+  `;
+
+  const insertDefaultSettings = `
+    INSERT INTO settings (key, value) VALUES ('currency', 'INR') ON CONFLICT (key) DO NOTHING;
   `;
 
   const attendanceTable = `
@@ -98,6 +109,8 @@ const createTables = async () => {
   
   try {
     await pool.query(memberTable);
+    await pool.query(settingsTable);
+    await pool.query(insertDefaultSettings);
     await pool.query(attendanceTable);
     await pool.query(classTable);
     await pool.query(scheduleTable);

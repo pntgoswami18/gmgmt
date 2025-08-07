@@ -1,4 +1,4 @@
-const pool = require('../config/database');
+const pool = require('../../config/database');
 const { sendEmail } = require('../../services/emailService');
 
 // Book a class for a member

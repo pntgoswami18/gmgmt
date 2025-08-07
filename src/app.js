@@ -11,6 +11,7 @@ const bookingRoutes = require('./api/routes/bookings');
 const planRoutes = require('./api/routes/plans');
 const paymentRoutes = require('./api/routes/payments');
 const reportRoutes = require('./api/routes/reports');
+const settingsRoutes = require('./api/routes/settings');
 
 
 app.use(express.json());
@@ -28,6 +29,7 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/plans', planRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/settings', settingsRoutes);
 
 
 const PORT = process.env.PORT || 3000;
