@@ -22,6 +22,7 @@ exports.getSetting = async (req, res) => {
 exports.updateSetting = async (req, res) => {
     const { key } = req.params;
     let { value } = req.body;
+    console.log(`Updating setting: ${key} to ${value}`); // Added logging
     try {
         if (key === 'membership_types') {
             value = JSON.stringify(value);
@@ -31,10 +32,16 @@ exports.updateSetting = async (req, res) => {
             [value, key]
         );
         if (updatedSetting.rows.length === 0) {
-            return res.status(404).json({ message: 'Setting not found' });
+            // If the setting doesn't exist, create it
+            const newSetting = await pool.query(
+                'INSERT INTO settings (key, value) VALUES ($1, $2) RETURNING *',
+                [key, value]
+            );
+            return res.json(newSetting.rows[0]);
         }
         res.json(updatedSetting.rows[0]);
     } catch (err) {
+        console.error(`Error updating setting: ${key}`, err); // Added error logging
         res.status(400).json({ message: err.message });
     }
 };
@@ -52,4 +59,3 @@ exports.uploadLogo = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
-
