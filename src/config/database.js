@@ -130,6 +130,8 @@ const createTables = async () => {
   }
 };
 
-createTables();
+const initializeDatabase = async () => {
+  await createTables();
+};
 
-module.exports = pool;
+module.exports = { pool, initializeDatabase };

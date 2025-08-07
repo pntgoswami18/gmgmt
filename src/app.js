@@ -1,6 +1,8 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const { pool, initializeDatabase } = require('./config/database');
 const app = express();
 
 const attendanceRoutes = require('./api/routes/attendance');
@@ -17,6 +19,13 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan('dev')); // Add this line for logging
 
+// Add middleware to log all requests
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    next();
+});
+
 app.use('/uploads', express.static('public/uploads'));
 
 app.use('/api/attendance', attendanceRoutes);
@@ -28,5 +37,24 @@ app.use('/api/plans', planRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/settings', settingsRoutes);
+
+// Initialize database and start server
+const PORT = process.env.PORT || 5000;
+
+const startServer = async () => {
+    try {
+        await initializeDatabase();
+        console.log('Database initialized successfully');
+        
+        app.listen(PORT, () => {
+            console.log(`Server running on port ${PORT}`);
+        });
+    } catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    }
+};
+
+startServer();
 
 module.exports = app;

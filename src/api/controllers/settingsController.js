@@ -1,4 +1,34 @@
-const pool = require('../../config/database');
+const { pool } = require('../../config/database');
+
+// Get all settings
+exports.getAllSettings = async (req, res) => {
+    console.log('getAllSettings called');
+    try {
+        console.log('Executing settings query...');
+        const settingsResult = await pool.query('SELECT key, value FROM settings');
+        console.log('Settings query result:', settingsResult.rows);
+        
+        const settings = {};
+        for (const row of settingsResult.rows) {
+            let value = row.value;
+            if (row.key === 'membership_types') {
+                try {
+                    value = JSON.parse(value);
+                } catch (e) {
+                    console.error('Failed to parse membership_types JSON:', value);
+                    value = [];
+                }
+            }
+            settings[row.key] = value;
+        }
+        
+        console.log('Final settings object:', settings);
+        res.json(settings);
+    } catch (err) {
+        console.error('Error getting all settings', err);
+        res.status(500).json({ message: 'Failed to get settings' });
+    }
+};
 
 // Get a setting by key
 exports.getSetting = async (req, res) => {
@@ -18,31 +48,41 @@ exports.getSetting = async (req, res) => {
     }
 };
 
-// Update a setting
-exports.updateSetting = async (req, res) => {
-    const { key } = req.params;
-    let { value } = req.body;
-    console.log(`Updating setting: ${key} to ${value}`); // Added logging
+// Update multiple settings at once
+exports.updateAllSettings = async (req, res) => {
+    const settings = req.body;
+    const client = await pool.connect();
+
     try {
-        if (key === 'membership_types') {
-            value = JSON.stringify(value);
+        await client.query('BEGIN');
+
+        for (const key in settings) {
+            if (Object.hasOwnProperty.call(settings, key)) {
+                let value = settings[key];
+
+                if (key === 'membership_types') {
+                    value = JSON.stringify(value);
+                }
+
+                const query = `
+                    INSERT INTO settings (key, value)
+                    VALUES ($1, $2)
+                    ON CONFLICT (key) DO UPDATE
+                    SET value = EXCLUDED.value;
+                `;
+                
+                await client.query(query, [key, value]);
+            }
         }
-        const updatedSetting = await pool.query(
-            'UPDATE settings SET value = $1 WHERE key = $2 RETURNING *',
-            [value, key]
-        );
-        if (updatedSetting.rows.length === 0) {
-            // If the setting doesn't exist, create it
-            const newSetting = await pool.query(
-                'INSERT INTO settings (key, value) VALUES ($1, $2) RETURNING *',
-                [key, value]
-            );
-            return res.json(newSetting.rows[0]);
-        }
-        res.json(updatedSetting.rows[0]);
+        
+        await client.query('COMMIT');
+        res.json({ message: 'Settings updated successfully' });
     } catch (err) {
-        console.error(`Error updating setting: ${key}`, err); // Added error logging
-        res.status(400).json({ message: err.message });
+        await client.query('ROLLBACK');
+        console.error('Error updating all settings', err);
+        res.status(500).json({ message: 'Failed to update settings' });
+    } finally {
+        client.release();
     }
 };
 

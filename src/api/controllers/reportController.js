@@ -1,4 +1,4 @@
-const pool = require('../../config/database');
+const { pool } = require('../../config/database');
 
 // Get member growth statistics
 exports.getMemberGrowth = async (req, res) => {
