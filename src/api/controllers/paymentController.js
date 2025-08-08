@@ -108,3 +108,25 @@ exports.recordManualPayment = async (req, res) => {
         res.status(400).json({ message: err.message });
     }
 };
+
+// Get unpaid invoices for a specific member
+exports.getUnpaidInvoicesByMember = async (req, res) => {
+    try {
+        const memberId = parseInt(req.query.member_id, 10);
+        if (!memberId) {
+            return res.status(400).json({ message: 'member_id is required' });
+        }
+
+        const result = await pool.query(
+            `SELECT id, amount, due_date
+             FROM invoices
+             WHERE member_id = $1 AND status = 'unpaid'
+             ORDER BY due_date ASC`,
+            [memberId]
+        );
+
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
