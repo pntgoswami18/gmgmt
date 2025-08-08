@@ -91,6 +91,20 @@ exports.getSummaryStats = async (req, res) => {
             FROM members 
             WHERE join_date >= DATE_TRUNC('month', CURRENT_DATE)
         `);
+
+        // Members who have NOT made a payment in the current month
+        const unpaidMembersThisMonth = await pool.query(`
+            SELECT COUNT(*) as count
+            FROM members m
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM payments p
+                JOIN invoices i ON p.invoice_id = i.id
+                WHERE i.member_id = m.id
+                  AND p.payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+                  AND p.payment_date < (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month')
+            )
+        `);
         
         // Active schedules
         const activeSchedules = await pool.query(`
@@ -103,7 +117,8 @@ exports.getSummaryStats = async (req, res) => {
             totalMembers: totalMembers.rows[0].count,
             totalRevenue: totalRevenue.rows[0].total || 0,
             newMembersThisMonth: membersThisMonth.rows[0].count,
-            activeSchedules: activeSchedules.rows[0].count
+            activeSchedules: activeSchedules.rows[0].count,
+            unpaidMembersThisMonth: unpaidMembersThisMonth.rows[0].count
         };
 
         res.json(summary);
