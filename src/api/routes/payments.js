@@ -3,5 +3,7 @@ const router = express.Router();
 const paymentController = require('../controllers/paymentController');
 
 router.post('/', paymentController.processPayment);
+router.post('/manual', paymentController.recordManualPayment);
+router.post('/invoice', paymentController.createInvoice);
 
 module.exports = router;

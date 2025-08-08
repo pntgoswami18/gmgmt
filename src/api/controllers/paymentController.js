@@ -52,3 +52,34 @@ exports.processPayment = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// Create an invoice for a member (manual or pre-payment)
+exports.createInvoice = async (req, res) => {
+    const { member_id, plan_id, amount, due_date } = req.body;
+    try {
+        const newInvoice = await pool.query(
+            'INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+            [member_id, plan_id || null, amount, due_date, 'unpaid']
+        );
+        res.status(201).json(newInvoice.rows[0]);
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+};
+
+// Record a manual payment (cash/bank/etc.)
+exports.recordManualPayment = async (req, res) => {
+    const { invoice_id, amount, method, transaction_id } = req.body;
+    try {
+        const payment = await pool.query(
+            'INSERT INTO payments (invoice_id, amount, payment_method, transaction_id) VALUES ($1, $2, $3, $4) RETURNING *',
+            [invoice_id, amount, method || 'manual', transaction_id || null]
+        );
+
+        await pool.query('UPDATE invoices SET status = $1 WHERE id = $2', ['paid', invoice_id]);
+
+        res.status(201).json({ message: 'Manual payment recorded', payment: payment.rows[0] });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+};

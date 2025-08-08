@@ -29,16 +29,24 @@ exports.getMemberById = async (req, res) => {
 exports.createMember = async (req, res) => {
     const { name, email, membership_type, membership_plan_id } = req.body;
     try {
+        const planId = membership_plan_id === null || membership_plan_id === undefined || membership_plan_id === ''
+            ? null
+            : parseInt(membership_plan_id, 10);
+
         const newMember = await pool.query(
             'INSERT INTO members (name, email, membership_type, membership_plan_id) VALUES ($1, $2, $3, $4) RETURNING *',
-            [name, email, membership_type, membership_plan_id]
+            [name, email, membership_type || null, planId]
         );
-        
-        // Send welcome email
-        await sendEmail('welcome', [name, email]);
-        
+
+        // Send welcome email (do not block on failures)
+        sendEmail('welcome', [name, email]).catch(() => {});
+
         res.status(201).json(newMember.rows[0]);
     } catch (err) {
+        // Handle unique email violation nicely
+        if (err.code === '23505') {
+            return res.status(409).json({ message: 'A member with this email already exists.' });
+        }
         res.status(400).json({ message: err.message });
     }
 };

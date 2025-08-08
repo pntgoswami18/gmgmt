@@ -37,6 +37,9 @@ const createTables = async () => {
     INSERT INTO settings (key, value) VALUES ('membership_types', '["Weight Training", "Cardio", "Cardio & Weights Training"]') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('gym_name', 'My Gym') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('gym_logo', 'logo.svg') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('primary_color', '#3f51b5') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('secondary_color', '#f50057') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('payment_reminder_days', '7') ON CONFLICT (key) DO NOTHING;
   `;
 
 
@@ -115,6 +118,9 @@ const createTables = async () => {
   
   try {
     await pool.query(memberTable);
+    // Ensure columns exist for backward compatibility
+    await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS membership_type VARCHAR(100);`);
+    await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS membership_plan_id INTEGER REFERENCES membership_plans(id);`);
     await pool.query(settingsTable);
     await pool.query(insertDefaultSettings);
     await pool.query(attendanceTable);
