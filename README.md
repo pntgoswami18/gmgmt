@@ -8,7 +8,7 @@ The application is built with a comprehensive feature set that includes:
 
 ### Backend API Features
 *   **Member Management:** Full CRUD (Create, Read, Update, Delete) operations for gym members with automated welcome emails.
-*   **Biometric Attendance:** API endpoint to simulate and log member check-ins from biometric devices with attendance history tracking.
+*   **Biometric Attendance:** API endpoints to log member check-ins from biometric devices (Secureye S‑B100CB or similar) with attendance history tracking and configurable working hours.
 *   **Class & Schedule Management:** Complete system for creating fitness classes and scheduling them with capacity management.
 *   **Online Booking System:** Members can book and cancel class spots with overbooking prevention and automated confirmation emails.
 *   **Billing & Payments:** Stripe-integrated payment processing with membership plans and automated payment confirmations.
@@ -159,7 +159,8 @@ The backend provides the following REST API endpoints:
 |              | `GET`  | `/api/members/:id`          | Get a single member by ID                  |
 |              | `PUT`  | `/api/members/:id`          | Update a member                            |
 |              | `DELETE`|`/api/members/:id`          | Delete a member                            |
-| **Attendance**| `POST`| `/api/attendance/check-in`  | Log a member check-in (enforces Morning 05:00–11:00 or Evening 16:00–22:00, max one check-in per calendar date) |
+| **Attendance**| `POST`| `/api/attendance/check-in`  | Log a member check-in by `memberId` or `device_user_id` (uses configurable working hours; one check-in per calendar date) |
+|              | `POST` | `/api/attendance/device-webhook` | Webhook for device push events (uses `device_user_id` mapping) |
 |              | `GET`  | `/api/attendance/:memberId` | Get attendance history for a member        |
 | **Classes**  | `GET`  | `/api/classes`              | Get all classes                            |
 |              | `POST` | `/api/classes`              | Create a new class                         |
@@ -170,6 +171,7 @@ The backend provides the following REST API endpoints:
 |              | `PATCH`| `/api/bookings/cancel/:bookingId`| Cancel a booking                       |
 | **Plans**    | `GET`  | `/api/plans`                | Get all membership plans                   |
 |              | `POST` | `/api/plans`                | Create a new membership plan               |
+| **Biometrics** | `PUT` | `/api/members/:id/biometric` | Link or update a member's biometric mapping (`device_user_id` and/or template) |
 | **Payments** | `POST` | `/api/payments`             | Process a payment for an invoice (Stripe)  |
 |              | `POST` | `/api/payments/manual`      | Record a manual payment (cash/bank/UPI). Auto-creates an invoice if missing/invalid |
 |              | `POST` | `/api/payments/invoice`     | Create a new invoice for a member          |
@@ -192,7 +194,8 @@ The application automatically creates the following database tables:
 - **classes:** Fitness class definitions with instructors and duration
 - **class_schedules:** Scheduled instances of classes with time and capacity
 - **bookings:** Member bookings for scheduled classes
-- **attendance:** Member check-in/check-out records
+- **attendance:** Member check-in records
+- **member_biometrics:** Mapping between app members, device user IDs, and optional fingerprint templates
 - **membership_plans:** Available membership plans with pricing
 - **invoices:** Billing records for members
 - **payments:** Payment transaction records
@@ -222,6 +225,58 @@ The dashboard provides comprehensive analytics including:
 - Attendance check-ins are only allowed during Morning (05:00–11:00) or Evening (16:00–22:00) sessions, and a member can check in only once per calendar date.
 - In the Financials “Record Manual Payment” modal, selecting a member fetches their unpaid invoices and lets you auto-fill invoice and amount by selection.
 - Dashboard cards are clickable and navigate to filtered views (e.g., unpaid members or pending payments).
+
+---
+
+## Biometric Device Integration (Secureye S‑B100CB)
+
+This project supports integrating the Secureye S‑B100CB Biometric Fingerprint Scanner for attendance check-ins over IP (Ethernet) or via a small gateway. The device offers TCP/IP communication, 2000 user capacity, and access-control support per the vendor details. See the product page for reference: [Secureye S‑B100CB Biometric Fingerprint Scanner – IP (Ethernet & USB)](https://www.secureye.com/product/s-b100cb-biometric-fingerprint-scanner-ip-ethernet-usb-biometric).
+
+### What we store
+- A mapping between your app’s `member_id` and the device’s `device_user_id` in a new table `member_biometrics`.
+- Optionally, a fingerprint template string (e.g., base64) if you enroll/capture via an SDK or external tool.
+
+### Configurable working hours
+Working hours are editable in Settings and enforced by the backend during check-in:
+- Morning session: `morning_session_start`–`morning_session_end` (default 05:00–11:00)
+- Evening session: `evening_session_start`–`evening_session_end` (default 16:00–22:00)
+
+### How to wire the device
+There are two common ways to integrate the device with the backend:
+
+1) Device push → Backend webhook
+- Configure the device (or its management software) to push user events to the backend:
+  - URL: `POST /api/attendance/device-webhook`
+  - Body: must include a device user field (any of `device_user_id`, `userId`, `UserID`, `EmpCode`, `emp_code`)
+  - Example JSON: `{ "device_user_id": "1234" }`
+- The backend resolves `device_user_id` → `member_id` via `member_biometrics` and performs the standard check-in with working-hours validation and “one check-in per day”.
+
+2) Local gateway → Backend
+- If the device cannot post directly, run a lightweight gateway on the same LAN that reads the device’s logs (via TCP/IP or vendor SDK) and POSTs to `POST /api/attendance/device-webhook` using the same schema as above.
+
+### Managing biometric links for members
+- In the admin UI, open Members → “Biometric” on a member.
+- Enter the Secureye `device_user_id` you configured on the device (or paste a template if available).
+- This calls `PUT /api/members/:id/biometric` and stores the mapping/template.
+- You can also upsert via API directly:
+  - `PUT /api/members/:id/biometric`
+  - Body: `{ "device_user_id": "1234", "template": "<optional base64>" }`
+
+### Check-in from devices or apps
+- Direct app/server call: `POST /api/attendance/check-in` with either `{ memberId: 42 }` or `{ device_user_id: "1234" }`
+- Device/webhook call: `POST /api/attendance/device-webhook` with `{ device_user_id: "1234" }`
+
+### Error handling
+- Out-of-hours: backend returns `400` with a message reflecting current configured hours.
+- Duplicate daily check-in: backend returns `409` with `Member has already checked in today.`
+- Unknown device user: backend returns `404` if no `member_biometrics` mapping is present.
+
+### Notes
+- The device supports TCP/IP and USB. For production, prefer an IP-based configuration and a small webhook/gateway approach for reliability.
+- If you use vendor SDKs for template management, store a template string with the member for future migrations; the backend does not need to interpret the template, it only stores it.
+- Ensure the device’s internal user IDs match the `device_user_id` you set for each member.
+
+Reference: [Secureye S‑B100CB Biometric Fingerprint Scanner – IP (Ethernet & USB)](https://www.secureye.com/product/s-b100cb-biometric-fingerprint-scanner-ip-ethernet-usb-biometric)
 
 ## Future Enhancements
 
