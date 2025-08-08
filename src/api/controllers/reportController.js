@@ -170,3 +170,25 @@ exports.getFinancialSummary = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// Get members who have no payments in the current month
+exports.getUnpaidMembersThisMonth = async (_req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT m.id, m.name, m.email
+            FROM members m
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM payments p
+                JOIN invoices i ON p.invoice_id = i.id
+                WHERE i.member_id = m.id
+                  AND p.payment_date >= DATE_TRUNC('month', CURRENT_DATE)
+                  AND p.payment_date < (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month')
+            )
+            ORDER BY m.name ASC
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
