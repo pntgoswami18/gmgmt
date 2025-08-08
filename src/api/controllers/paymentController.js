@@ -68,17 +68,42 @@ exports.createInvoice = async (req, res) => {
 };
 
 // Record a manual payment (cash/bank/etc.)
+// If invoice_id is missing or invalid, create an invoice automatically
 exports.recordManualPayment = async (req, res) => {
-    const { invoice_id, amount, method, transaction_id } = req.body;
+    let { invoice_id, amount, method, transaction_id, member_id, plan_id, due_date } = req.body;
     try {
+        const normalizedAmount = parseFloat(amount);
+        if (Number.isNaN(normalizedAmount) || normalizedAmount <= 0) {
+            return res.status(400).json({ message: 'Invalid amount' });
+        }
+
+        let ensuredInvoiceId = invoice_id ? parseInt(invoice_id, 10) : null;
+
+        if (!ensuredInvoiceId) {
+            const inv = await pool.query(
+                'INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+                [member_id || null, plan_id || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']
+            );
+            ensuredInvoiceId = inv.rows[0].id;
+        } else {
+            const existing = await pool.query('SELECT id FROM invoices WHERE id = $1', [ensuredInvoiceId]);
+            if (existing.rowCount === 0) {
+                const inv = await pool.query(
+                    'INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+                    [member_id || null, plan_id || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']
+                );
+                ensuredInvoiceId = inv.rows[0].id;
+            }
+        }
+
         const payment = await pool.query(
             'INSERT INTO payments (invoice_id, amount, payment_method, transaction_id) VALUES ($1, $2, $3, $4) RETURNING *',
-            [invoice_id, amount, method || 'manual', transaction_id || null]
+            [ensuredInvoiceId, normalizedAmount, method || 'manual', transaction_id || null]
         );
 
-        await pool.query('UPDATE invoices SET status = $1 WHERE id = $2', ['paid', invoice_id]);
+        await pool.query('UPDATE invoices SET status = $1 WHERE id = $2', ['paid', ensuredInvoiceId]);
 
-        res.status(201).json({ message: 'Manual payment recorded', payment: payment.rows[0] });
+        res.status(201).json({ message: 'Manual payment recorded', payment: payment.rows[0], invoice_id: ensuredInvoiceId });
     } catch (err) {
         res.status(400).json({ message: err.message });
     }
