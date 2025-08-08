@@ -14,7 +14,35 @@ exports.checkIn = async (req, res) => {
             return res.status(404).json({ message: "Member not found" });
         }
 
-        // 2. Create a new attendance record with the current timestamp
+        // 2. Enforce session windows (morning: 05:00-11:00, evening: 16:00-22:00)
+        const now = new Date();
+        const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
+
+        const MORNING_START_MINUTES = 5 * 60;   // 05:00
+        const MORNING_END_MINUTES = 11 * 60;    // 11:00
+        const EVENING_START_MINUTES = 16 * 60;  // 16:00
+        const EVENING_END_MINUTES = 22 * 60;    // 22:00
+
+        const isInMorningSession = minutesSinceMidnight >= MORNING_START_MINUTES && minutesSinceMidnight <= MORNING_END_MINUTES;
+        const isInEveningSession = minutesSinceMidnight >= EVENING_START_MINUTES && minutesSinceMidnight <= EVENING_END_MINUTES;
+
+        if (!isInMorningSession && !isInEveningSession) {
+            return res.status(400).json({ message: 'Check-in allowed only during Morning (05:00-11:00) or Evening (16:00-22:00) sessions.' });
+        }
+
+        // 3. Allow only one check-in per calendar date (either morning or evening)
+        const alreadyCheckedInToday = await pool.query(
+            `SELECT 1 FROM attendance 
+             WHERE member_id = $1 AND check_in_time::date = CURRENT_DATE 
+             LIMIT 1`,
+            [memberId]
+        );
+
+        if (alreadyCheckedInToday.rowCount > 0) {
+            return res.status(409).json({ message: 'Member has already checked in today.' });
+        }
+
+        // 4. Create a new attendance record with the current timestamp
         const newAttendance = await pool.query(
             'INSERT INTO attendance (member_id, check_in_time) VALUES ($1, NOW()) RETURNING *',
             [memberId]

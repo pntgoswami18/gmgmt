@@ -20,9 +20,10 @@ The application is built with a comprehensive feature set that includes:
 *   **Member Management Interface:** Add, view, edit, and delete gym members with real-time data updates.
 *   **Class Management Interface:** Create and manage fitness classes with instructor and duration details.
 *   **Schedule Management Interface:** Schedule classes with datetime pickers, capacity settings, and visual schedule display.
-*   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing.
-*   **Financial Management Interface:** Create membership plans and manage billing with Stripe integration guidance.
-*   **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics.
+*   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date.
+*   **Financial Management Interface:** Create membership plans and manage billing with Stripe integration guidance. Record manual payments against invoices, including auto-creating an invoice if none exists.
+*   **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics. Dashboard cards are clickable and deep-link to filtered sections (e.g., unpaid members, pending payments).
+*   **Material UI Navigation:** Enhanced left navigation with icons and active-route highlighting.
 
 ## Technology Stack
 
@@ -121,7 +122,7 @@ Open a terminal in the project's root directory and run:
 npm start
 ```
 
-The backend API will be running on `http://localhost:3000`.
+The backend API will be running on `http://localhost:3001` by default (or `PORT` env var if set).
 
 **2. Start the Frontend Application:**
 
@@ -132,7 +133,7 @@ cd client
 npm start
 ```
 
-The React development server will open the admin dashboard in your browser, typically at `http://localhost:3001`.
+The React development server will open the admin dashboard in your browser at `http://localhost:3000`.
 
 ### 3. Access the Dashboard
 
@@ -158,7 +159,7 @@ The backend provides the following REST API endpoints:
 |              | `GET`  | `/api/members/:id`          | Get a single member by ID                  |
 |              | `PUT`  | `/api/members/:id`          | Update a member                            |
 |              | `DELETE`|`/api/members/:id`          | Delete a member                            |
-| **Attendance**| `POST`| `/api/attendance/check-in`  | Log a member check-in (for biometric device) |
+| **Attendance**| `POST`| `/api/attendance/check-in`  | Log a member check-in (enforces Morning 05:00–11:00 or Evening 16:00–22:00, max one check-in per calendar date) |
 |              | `GET`  | `/api/attendance/:memberId` | Get attendance history for a member        |
 | **Classes**  | `GET`  | `/api/classes`              | Get all classes                            |
 |              | `POST` | `/api/classes`              | Create a new class                         |
@@ -169,12 +170,17 @@ The backend provides the following REST API endpoints:
 |              | `PATCH`| `/api/bookings/cancel/:bookingId`| Cancel a booking                       |
 | **Plans**    | `GET`  | `/api/plans`                | Get all membership plans                   |
 |              | `POST` | `/api/plans`                | Create a new membership plan               |
-| **Payments** | `POST` | `/api/payments`             | Process a payment for an invoice           |
-| **Reports**  | `GET`  | `/api/reports/summary`      | Get overall summary statistics             |
+| **Payments** | `POST` | `/api/payments`             | Process a payment for an invoice (Stripe)  |
+|              | `POST` | `/api/payments/manual`      | Record a manual payment (cash/bank/UPI). Auto-creates an invoice if missing/invalid |
+|              | `POST` | `/api/payments/invoice`     | Create a new invoice for a member          |
+|              | `GET`  | `/api/payments/unpaid?member_id=<id>` | List unpaid invoices for a member |
+| **Reports**  | `GET`  | `/api/reports/summary`      | Get overall summary statistics (includes unpaidMembersThisMonth) |
 |              | `GET`  | `/api/reports/member-growth`| Get member growth over last 12 months     |
 |              | `GET`  | `/api/reports/attendance-stats`| Get daily attendance for last 30 days  |
 |              | `GET`  | `/api/reports/popular-classes`| Get most popular classes by booking count|
 |              | `GET`  | `/api/reports/revenue-stats`| Get monthly revenue for last 12 months    |
+|              | `GET`  | `/api/reports/financial-summary` | Get outstanding invoices, payment history, member payment status |
+|              | `GET`  | `/api/reports/unpaid-members-this-month` | Members with no payments in the current month |
 
 ---
 
@@ -205,11 +211,17 @@ All emails use professional HTML templates with gym branding.
 
 The dashboard provides comprehensive analytics including:
 
-- **Summary Statistics:** Total members, revenue, new members this month, active schedules
+- **Summary Statistics:** Total members, revenue, new members this month, active schedules, unpaid members this month
 - **Member Growth:** 12-month trend of new member registrations
 - **Revenue Analytics:** Monthly revenue trends over the past year
 - **Popular Classes:** Rankings of classes by total bookings
 - **Attendance Trends:** Daily check-in statistics for the last 30 days
+
+## Current Behavior Notes
+
+- Attendance check-ins are only allowed during Morning (05:00–11:00) or Evening (16:00–22:00) sessions, and a member can check in only once per calendar date.
+- In the Financials “Record Manual Payment” modal, selecting a member fetches their unpaid invoices and lets you auto-fill invoice and amount by selection.
+- Dashboard cards are clickable and navigate to filtered views (e.g., unpaid members or pending payments).
 
 ## Future Enhancements
 
