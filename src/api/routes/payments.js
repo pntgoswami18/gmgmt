@@ -6,5 +6,8 @@ router.post('/', paymentController.processPayment);
 router.post('/manual', paymentController.recordManualPayment);
 router.post('/invoice', paymentController.createInvoice);
 router.get('/unpaid', paymentController.getUnpaidInvoicesByMember);
+router.get('/:id/invoice', paymentController.getInvoiceByPaymentId);
+// Alternate path for fetching invoice by payment id
+router.get('/invoice/:id', paymentController.getInvoiceByPaymentId);
 
 module.exports = router;

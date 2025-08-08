@@ -40,6 +40,10 @@ const createTables = async () => {
     INSERT INTO settings (key, value) VALUES ('primary_color', '#3f51b5') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('secondary_color', '#f50057') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('payment_reminder_days', '7') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('morning_session_start', '05:00') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('morning_session_end', '11:00') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('evening_session_start', '16:00') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('evening_session_end', '22:00') ON CONFLICT (key) DO NOTHING;
   `;
 
 

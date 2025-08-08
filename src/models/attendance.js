@@ -1,11 +1,10 @@
 // Model for attendance records
 
 class Attendance {
-    constructor(id, memberId, checkInTime, checkOutTime) {
+    constructor(id, memberId, checkInTime) {
         this.id = id;
         this.memberId = memberId;
         this.checkInTime = checkInTime;
-        this.checkOutTime = checkOutTime;
     }
 
     // Methods to save and retrieve attendance from the database.

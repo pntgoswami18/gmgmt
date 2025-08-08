@@ -130,3 +130,47 @@ exports.getUnpaidInvoicesByMember = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// Get invoice details by payment id (for printable invoice view)
+exports.getInvoiceByPaymentId = async (req, res) => {
+    try {
+        const paymentId = parseInt(req.params.id, 10);
+        if (!paymentId) {
+            return res.status(400).json({ message: 'Invalid payment id' });
+        }
+
+        const result = await pool.query(
+            `SELECT 
+                p.id               AS payment_id,
+                p.amount           AS payment_amount,
+                p.payment_date,
+                p.payment_method,
+                p.transaction_id,
+                i.id               AS invoice_id,
+                i.amount           AS invoice_amount,
+                i.status           AS invoice_status,
+                i.due_date,
+                i.created_at       AS invoice_created_at,
+                m.id               AS member_id,
+                m.name             AS member_name,
+                m.email            AS member_email,
+                mp.name            AS plan_name,
+                mp.price           AS plan_price,
+                mp.duration_days   AS plan_duration_days
+            FROM payments p
+            JOIN invoices i ON p.invoice_id = i.id
+            LEFT JOIN members m ON i.member_id = m.id
+            LEFT JOIN membership_plans mp ON i.plan_id = mp.id
+            WHERE p.id = $1`,
+            [paymentId]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Payment not found' });
+        }
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};

@@ -14,20 +14,29 @@ exports.checkIn = async (req, res) => {
             return res.status(404).json({ message: "Member not found" });
         }
 
-        // 2. Enforce session windows (morning: 05:00-11:00, evening: 16:00-22:00)
+        // 2. Enforce session windows from settings (fallback to defaults)
+        const settingsRes = await pool.query(`
+            SELECT key, value FROM settings WHERE key IN (
+                'morning_session_start','morning_session_end','evening_session_start','evening_session_end'
+            )
+        `);
+        const settingsMap = Object.fromEntries(settingsRes.rows.map(r => [r.key, r.value]));
+        const parseTimeToMinutes = (hhmm) => {
+            const [h, m] = String(hhmm || '00:00').split(':').map(Number);
+            return (h * 60) + (m || 0);
+        };
+        const MORNING_START_MINUTES = parseTimeToMinutes(settingsMap.morning_session_start || '05:00');
+        const MORNING_END_MINUTES = parseTimeToMinutes(settingsMap.morning_session_end || '11:00');
+        const EVENING_START_MINUTES = parseTimeToMinutes(settingsMap.evening_session_start || '16:00');
+        const EVENING_END_MINUTES = parseTimeToMinutes(settingsMap.evening_session_end || '22:00');
+
         const now = new Date();
         const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
-
-        const MORNING_START_MINUTES = 5 * 60;   // 05:00
-        const MORNING_END_MINUTES = 11 * 60;    // 11:00
-        const EVENING_START_MINUTES = 16 * 60;  // 16:00
-        const EVENING_END_MINUTES = 22 * 60;    // 22:00
-
         const isInMorningSession = minutesSinceMidnight >= MORNING_START_MINUTES && minutesSinceMidnight <= MORNING_END_MINUTES;
         const isInEveningSession = minutesSinceMidnight >= EVENING_START_MINUTES && minutesSinceMidnight <= EVENING_END_MINUTES;
 
         if (!isInMorningSession && !isInEveningSession) {
-            return res.status(400).json({ message: 'Check-in allowed only during Morning (05:00-11:00) or Evening (16:00-22:00) sessions.' });
+            return res.status(400).json({ message: `Check-in allowed only during Morning (${settingsMap.morning_session_start || '05:00'}-${settingsMap.morning_session_end || '11:00'}) or Evening (${settingsMap.evening_session_start || '16:00'}-${settingsMap.evening_session_end || '22:00'}) sessions.` });
         }
 
         // 3. Allow only one check-in per calendar date (either morning or evening)
