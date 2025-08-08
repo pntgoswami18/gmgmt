@@ -119,6 +119,16 @@ const createTables = async () => {
         transaction_id VARCHAR(100) -- For external payment provider reference
     );
   `;
+
+  const biometricTable = `
+    CREATE TABLE IF NOT EXISTS member_biometrics (
+      id SERIAL PRIMARY KEY,
+      member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+      device_user_id VARCHAR(50) UNIQUE,
+      template TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `;
   
   try {
     await pool.query(memberTable);
@@ -134,6 +144,7 @@ const createTables = async () => {
     await pool.query(membershipPlanTable);
     await pool.query(invoiceTable);
     await pool.query(paymentTable);
+    await pool.query(biometricTable);
     console.log('All tables created successfully');
   } catch (err) {
     console.error('Error creating tables', err.stack);

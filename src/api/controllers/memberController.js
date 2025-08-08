@@ -69,6 +69,36 @@ exports.updateMember = async (req, res) => {
     }
 };
 
+// Upsert biometric data for a member
+exports.upsertBiometric = async (req, res) => {
+    const { id } = req.params; // member id
+    const { device_user_id, template } = req.body; // template may be base64 string
+
+    if (!device_user_id && !template) {
+        return res.status(400).json({ message: 'device_user_id or template is required' });
+    }
+
+    try {
+        // Ensure member exists
+        const member = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
+        if (member.rowCount === 0) {
+            return res.status(404).json({ message: 'Member not found' });
+        }
+
+        const upsert = await pool.query(
+            `INSERT INTO member_biometrics (member_id, device_user_id, template)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (device_user_id) DO UPDATE SET member_id = EXCLUDED.member_id, template = EXCLUDED.template
+             RETURNING *`,
+            [id, device_user_id || null, template || null]
+        );
+
+        res.json({ message: 'Biometric data saved', biometric: upsert.rows[0] });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+};
+
 // Delete a member
 exports.deleteMember = async (req, res) => {
     const { id } = req.params;

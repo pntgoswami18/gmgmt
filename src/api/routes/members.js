@@ -6,6 +6,7 @@ router.get('/', memberController.getAllMembers);
 router.get('/:id', memberController.getMemberById);
 router.post('/', memberController.createMember);
 router.put('/:id', memberController.updateMember);
+router.put('/:id/biometric', memberController.upsertBiometric);
 router.delete('/:id', memberController.deleteMember);
 
 module.exports = router;
