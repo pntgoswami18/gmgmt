@@ -18,7 +18,8 @@ const createTables = async () => {
     CREATE TABLE IF NOT EXISTS members (
       id SERIAL PRIMARY KEY,
       name VARCHAR(100) NOT NULL,
-      email VARCHAR(100) UNIQUE NOT NULL,
+      email VARCHAR(100) UNIQUE,
+      phone VARCHAR(20),
       membership_type VARCHAR(100),
       membership_plan_id INTEGER REFERENCES membership_plans(id),
       join_date DATE DEFAULT CURRENT_DATE
@@ -135,6 +136,10 @@ const createTables = async () => {
     // Ensure columns exist for backward compatibility
     await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS membership_type VARCHAR(100);`);
     await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS membership_plan_id INTEGER REFERENCES membership_plans(id);`);
+    await pool.query(`ALTER TABLE members ADD COLUMN IF NOT EXISTS phone VARCHAR(20);`);
+    await pool.query(`ALTER TABLE members ALTER COLUMN email DROP NOT NULL;`).catch(()=>{});
+    // Enforce uniqueness of phone numbers when provided
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ux_members_phone ON members(phone) WHERE phone IS NOT NULL;`);
     await pool.query(settingsTable);
     await pool.query(insertDefaultSettings);
     await pool.query(attendanceTable);

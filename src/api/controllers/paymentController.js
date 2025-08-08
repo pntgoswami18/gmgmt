@@ -154,6 +154,7 @@ exports.getInvoiceByPaymentId = async (req, res) => {
                 m.id               AS member_id,
                 m.name             AS member_name,
                 m.email            AS member_email,
+                m.phone            AS member_phone,
                 mp.name            AS plan_name,
                 mp.price           AS plan_price,
                 mp.duration_days   AS plan_duration_days
@@ -193,6 +194,7 @@ exports.getInvoiceByInvoiceId = async (req, res) => {
                 m.id               AS member_id,
                 m.name             AS member_name,
                 m.email            AS member_email,
+                m.phone            AS member_phone,
                 mp.name            AS plan_name,
                 mp.price           AS plan_price,
                 mp.duration_days   AS plan_duration_days,

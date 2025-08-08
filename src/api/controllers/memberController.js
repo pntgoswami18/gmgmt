@@ -1,6 +1,13 @@
 const { pool } = require('../../config/database');
 const { sendEmail } = require('../../services/emailService');
 
+const isValidPhone = (value) => {
+    if (!value) return false;
+    const normalized = String(value).trim();
+    // Accept E.164 style or plain digits: 10 to 15 digits, optional leading +
+    return /^\+?[0-9]{10,15}$/.test(normalized);
+};
+
 // Get all members
 exports.getAllMembers = async (req, res) => {
     try {
@@ -27,15 +34,21 @@ exports.getMemberById = async (req, res) => {
 
 // Create a new member
 exports.createMember = async (req, res) => {
-    const { name, email, membership_type, membership_plan_id } = req.body;
+    const { name, email, phone, membership_type, membership_plan_id } = req.body;
     try {
+        if (!phone) {
+            return res.status(400).json({ message: 'Phone is required' });
+        }
+        if (!isValidPhone(phone)) {
+            return res.status(400).json({ message: 'Invalid phone number. Use 10–15 digits, with optional leading +' });
+        }
         const planId = membership_plan_id === null || membership_plan_id === undefined || membership_plan_id === ''
             ? null
             : parseInt(membership_plan_id, 10);
 
         const newMember = await pool.query(
-            'INSERT INTO members (name, email, membership_type, membership_plan_id) VALUES ($1, $2, $3, $4) RETURNING *',
-            [name, email, membership_type || null, planId]
+            'INSERT INTO members (name, email, phone, membership_type, membership_plan_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+            [name, email || null, phone || null, membership_type || null, planId]
         );
 
         // Send welcome email (do not block on failures)
@@ -43,9 +56,12 @@ exports.createMember = async (req, res) => {
 
         res.status(201).json(newMember.rows[0]);
     } catch (err) {
-        // Handle unique email violation nicely
+        // Handle unique constraint violations for email/phone
         if (err.code === '23505') {
-            return res.status(409).json({ message: 'A member with this email already exists.' });
+            const msg = (err.detail && err.detail.includes('phone'))
+                ? 'A member with this phone number already exists.'
+                : 'A member with this email already exists.';
+            return res.status(409).json({ message: msg });
         }
         res.status(400).json({ message: err.message });
     }
@@ -54,17 +70,29 @@ exports.createMember = async (req, res) => {
 // Update a member
 exports.updateMember = async (req, res) => {
     const { id } = req.params;
-    const { name, email, membership_type } = req.body;
+    const { name, email, phone, membership_type } = req.body;
     try {
+        if (!phone) {
+            return res.status(400).json({ message: 'Phone is required' });
+        }
+        if (!isValidPhone(phone)) {
+            return res.status(400).json({ message: 'Invalid phone number. Use 10–15 digits, with optional leading +' });
+        }
         const updatedMember = await pool.query(
-            'UPDATE members SET name = $1, email = $2, membership_type = $3 WHERE id = $4 RETURNING *',
-            [name, email, membership_type, id]
+            'UPDATE members SET name = $1, email = $2, phone = $3, membership_type = $4 WHERE id = $5 RETURNING *',
+            [name, email || null, phone || null, membership_type, id]
         );
         if (updatedMember.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });
         }
         res.json(updatedMember.rows[0]);
     } catch (err) {
+        if (err.code === '23505') {
+            const msg = (err.detail && err.detail.includes('phone'))
+                ? 'A member with this phone number already exists.'
+                : 'A member with this email already exists.';
+            return res.status(409).json({ message: msg });
+        }
         res.status(400).json({ message: err.message });
     }
 };
