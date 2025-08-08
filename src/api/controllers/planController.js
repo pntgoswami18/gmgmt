@@ -1,4 +1,4 @@
-const pool = require('../../config/database');
+const { pool } = require('../../config/database');
 
 // Create a new membership plan
 exports.createPlan = async (req, res) => {

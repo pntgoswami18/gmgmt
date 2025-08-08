@@ -1,4 +1,4 @@
-const pool = require('../../config/database');
+const { pool } = require('../../config/database');
 
 // Get all classes
 exports.getAllClasses = async (req, res) => {
