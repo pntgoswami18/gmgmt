@@ -174,3 +174,52 @@ exports.getInvoiceByPaymentId = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// Get invoice details by invoice id (latest payment if available)
+exports.getInvoiceByInvoiceId = async (req, res) => {
+    try {
+        const invoiceId = parseInt(req.params.id, 10);
+        if (!invoiceId) {
+            return res.status(400).json({ message: 'Invalid invoice id' });
+        }
+
+        const result = await pool.query(
+            `SELECT 
+                i.id               AS invoice_id,
+                i.amount           AS invoice_amount,
+                i.status           AS invoice_status,
+                i.due_date,
+                i.created_at       AS invoice_created_at,
+                m.id               AS member_id,
+                m.name             AS member_name,
+                m.email            AS member_email,
+                mp.name            AS plan_name,
+                mp.price           AS plan_price,
+                mp.duration_days   AS plan_duration_days,
+                p.id               AS payment_id,
+                p.amount           AS payment_amount,
+                p.payment_date,
+                p.payment_method,
+                p.transaction_id
+            FROM invoices i
+            LEFT JOIN members m ON i.member_id = m.id
+            LEFT JOIN membership_plans mp ON i.plan_id = mp.id
+            LEFT JOIN LATERAL (
+                SELECT id, amount, payment_date, payment_method, transaction_id
+                FROM payments
+                WHERE invoice_id = i.id
+                ORDER BY payment_date DESC
+                LIMIT 1
+            ) p ON true
+            WHERE i.id = $1`,
+            [invoiceId]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Invoice not found' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
