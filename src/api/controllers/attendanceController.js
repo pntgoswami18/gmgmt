@@ -108,11 +108,11 @@ exports.getAttendanceByMember = async (req, res) => {
         const params = [memberId];
         if (start) {
             params.push(start);
-            query += ` AND check_in_time::date >= $${params.length}`;
+            query += ` AND check_in_time::date >= $${params.length}::date`;
         }
         if (end) {
             params.push(end);
-            query += ` AND check_in_time::date <= $${params.length}`;
+            query += ` AND check_in_time::date <= $${params.length}::date`;
         }
         query += ' ORDER BY check_in_time DESC';
 

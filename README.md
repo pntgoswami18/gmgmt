@@ -24,6 +24,9 @@ The application is built with a comprehensive feature set that includes:
 *   **Financial Management Interface:** Create membership plans and manage billing with Stripe integration guidance. Record manual payments against invoices, including auto-creating an invoice if none exists.
 *   **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics. Dashboard cards are clickable and deep-link to filtered sections (e.g., unpaid members, pending payments).
 *   **Material UI Navigation:** Enhanced left navigation with icons and active-route highlighting.
+*   **Branding & Accent Colors:** Configure Primary and Secondary accents as Solid or Gradient in Settings. A gradient editor lets you adjust mode (Linear/Radial), angle, and color stops. Accents are used across buttons, headings, and section headers.
+*   **Dashboard Card Visibility:** Toggle which summary cards are shown on the Dashboard in Settings.
+*   **Invoices:** Click recent payments to open a printable invoice. Print generates a print-out of only the invoice; Download PDF creates a file (no print dialog). Share via WhatsApp opens WhatsApp Web with a prefilled message.
 
 ## Technology Stack
 
@@ -55,7 +58,82 @@ First, install the necessary npm packages for both the backend server and the fr
 
 ```bash
 # Install backend dependencies from the root directory
+# Gym Management Software
+
+This project provides an end‑to‑end gym management system with an admin dashboard and a Node.js API. Use it to manage members, classes, schedules, attendance, billing and basic analytics.
+
+## High‑level Features
+
+- Member management (create, update, list)
+- Class and schedule management
+- Attendance tracking with configurable working hours
+- Billing: membership plans, invoices, payments (manual and Stripe-ready)
+- Analytics dashboard (summary cards, basic charts)
+- Branding controls and accent colors (solid or gradient)
+
+## Technology Stack
+
+- Backend: Node.js, Express, PostgreSQL, Axios, Nodemailer
+- Frontend: React, React Router, Material UI, Recharts
+
+## Installation & Setup
+
+### Prerequisites
+- Node.js and npm
+- PostgreSQL server
+
+### 1) Install dependencies
+
+```bash
+# From the project root (server)
 npm install
+
+# Frontend
+cd client
+npm install
+cd ..
+```
+
+### 2) Create the database
+
+```sql
+CREATE DATABASE gym_management;
+```
+
+### 3) Configure environment variables
+
+Create a `.env` file in the project root:
+
+```env
+DB_USER=your_postgres_user
+DB_HOST=localhost
+DB_DATABASE=gym_management
+DB_PASSWORD=your_database_password
+DB_PORT=5432
+
+# Optional integrations
+STRIPE_SECRET_KEY=sk_test_your_key
+EMAIL_USER=your_email
+EMAIL_PASS=your_app_password
+```
+
+### 4) Start the backend
+
+```bash
+npm start
+```
+
+The API runs at `http://localhost:3001` and auto‑creates tables on first start.
+
+### 5) Start the frontend
+
+```bash
+cd client
+npm start
+```
+
+The dashboard opens at `http://localhost:3000` and proxies API calls to the backend.
+
 
 # Navigate to the client directory and install frontend dependencies
 cd client
@@ -161,7 +239,7 @@ The backend provides the following REST API endpoints:
 |              | `DELETE`|`/api/members/:id`          | Delete a member                            |
 | **Attendance**| `POST`| `/api/attendance/check-in`  | Log a member check-in by `memberId` or `device_user_id` (uses configurable working hours; one check-in per calendar date) |
 |              | `POST` | `/api/attendance/device-webhook` | Webhook for device push events (uses `device_user_id` mapping) |
-|              | `GET`  | `/api/attendance/:memberId` | Get attendance history for a member        |
+|              | `GET`  | `/api/attendance/:memberId?start=YYYY-MM-DD&end=YYYY-MM-DD` | Get attendance history for a member filtered by date range |
 | **Classes**  | `GET`  | `/api/classes`              | Get all classes                            |
 |              | `POST` | `/api/classes`              | Create a new class                         |
 | **Schedules**| `GET`  | `/api/schedules`            | Get all class schedules                    |
@@ -176,6 +254,8 @@ The backend provides the following REST API endpoints:
 |              | `POST` | `/api/payments/manual`      | Record a manual payment (cash/bank/UPI). Auto-creates an invoice if missing/invalid |
 |              | `POST` | `/api/payments/invoice`     | Create a new invoice for a member          |
 |              | `GET`  | `/api/payments/unpaid?member_id=<id>` | List unpaid invoices for a member |
+|              | `GET`  | `/api/payments/:id/invoice` | Invoice details by payment id (for invoice preview) |
+|              | `GET`  | `/api/payments/invoices/:id` | Invoice details by invoice id (latest payment included) |
 | **Reports**  | `GET`  | `/api/reports/summary`      | Get overall summary statistics (includes unpaidMembersThisMonth) |
 |              | `GET`  | `/api/reports/member-growth`| Get member growth over last 12 months     |
 |              | `GET`  | `/api/reports/attendance-stats`| Get daily attendance for last 30 days  |
@@ -190,7 +270,7 @@ The backend provides the following REST API endpoints:
 
 The application automatically creates the following database tables:
 
-- **members:** Store member information and membership details
+- **members:** Store member information and membership details (email optional, phone required and unique when provided)
 - **classes:** Fitness class definitions with instructors and duration
 - **class_schedules:** Scheduled instances of classes with time and capacity
 - **bookings:** Member bookings for scheduled classes
@@ -223,8 +303,23 @@ The dashboard provides comprehensive analytics including:
 ## Current Behavior Notes
 
 - Attendance check-ins are only allowed during Morning (05:00–11:00) or Evening (16:00–22:00) sessions, and a member can check in only once per calendar date.
+- Attendance view supports date range filtering (default: current week).
 - In the Financials “Record Manual Payment” modal, selecting a member fetches their unpaid invoices and lets you auto-fill invoice and amount by selection.
 - Dashboard cards are clickable and navigate to filtered views (e.g., unpaid members or pending payments).
+- Dashboard card visibility can be configured in Settings.
+
+### Branding & Theme
+- Settings → Accent Colors lets you configure:
+  - Primary/Secondary mode: Solid or Gradient
+  - Gradient editor (Linear/Radial, angle, color stops)
+- Exposed CSS variables for custom styling: `--accent-primary-color`, `--accent-secondary-color`, `--accent-primary-bg`, `--accent-secondary-bg`.
+- Secondary accent is applied to: contained/outlined buttons, h4/h5 headings (gradient text), section header borders, and invoice header label.
+
+### Invoices
+- Open from Financials → Recent Payment History by clicking a row.
+- Print: prints only the invoice area.
+- Download: generates a PDF via html2canvas + jsPDF (no print dialog).
+- Send via WhatsApp: opens WhatsApp Web with a prefilled message to the member’s phone number.
 
 ---
 
