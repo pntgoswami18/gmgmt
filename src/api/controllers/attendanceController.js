@@ -103,11 +103,20 @@ exports.getAttendanceByMember = async (req, res) => {
          if (member.rows.length === 0) {
              return res.status(404).json({ message: "Member not found" });
          }
+        const { start, end } = req.query;
+        let query = 'SELECT * FROM attendance WHERE member_id = $1';
+        const params = [memberId];
+        if (start) {
+            params.push(start);
+            query += ` AND check_in_time::date >= $${params.length}`;
+        }
+        if (end) {
+            params.push(end);
+            query += ` AND check_in_time::date <= $${params.length}`;
+        }
+        query += ' ORDER BY check_in_time DESC';
 
-        const attendanceRecords = await pool.query(
-            'SELECT * FROM attendance WHERE member_id = $1 ORDER BY check_in_time DESC',
-            [memberId]
-        );
+        const attendanceRecords = await pool.query(query, params);
         res.json(attendanceRecords.rows);
     } catch (err) {
         res.status(500).json({ message: err.message });
