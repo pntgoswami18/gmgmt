@@ -40,11 +40,20 @@ const createTables = async () => {
     INSERT INTO settings (key, value) VALUES ('gym_logo', 'logo.svg') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('primary_color', '#3f51b5') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('secondary_color', '#f50057') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('primary_color_mode', 'solid') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('secondary_color_mode', 'solid') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('primary_color_gradient', '') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('secondary_color_gradient', '') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('payment_reminder_days', '7') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('morning_session_start', '05:00') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('morning_session_end', '11:00') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('evening_session_start', '16:00') ON CONFLICT (key) DO NOTHING;
     INSERT INTO settings (key, value) VALUES ('evening_session_end', '22:00') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('show_card_total_members', 'true') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('show_card_total_revenue', 'true') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('show_card_new_members_this_month', 'true') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('show_card_unpaid_members_this_month', 'true') ON CONFLICT (key) DO NOTHING;
+    INSERT INTO settings (key, value) VALUES ('show_card_active_schedules', 'true') ON CONFLICT (key) DO NOTHING;
   `;
 
 
