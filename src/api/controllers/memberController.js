@@ -2,7 +2,7 @@ const { pool } = require('../../config/database');
 const { sendEmail } = require('../../services/emailService');
 
 const isValidPhone = (value) => {
-    if (!value) return false;
+    if (!value) { return false; }
     const normalized = String(value).trim();
     // Accept E.164 style or plain digits: 10 to 15 digits, optional leading +
     return /^\+?[0-9]{10,15}$/.test(normalized);
