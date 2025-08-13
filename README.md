@@ -11,7 +11,7 @@ The application is built with a comprehensive feature set that includes:
 *   **Biometric Attendance:** API endpoints to log member check-ins from biometric devices (Secureye S‑B100CB or similar) with attendance history tracking and configurable working hours.
 *   **Class & Schedule Management:** Complete system for creating fitness classes and scheduling them with capacity management.
 *   **Online Booking System:** Members can book and cancel class spots with overbooking prevention and automated confirmation emails.
-*   **Billing & Payments:** Stripe-integrated payment processing with membership plans and automated payment confirmations.
+*   **Billing & Payments:** Membership plans, invoices, and manual payment recording.
 *   **Automated Communications:** Email notifications for member registration, class bookings, and payment confirmations.
 *   **Advanced Analytics:** Comprehensive reporting system with member growth, attendance trends, revenue analytics, and popular class rankings.
 
@@ -21,7 +21,7 @@ The application is built with a comprehensive feature set that includes:
 *   **Class Management Interface:** Create and manage fitness classes with instructor and duration details.
 *   **Schedule Management Interface:** Schedule classes with datetime pickers, capacity settings, and visual schedule display.
 *   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date.
-*   **Financial Management Interface:** Create membership plans and manage billing with Stripe integration guidance. Record manual payments against invoices, including auto-creating an invoice if none exists.
+*   **Financial Management Interface:** Create membership plans and manage billing. Record manual payments against invoices, including auto-creating an invoice if none exists.
 *   **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics. Dashboard cards are clickable and deep-link to filtered sections (e.g., unpaid members, pending payments).
 *   **Material UI Navigation:** Enhanced left navigation with icons and active-route highlighting.
 *   **Branding & Accent Colors:** Configure Primary and Secondary accents as Solid or Gradient in Settings. A gradient editor lets you adjust mode (Linear/Radial), angle, and color stops. Accents are used across buttons, headings, and section headers.
@@ -33,7 +33,7 @@ The application is built with a comprehensive feature set that includes:
 -   **Backend:**
     -   Node.js with Express.js framework
     -   PostgreSQL database with automated schema creation
-    -   Stripe API for secure payment processing
+    -   (Optional) Payment gateway integration — currently disabled
     -   Nodemailer for automated email communications
     -   JWT for authentication (ready for future implementation)
 -   **Frontend:**
@@ -67,7 +67,7 @@ This project provides an end‑to‑end gym management system with an admin dash
 - Member management (create, update, list)
 - Class and schedule management
 - Attendance tracking with configurable working hours
-- Billing: membership plans, invoices, payments (manual and Stripe-ready)
+- Billing: membership plans, invoices, payments (manual)
 - Analytics dashboard (summary cards, basic charts)
 - Branding controls and accent colors (solid or gradient)
 
@@ -112,7 +112,7 @@ DB_PASSWORD=your_database_password
 DB_PORT=5432
 
 # Optional integrations
-STRIPE_SECRET_KEY=sk_test_your_key
+# Payment gateway disabled; no secret key required
 EMAIL_USER=your_email
 EMAIL_PASS=your_app_password
 ```
@@ -167,8 +167,7 @@ DB_PORT=5432
 # JSON Web Token Secret (for future authentication features)
 JWT_SECRET=your_super_secret_jwt_key
 
-# Stripe API Secret Key (for payment processing)
-STRIPE_SECRET_KEY=sk_test_...your_stripe_secret_key
+# Payment gateway configuration (disabled)
 
 # Email Configuration (for automated notifications)
 EMAIL_USER=your_email@gmail.com
@@ -182,7 +181,7 @@ EMAIL_PASS=your_app_password
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-**Note for Stripe Setup:** To get a Stripe secret key, you need a Stripe account. From the Stripe Developer Dashboard, find your "secret key" for test mode (it will start with `sk_test_`).
+**Note:** Card payment gateway is disabled in this build. Use manual payments.
 
 The application will automatically create the required tables when it first connects to the database.
 
@@ -250,7 +249,7 @@ The backend provides the following REST API endpoints:
 | **Plans**    | `GET`  | `/api/plans`                | Get all membership plans                   |
 |              | `POST` | `/api/plans`                | Create a new membership plan               |
 | **Biometrics** | `PUT` | `/api/members/:id/biometric` | Link or update a member's biometric mapping (`device_user_id` and/or template) |
-| **Payments** | `POST` | `/api/payments`             | Process a payment for an invoice (Stripe)  |
+| **Payments** | `POST` | `/api/payments`             | Card payments disabled (501)               |
 |              | `POST` | `/api/payments/manual`      | Record a manual payment (cash/bank/UPI). Auto-creates an invoice if missing/invalid |
 |              | `POST` | `/api/payments/invoice`     | Create a new invoice for a member          |
 |              | `GET`  | `/api/payments/unpaid?member_id=<id>` | List unpaid invoices for a member |

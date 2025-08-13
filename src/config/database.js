@@ -125,7 +125,7 @@ const createTables = async () => {
         invoice_id INTEGER REFERENCES invoices(id) ON DELETE CASCADE,
         amount NUMERIC(10, 2) NOT NULL,
         payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        payment_method VARCHAR(50), -- e.g., 'stripe', 'cash'
+        payment_method VARCHAR(50), -- e.g., 'cash', 'bank', 'upi'
         transaction_id VARCHAR(100) -- For external payment provider reference
     );
   `;

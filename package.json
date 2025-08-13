@@ -20,8 +20,7 @@
     "multer": "^2.0.2",
     "nodemailer": "^6.9.14",
     "pg": "^8.9.0",
-    "recharts": "^3.1.2",
-    "stripe": "^18.4.0"
+    "recharts": "^3.1.2"
   },
   "devDependencies": {
     "nodemon": "^2.0.20"
