@@ -32,7 +32,7 @@ The application is built with a comprehensive feature set that includes:
 
 -   **Backend:**
     -   Node.js with Express.js framework
-    -   PostgreSQL database with automated schema creation
+    -   SQLite (recommended for standalone Windows build) or PostgreSQL (legacy/dev)
     -   (Optional) Payment gateway integration — currently disabled
     -   Nodemailer for automated email communications
     -   JWT for authentication (ready for future implementation)
@@ -50,7 +50,7 @@ Follow these steps to get the application running on your local machine.
 ### Prerequisites
 
 -   [Node.js](https://nodejs.org/) (which includes npm)
--   [PostgreSQL](https://www.postgresql.org/download/)
+-   [PostgreSQL](https://www.postgresql.org/download/) (only if running the legacy Postgres setup)
 
 ### 1. Install Dependencies
 
@@ -371,6 +371,176 @@ There are two common ways to integrate the device with the backend:
 - Ensure the device’s internal user IDs match the `device_user_id` you set for each member.
 
 Reference: [Secureye S‑B100CB Biometric Fingerprint Scanner – IP (Ethernet & USB)](https://www.secureye.com/product/s-b100cb-biometric-fingerprint-scanner-ip-ethernet-usb-biometric)
+
+## Windows standalone build (Service + Installer, SQLite)
+
+This section documents how to ship GMgmt as a self-contained Windows application that runs as a Windows Service and uses SQLite (single-file database). It covers both 32-bit (x86) and 64-bit (x64) Windows.
+
+### Overview
+
+- Backend runs as a Windows Service (listens on `http://localhost:3001`).
+- Frontend is prebuilt and served by Express from `client/build`.
+- SQLite database file is stored under `%ProgramData%\gmgmt\data\gmgmt.sqlite`.
+- Installer copies files, installs the service, creates a firewall rule, and writes an `.env`.
+- Two installers are produced: `GMgmt-Setup-x86.exe` and `GMgmt-Setup-x64.exe`.
+
+### Prerequisites (for building installers)
+
+- Windows 10/11 build machine (x64) with Node.js and npm.
+- NSIS or WiX Toolset for building the installer (examples below use NSIS).
+- Optional: NSSM if you prefer service install via command line instead of bundling `node-windows`.
+
+### 1) Switch backend database to SQLite
+
+1. Replace PostgreSQL with SQLite dependency:
+
+   ```bash
+   npm uninstall pg
+   npm install better-sqlite3@^9
+   ```
+
+2. Add a small adapter `src/config/sqlite.js` that:
+   - Resolves DB path to `%ProgramData%\gmgmt\data\gmgmt.sqlite` (create folders as needed)
+   - On start, creates tables if missing (mirroring the current schema)
+   - Exposes `initializeDatabase()` and a `query(sql, params)` function
+
+3. In `src/app.js` and controllers:
+   - Replace imports from `../../config/database` with `../../config/sqlite`
+   - Change `await pool.query(...)` to `query(...)`
+   - For inserts that relied on `RETURNING *`, run a follow-up `SELECT` by last insert id if needed
+
+4. Simplify `.env` (no DB host/port required):
+
+   ```env
+   PORT=3001
+   EMAIL_USER=your_email
+   EMAIL_PASS=your_app_password
+   ```
+
+### 2) Build the frontend and serve static files
+
+```bash
+cd client
+npm run build
+cd ..
+```
+
+Add to `src/app.js` to serve the built UI:
+
+```js
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../client/build')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../client/build/index.html'));
+});
+```
+
+### 3) Bundle a Node.js runtime (x86 and x64)
+
+- Use Node 18 for 32-bit support (Node ≥20 dropped 32-bit Windows).
+- Place runtimes under your install directory:
+  - `vendor/node-win-x64/node.exe`
+  - `vendor/node-win-ia32/node.exe`
+
+### 4) Install as a Windows Service
+
+Option A: Programmatic with `node-windows`:
+
+```bash
+npm install node-windows --save
+```
+
+```js
+// scripts/service-install.js
+const path = require('path');
+const Service = require('node-windows').Service;
+const svc = new Service({
+  name: 'GMgmt',
+  description: 'Gym Management Service',
+  script: path.join(__dirname, '..', 'src', 'app.js'),
+  workingDirectory: path.join(__dirname, '..'),
+  env: [{ name: 'NODE_ENV', value: 'production' }]
+});
+svc.on('install', () => svc.start());
+svc.install();
+```
+
+Run:
+
+```bash
+node scripts/service-install.js
+```
+
+Option B: Using NSSM (no code dependency):
+
+```bash
+nssm install GMgmt "C:\\Program Files\\gmgmt\\vendor\\node-win-x64\\node.exe" "C:\\Program Files\\gmgmt\\src\\app.js"
+nssm set GMgmt AppDirectory "C:\\Program Files\\gmgmt"
+nssm set GMgmt AppStdout "C:\\ProgramData\\gmgmt\\logs\\out.log"
+nssm set GMgmt AppStderr "C:\\ProgramData\\gmgmt\\logs\\err.log"
+nssm start GMgmt
+```
+
+Allow the API port through Windows Firewall:
+
+```bash
+netsh advfirewall firewall add rule name="GMgmt API" dir=in action=allow protocol=TCP localport=3001
+```
+
+### 5) Build the Installer (NSIS)
+
+Your installer should:
+
+- Copy app files to `C:\\Program Files\\gmgmt` (x64) or `C:\\Program Files (x86)\\gmgmt` (x86)
+- Copy the correct Node runtime (`vendor/node-win-<arch>/node.exe`)
+- Create `%ProgramData%\\gmgmt\\{data,logs}`
+- Write `%ProgramData%\\gmgmt\\.env`
+- Install and start the Windows Service (via script or NSSM)
+- Add a firewall rule for TCP 3001
+- Create Start Menu shortcuts (e.g., open `http://localhost:3001` in default browser)
+- Uninstaller should stop/remove the service and optionally preserve `%ProgramData%\\gmgmt` data
+
+Example NSIS snippet:
+
+```nsis
+Section
+  CreateDirectory "$%ProgramData%\gmgmt\data"
+  CreateDirectory "$%ProgramData%\gmgmt\logs"
+  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="GMgmt API" dir=in action=allow protocol=TCP localport=3001'
+SectionEnd
+```
+
+### 6) 32-bit vs 64-bit builds
+
+- Build two artifacts; ensure `better-sqlite3` has binaries for both architectures.
+- If building on CI for x86, run `npm ci` with `npm_config_target_arch=ia32`.
+- Use Node 18 for x86; x64 can also use Node 18+ (keep in sync with native deps).
+
+### 7) Optional: Migrate data from PostgreSQL
+
+- Export tables from Postgres to CSV.
+- Initialize a fresh SQLite DB (created on first run) and import CSVs using the SQLite CLI:
+
+```sql
+.mode csv
+.import members.csv members
+.import membership_plans.csv membership_plans
+.import invoices.csv invoices
+.import payments.csv payments
+.import classes.csv classes
+.import class_schedules.csv class_schedules
+.import bookings.csv bookings
+.import attendance.csv attendance
+.import member_biometrics.csv member_biometrics
+```
+
+Verify foreign keys and adjust IDs if required. SQLite autoincrements without sequences.
+
+### 8) Operator quickstart (after install)
+
+1. Run `GMgmt-Setup-x64.exe` or `GMgmt-Setup-x86.exe`.
+2. Browse to `http://localhost:3001` to use the app.
+3. Manage the `GMgmt` Windows Service via Services.msc (start/stop) when needed.
 
 ## Future Enhancements
 
