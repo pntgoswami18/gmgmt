@@ -1,4 +1,4 @@
-const { pool } = require('../../config/database');
+const { pool } = require('../../config/sqlite');
 
 // Card payment processing is disabled (Stripe removed)
 exports.processPayment = async (_req, res) => {
@@ -11,10 +11,8 @@ exports.processPayment = async (_req, res) => {
 exports.createInvoice = async (req, res) => {
     const { member_id, plan_id, amount, due_date } = req.body;
     try {
-        const newInvoice = await pool.query(
-            'INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [member_id, plan_id || null, amount, due_date, 'unpaid']
-        );
+        await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id, plan_id || null, amount, due_date, 'unpaid']);
+        const newInvoice = await pool.query('SELECT * FROM invoices ORDER BY id DESC LIMIT 1');
         res.status(201).json(newInvoice.rows[0]);
     } catch (err) {
         res.status(400).json({ message: err.message });
@@ -34,26 +32,20 @@ exports.recordManualPayment = async (req, res) => {
         let ensuredInvoiceId = invoice_id ? parseInt(invoice_id, 10) : null;
 
         if (!ensuredInvoiceId) {
-            const inv = await pool.query(
-                'INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-                [member_id || null, plan_id || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']
-            );
+            await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id || null, plan_id || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']);
+            const inv = await pool.query('SELECT id FROM invoices ORDER BY id DESC LIMIT 1');
             ensuredInvoiceId = inv.rows[0].id;
         } else {
             const existing = await pool.query('SELECT id FROM invoices WHERE id = $1', [ensuredInvoiceId]);
             if (existing.rowCount === 0) {
-                const inv = await pool.query(
-                    'INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-                    [member_id || null, plan_id || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']
-                );
+                await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id || null, plan_id || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']);
+                const inv = await pool.query('SELECT id FROM invoices ORDER BY id DESC LIMIT 1');
                 ensuredInvoiceId = inv.rows[0].id;
             }
         }
 
-        const payment = await pool.query(
-            'INSERT INTO payments (invoice_id, amount, payment_method, transaction_id) VALUES ($1, $2, $3, $4) RETURNING *',
-            [ensuredInvoiceId, normalizedAmount, method || 'manual', transaction_id || null]
-        );
+        await pool.query('INSERT INTO payments (invoice_id, amount, payment_method, transaction_id) VALUES ($1, $2, $3, $4)', [ensuredInvoiceId, normalizedAmount, method || 'manual', transaction_id || null]);
+        const payment = await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 1');
 
         await pool.query('UPDATE invoices SET status = $1 WHERE id = $2', ['paid', ensuredInvoiceId]);
 

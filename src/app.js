@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
-const { pool, initializeDatabase } = require('./config/database');
+const { initializeDatabase } = require('./config/sqlite');
 const app = express();
 
 const attendanceRoutes = require('./api/routes/attendance');
@@ -37,6 +37,13 @@ app.use('/api/plans', planRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/settings', settingsRoutes);
+
+// Serve frontend build after API routes so /api/* is not intercepted
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../client/build')));
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/build/index.html'));
+});
 
 // Initialize database and start server
 const PORT = process.env.PORT || 3001;

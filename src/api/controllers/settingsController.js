@@ -1,4 +1,4 @@
-const { pool } = require('../../config/database');
+const { pool } = require('../../config/sqlite');
 
 // Get all settings
 exports.getAllSettings = async (req, res) => {
@@ -51,10 +51,8 @@ exports.getSetting = async (req, res) => {
 // Update multiple settings at once
 exports.updateAllSettings = async (req, res) => {
     const settings = req.body;
-    const client = await pool.connect();
-
     try {
-        await client.query('BEGIN');
+        await pool.query('BEGIN');
 
         for (const key in settings) {
             if (Object.hasOwnProperty.call(settings, key)) {
@@ -62,6 +60,11 @@ exports.updateAllSettings = async (req, res) => {
 
                 if (key === 'membership_types') {
                     value = JSON.stringify(value);
+                } else if (value === undefined || value === null) {
+                    value = null;
+                } else if (typeof value !== 'string' && typeof value !== 'number') {
+                    // Store booleans and other primitives as strings in TEXT column
+                    value = String(value);
                 }
 
                 const query = `
@@ -71,18 +74,16 @@ exports.updateAllSettings = async (req, res) => {
                     SET value = EXCLUDED.value;
                 `;
                 
-                await client.query(query, [key, value]);
+                await pool.query(query, [key, value]);
             }
         }
         
-        await client.query('COMMIT');
+        await pool.query('COMMIT');
         res.json({ message: 'Settings updated successfully' });
     } catch (err) {
-        await client.query('ROLLBACK');
+        await pool.query('ROLLBACK');
         console.error('Error updating all settings', err);
         res.status(500).json({ message: 'Failed to update settings' });
-    } finally {
-        client.release();
     }
 };
 
@@ -93,7 +94,7 @@ exports.uploadLogo = async (req, res) => {
     }
     const logoUrl = `/uploads/${req.file.filename}`;
     try {
-        await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [logoUrl, 'gym_logo']);
+        await pool.query('INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value', [ 'gym_logo', logoUrl ]);
         res.json({ message: 'Logo uploaded successfully', logoUrl });
     } catch (err) {
         res.status(500).json({ message: err.message });

@@ -1,4 +1,4 @@
-const { pool } = require('../../config/database');
+const { pool } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
 
 const isValidPhone = (value) => {
@@ -46,19 +46,17 @@ exports.createMember = async (req, res) => {
             ? null
             : parseInt(membership_plan_id, 10);
 
-        const newMember = await pool.query(
-            'INSERT INTO members (name, email, phone, membership_type, membership_plan_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [name, email || null, phone || null, membership_type || null, planId]
-        );
+        await pool.query('INSERT INTO members (name, email, phone, membership_type, membership_plan_id) VALUES ($1, $2, $3, $4, $5)', [name, email || null, phone || null, membership_type || null, planId]);
+        const newMember = await pool.query('SELECT * FROM members ORDER BY id DESC LIMIT 1');
 
         // Send welcome email (do not block on failures)
         sendEmail('welcome', [name, email]).catch(() => {});
 
         res.status(201).json(newMember.rows[0]);
     } catch (err) {
-        // Handle unique constraint violations for email/phone
-        if (err.code === '23505') {
-            const msg = (err.detail && err.detail.includes('phone'))
+        const lowered = String(err.message || '').toLowerCase();
+        if (lowered.includes('unique')) {
+            const msg = lowered.includes('phone')
                 ? 'A member with this phone number already exists.'
                 : 'A member with this email already exists.';
             return res.status(409).json({ message: msg });
@@ -78,17 +76,16 @@ exports.updateMember = async (req, res) => {
         if (!isValidPhone(phone)) {
             return res.status(400).json({ message: 'Invalid phone number. Use 10–15 digits, with optional leading +' });
         }
-        const updatedMember = await pool.query(
-            'UPDATE members SET name = $1, email = $2, phone = $3, membership_type = $4 WHERE id = $5 RETURNING *',
-            [name, email || null, phone || null, membership_type, id]
-        );
+        await pool.query('UPDATE members SET name = $1, email = $2, phone = $3, membership_type = $4 WHERE id = $5', [name, email || null, phone || null, membership_type, id]);
+        const updatedMember = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
         if (updatedMember.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });
         }
         res.json(updatedMember.rows[0]);
     } catch (err) {
-        if (err.code === '23505') {
-            const msg = (err.detail && err.detail.includes('phone'))
+        const lowered = String(err.message || '').toLowerCase();
+        if (lowered.includes('unique')) {
+            const msg = lowered.includes('phone')
                 ? 'A member with this phone number already exists.'
                 : 'A member with this email already exists.';
             return res.status(409).json({ message: msg });
@@ -113,14 +110,13 @@ exports.upsertBiometric = async (req, res) => {
             return res.status(404).json({ message: 'Member not found' });
         }
 
-        const upsert = await pool.query(
+        await pool.query(
             `INSERT INTO member_biometrics (member_id, device_user_id, template)
              VALUES ($1, $2, $3)
-             ON CONFLICT (device_user_id) DO UPDATE SET member_id = EXCLUDED.member_id, template = EXCLUDED.template
-             RETURNING *`,
+             ON CONFLICT(device_user_id) DO UPDATE SET member_id = excluded.member_id, template = excluded.template`,
             [id, device_user_id || null, template || null]
         );
-
+        const upsert = await pool.query('SELECT * FROM member_biometrics WHERE device_user_id = $1', [device_user_id || null]);
         res.json({ message: 'Biometric data saved', biometric: upsert.rows[0] });
     } catch (err) {
         res.status(400).json({ message: err.message });
@@ -131,10 +127,11 @@ exports.upsertBiometric = async (req, res) => {
 exports.deleteMember = async (req, res) => {
     const { id } = req.params;
     try {
-        const deletedMember = await pool.query('DELETE FROM members WHERE id = $1 RETURNING *', [id]);
-        if (deletedMember.rowCount === 0) {
+        const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
             return res.status(404).json({ message: 'Member not found' });
         }
+        await pool.query('DELETE FROM members WHERE id = $1', [id]);
         res.json({ message: 'Member deleted successfully' });
     } catch (err) {
         res.status(500).json({ message: err.message });

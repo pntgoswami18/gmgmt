@@ -1,4 +1,4 @@
-const { pool } = require('../../config/database');
+const { pool } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
 
 // Book a class for a member
@@ -12,16 +12,14 @@ exports.bookClass = async (req, res) => {
             return res.status(404).json({ message: 'Schedule not found' });
         }
 
-        const bookingCount = await pool.query('SELECT COUNT(*) FROM bookings WHERE schedule_id = $1', [schedule_id]);
-        if (bookingCount.rows[0].count >= schedule.rows[0].max_capacity) {
+        const bookingCount = await pool.query('SELECT COUNT(*) as cnt FROM bookings WHERE schedule_id = $1', [schedule_id]);
+        if ((Number(bookingCount.rows[0].cnt) || 0) >= schedule.rows[0].max_capacity) {
             return res.status(400).json({ message: 'This class is already full.' });
         }
 
         // Create the booking
-        const newBooking = await pool.query(
-            'INSERT INTO bookings (member_id, schedule_id) VALUES ($1, $2) RETURNING *',
-            [member_id, schedule_id]
-        );
+        await pool.query('INSERT INTO bookings (member_id, schedule_id) VALUES ($1, $2)', [member_id, schedule_id]);
+        const newBooking = await pool.query('SELECT * FROM bookings WHERE member_id = $1 AND schedule_id = $2 ORDER BY id DESC LIMIT 1', [member_id, schedule_id]);
 
         // Get member and class details for email
         const memberDetails = await pool.query('SELECT name, email FROM members WHERE id = $1', [member_id]);
@@ -48,7 +46,8 @@ exports.bookClass = async (req, res) => {
         res.status(201).json(newBooking.rows[0]);
     } catch (err) {
         // Handle unique constraint violation (member already booked)
-        if (err.code === '23505') { 
+        // SQLite uses constraint names; we return conflict on any UNIQUE violation
+        if (String(err.message || '').toLowerCase().includes('unique')) { 
             return res.status(409).json({ message: 'You have already booked this class.' });
         }
         res.status(500).json({ message: err.message });

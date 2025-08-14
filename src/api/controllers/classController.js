@@ -1,4 +1,4 @@
-const { pool } = require('../../config/database');
+const { pool } = require('../../config/sqlite');
 
 // Get all classes
 exports.getAllClasses = async (req, res) => {
@@ -28,11 +28,9 @@ exports.getClassById = async (req, res) => {
 exports.createClass = async (req, res) => {
     const { name, description, instructor, duration_minutes } = req.body;
     try {
-        const newClass = await pool.query(
-            'INSERT INTO classes (name, description, instructor, duration_minutes) VALUES ($1, $2, $3, $4) RETURNING *',
-            [name, description, instructor, duration_minutes]
-        );
-        res.status(201).json(newClass.rows[0]);
+        await pool.query('INSERT INTO classes (name, description, instructor, duration_minutes) VALUES ($1, $2, $3, $4)', [name, description, instructor, duration_minutes]);
+        const created = await pool.query('SELECT * FROM classes ORDER BY id DESC LIMIT 1');
+        res.status(201).json(created.rows[0]);
     } catch (err) {
         res.status(400).json({ message: err.message });
     }
@@ -43,10 +41,8 @@ exports.updateClass = async (req, res) => {
     const { id } = req.params;
     const { name, description, instructor, duration_minutes } = req.body;
     try {
-        const updatedClass = await pool.query(
-            'UPDATE classes SET name = $1, description = $2, instructor = $3, duration_minutes = $4 WHERE id = $5 RETURNING *',
-            [name, description, instructor, duration_minutes, id]
-        );
+        await pool.query('UPDATE classes SET name = $1, description = $2, instructor = $3, duration_minutes = $4 WHERE id = $5', [name, description, instructor, duration_minutes, id]);
+        const updatedClass = await pool.query('SELECT * FROM classes WHERE id = $1', [id]);
         if (updatedClass.rows.length === 0) {
             return res.status(404).json({ message: 'Class not found' });
         }
@@ -60,10 +56,11 @@ exports.updateClass = async (req, res) => {
 exports.deleteClass = async (req, res) => {
     const { id } = req.params;
     try {
-        const deletedClass = await pool.query('DELETE FROM classes WHERE id = $1 RETURNING *', [id]);
-        if (deletedClass.rowCount === 0) {
+        const existing = await pool.query('SELECT id FROM classes WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
             return res.status(404).json({ message: 'Class not found' });
         }
+        await pool.query('DELETE FROM classes WHERE id = $1', [id]);
         res.json({ message: 'Class deleted successfully' });
     } catch (err) {
         res.status(500).json({ message: err.message });

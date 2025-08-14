@@ -1,4 +1,4 @@
-const { pool } = require('../../config/database');
+const { pool } = require('../../config/sqlite');
 
 // This endpoint would be called by the biometric device
 const performCheckIn = async (resolvedMemberId, res) => {
@@ -36,7 +36,7 @@ const performCheckIn = async (resolvedMemberId, res) => {
     // Only one check-in per day
     const alreadyCheckedInToday = await pool.query(
         `SELECT 1 FROM attendance 
-         WHERE member_id = $1 AND check_in_time::date = CURRENT_DATE 
+         WHERE member_id = $1 AND DATE(check_in_time) = DATE('now') 
          LIMIT 1`,
         [resolvedMemberId]
     );
@@ -45,10 +45,11 @@ const performCheckIn = async (resolvedMemberId, res) => {
         return res.status(409).json({ message: 'Member has already checked in today.' });
     }
 
-    const newAttendance = await pool.query(
-        'INSERT INTO attendance (member_id, check_in_time) VALUES ($1, NOW()) RETURNING *',
+    await pool.query(
+        'INSERT INTO attendance (member_id, check_in_time) VALUES ($1, datetime("now"))',
         [resolvedMemberId]
     );
+    const newAttendance = await pool.query('SELECT * FROM attendance WHERE member_id = $1 ORDER BY id DESC LIMIT 1', [resolvedMemberId]);
 
     return res.status(200).json({ 
         message: `Member ${resolvedMemberId} checked in successfully.`,
@@ -108,11 +109,11 @@ exports.getAttendanceByMember = async (req, res) => {
         const params = [memberId];
         if (start) {
             params.push(start);
-            query += ` AND check_in_time::date >= $${params.length}::date`;
+            query += ` AND DATE(check_in_time) >= DATE($${params.length})`;
         }
         if (end) {
             params.push(end);
-            query += ` AND check_in_time::date <= $${params.length}::date`;
+            query += ` AND DATE(check_in_time) <= DATE($${params.length})`;
         }
         query += ' ORDER BY check_in_time DESC';
 
