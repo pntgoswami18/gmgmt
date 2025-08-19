@@ -139,3 +139,30 @@ exports.getAttendanceByMember = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// Get attendance records for all members (optionally filtered by date range)
+exports.getAllAttendance = async (req, res) => {
+    try {
+        const { start, end } = req.query;
+        let query = `
+            SELECT a.id, a.member_id, a.check_in_time, m.name AS member_name
+            FROM attendance a
+            JOIN members m ON m.id = a.member_id
+            WHERE 1=1`;
+        const params = [];
+        if (start) {
+            params.push(start);
+            query += ` AND DATE(a.check_in_time) >= DATE($${params.length})`;
+        }
+        if (end) {
+            params.push(end);
+            query += ` AND DATE(a.check_in_time) <= DATE($${params.length})`;
+        }
+        query += ' ORDER BY a.check_in_time DESC';
+
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};

@@ -9,6 +9,7 @@ router.post('/check-in', attendanceController.checkIn);
 router.post('/device-webhook', attendanceController.deviceWebhook);
 
 // Endpoint for staff to get attendance records
+router.get('/', attendanceController.getAllAttendance);
 router.get('/:memberId', attendanceController.getAttendanceByMember);
 
 module.exports = router;
