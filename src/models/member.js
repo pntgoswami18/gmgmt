@@ -1,5 +1,5 @@
 // In a real application, you would have database connection setup here.
-// For example, using the 'pg' library for PostgreSQL.
+// For example, using the 'better-sqlite3' library for SQLite.
 
 class Member {
     constructor(id, name, email, membershipType, joinDate) {

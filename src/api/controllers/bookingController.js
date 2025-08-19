@@ -22,7 +22,7 @@ exports.bookClass = async (req, res) => {
         const newBooking = await pool.query('SELECT * FROM bookings WHERE member_id = $1 AND schedule_id = $2 ORDER BY id DESC LIMIT 1', [member_id, schedule_id]);
 
         // Get member and class details for email
-        const memberDetails = await pool.query('SELECT name, email FROM members WHERE id = $1', [member_id]);
+        const memberDetails = await pool.query('SELECT name FROM members WHERE id = $1', [member_id]);
         const classDetails = await pool.query(`
             SELECT c.name, s.start_time 
             FROM class_schedules s 
@@ -35,12 +35,7 @@ exports.bookClass = async (req, res) => {
             const classInfo = classDetails.rows[0];
             
             // Send booking confirmation email
-            await sendEmail('bookingConfirmation', [
-                member.name, 
-                member.email, 
-                classInfo.name, 
-                classInfo.start_time
-            ]);
+            // Email removed from members; skip sending booking confirmation
         }
 
         res.status(201).json(newBooking.rows[0]);

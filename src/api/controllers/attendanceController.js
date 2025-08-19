@@ -2,6 +2,9 @@ const { pool } = require('../../config/sqlite');
 
 // This endpoint would be called by the biometric device
 const performCheckIn = async (resolvedMemberId, res) => {
+    if (resolvedMemberId === undefined || resolvedMemberId === null) {
+        return res.status(400).json({ message: 'A valid memberId is required to check in.' });
+    }
     // Validate member exists
     const member = await pool.query('SELECT id FROM members WHERE id = $1', [resolvedMemberId]);
     if (member.rows.length === 0) {
@@ -46,7 +49,7 @@ const performCheckIn = async (resolvedMemberId, res) => {
     }
 
     await pool.query(
-        'INSERT INTO attendance (member_id, check_in_time) VALUES ($1, datetime("now"))',
+        "INSERT INTO attendance (member_id, check_in_time) VALUES ($1, datetime('now'))",
         [resolvedMemberId]
     );
     const newAttendance = await pool.query('SELECT * FROM attendance WHERE member_id = $1 ORDER BY id DESC LIMIT 1', [resolvedMemberId]);
@@ -59,21 +62,34 @@ const performCheckIn = async (resolvedMemberId, res) => {
 
 exports.checkIn = async (req, res) => {
     const { memberId, device_user_id } = req.body; // from app or device gateway
-    if (!memberId && !device_user_id) {
+    if (memberId === undefined && !device_user_id) {
         return res.status(400).json({ message: 'Member ID or device_user_id is required.' });
     }
 
     try {
-        let resolvedMemberId = memberId;
-        if (!resolvedMemberId && device_user_id) {
+        let resolvedMemberId = undefined;
+
+        if (memberId !== undefined) {
+            const numeric = Number(memberId);
+            if (Number.isFinite(numeric) && Number.isInteger(numeric) && numeric > 0) {
+                resolvedMemberId = numeric;
+            } else {
+                return res.status(400).json({ message: 'memberId must be a positive integer.' });
+            }
+        }
+
+        if (resolvedMemberId === undefined && device_user_id) {
             const map = await pool.query('SELECT member_id FROM member_biometrics WHERE device_user_id = $1', [device_user_id]);
             if (map.rowCount > 0) {
                 resolvedMemberId = map.rows[0].member_id;
+            } else {
+                return res.status(404).json({ message: 'No member linked to this device user id' });
             }
         }
+
         await performCheckIn(resolvedMemberId, res);
     } catch (err) {
-        res.status(500).json({ message: err.message });
+        res.status(500).json({ message: err.message || 'Internal server error' });
     }
 };
 

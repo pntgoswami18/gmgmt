@@ -32,9 +32,9 @@ exports.getMemberById = async (req, res) => {
     }
 };
 
-// Create a new member
+// Create a new member (email removed)
 exports.createMember = async (req, res) => {
-    const { name, email, phone, membership_type, membership_plan_id } = req.body;
+    const { name, phone, membership_plan_id } = req.body;
     try {
         if (!phone) {
             return res.status(400).json({ message: 'Phone is required' });
@@ -46,11 +46,11 @@ exports.createMember = async (req, res) => {
             ? null
             : parseInt(membership_plan_id, 10);
 
-        await pool.query('INSERT INTO members (name, email, phone, membership_type, membership_plan_id) VALUES ($1, $2, $3, $4, $5)', [name, email || null, phone || null, membership_type || null, planId]);
+        await pool.query('INSERT INTO members (name, phone, membership_plan_id) VALUES ($1, $2, $3)', [name, phone || null, planId]);
         const newMember = await pool.query('SELECT * FROM members ORDER BY id DESC LIMIT 1');
 
         // Send welcome email (do not block on failures)
-        sendEmail('welcome', [name, email]).catch(() => {});
+        // Email removed from member; skip sending welcome email
 
         res.status(201).json(newMember.rows[0]);
     } catch (err) {
@@ -65,10 +65,10 @@ exports.createMember = async (req, res) => {
     }
 };
 
-// Update a member
+// Update a member (email removed)
 exports.updateMember = async (req, res) => {
     const { id } = req.params;
-    const { name, email, phone, membership_type } = req.body;
+    const { name, phone } = req.body;
     try {
         if (!phone) {
             return res.status(400).json({ message: 'Phone is required' });
@@ -76,7 +76,7 @@ exports.updateMember = async (req, res) => {
         if (!isValidPhone(phone)) {
             return res.status(400).json({ message: 'Invalid phone number. Use 10–15 digits, with optional leading +' });
         }
-        await pool.query('UPDATE members SET name = $1, email = $2, phone = $3, membership_type = $4 WHERE id = $5', [name, email || null, phone || null, membership_type, id]);
+        await pool.query('UPDATE members SET name = $1, phone = $2 WHERE id = $3', [name, phone || null, id]);
         const updatedMember = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
         if (updatedMember.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });

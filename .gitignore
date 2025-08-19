@@ -9,3 +9,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+
+# SQLite database files (main file and WAL/SHM sidecars)
+data/data/*.sqlite*
