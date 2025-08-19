@@ -14,6 +14,7 @@ const planRoutes = require('./api/routes/plans');
 const reportRoutes = require('./api/routes/reports');
 const scheduleRoutes = require('./api/routes/schedules');
 const settingsRoutes = require('./api/routes/settings');
+const biometricRoutes = require('./api/routes/biometric');
 
 app.use(cors());
 app.use(express.json());
@@ -37,6 +38,7 @@ app.use('/api/plans', planRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/biometric', biometricRoutes);
 
 // Serve frontend build after API routes so /api/* is not intercepted
 const path = require('path');
@@ -56,6 +58,23 @@ const startServer = async () => {
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`Server running on port ${PORT} and accessible from all interfaces`);
         });
+
+        // Start biometric integration if enabled
+        if (process.env.ENABLE_BIOMETRIC === 'true') {
+            const BiometricIntegration = require('./services/biometricIntegration');
+            const { setBiometricIntegration } = require('./api/controllers/biometricController');
+            const biometricPort = process.env.BIOMETRIC_PORT || 8080;
+            
+            console.log('🔐 Starting biometric integration...');
+            const biometricIntegration = new BiometricIntegration(biometricPort);
+            biometricIntegration.start();
+            
+            // Connect integration with controller
+            setBiometricIntegration(biometricIntegration);
+            
+            // Store reference for potential cleanup
+            app.biometricIntegration = biometricIntegration;
+        }
     } catch (error) {
         console.error('Failed to start server:', error);
         process.exit(1);

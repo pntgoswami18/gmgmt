@@ -5,7 +5,12 @@
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "nodemon src/app.js"
+    "dev": "nodemon src/app.js",
+    "biometric:start": "node src/startBiometricListener.js",
+    "biometric:setup": "node tools/add_biometric_field.js",
+    "biometric:test": "./tools/test_biometric.sh test",
+    "biometric:check": "./tools/test_biometric.sh check",
+    "start:with-biometric": "ENABLE_BIOMETRIC=true node src/app.js"
   },
   "keywords": [],
   "author": "",

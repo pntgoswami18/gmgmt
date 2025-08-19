@@ -1,0 +1,353 @@
+const { pool } = require('../../config/sqlite');
+
+// Get reference to biometric integration instance
+let biometricIntegration = null;
+
+const setBiometricIntegration = (integration) => {
+  biometricIntegration = integration;
+};
+
+// Get biometric status for a member
+const getMemberBiometricStatus = async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    const status = await biometricIntegration.getMemberBiometricStatus(parseInt(memberId));
+    
+    if (!status) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Member not found' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      data: status 
+    });
+  } catch (error) {
+    console.error('Error getting member biometric status:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get biometric status',
+      error: error.message 
+    });
+  }
+};
+
+// Start enrollment for a member
+const startEnrollment = async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    // Get member details
+    const memberResult = await pool.query('SELECT id, name FROM members WHERE id = ?', [memberId]);
+    const member = memberResult.rows[0];
+
+    if (!member) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Member not found' 
+      });
+    }
+
+    // Check if member already has biometric data
+    if (member.biometric_id) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Member already has biometric data enrolled. Remove existing data first.' 
+      });
+    }
+
+    // Start enrollment mode
+    const enrollmentSession = biometricIntegration.startEnrollmentMode(member.id, member.name);
+    
+    res.json({ 
+      success: true, 
+      message: 'Enrollment mode started',
+      data: {
+        session: enrollmentSession,
+        instructions: 'Please ask the member to place their finger on the biometric device multiple times as instructed.'
+      }
+    });
+  } catch (error) {
+    console.error('Error starting enrollment:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to start enrollment',
+      error: error.message 
+    });
+  }
+};
+
+// Stop enrollment
+const stopEnrollment = async (req, res) => {
+  try {
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    const result = biometricIntegration.stopEnrollmentMode('manual');
+    
+    if (!result) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No active enrollment session' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Enrollment stopped',
+      data: result 
+    });
+  } catch (error) {
+    console.error('Error stopping enrollment:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to stop enrollment',
+      error: error.message 
+    });
+  }
+};
+
+// Remove biometric data for a member
+const removeBiometricData = async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    const success = await biometricIntegration.removeBiometricId(parseInt(memberId));
+    
+    if (success) {
+      res.json({ 
+        success: true, 
+        message: 'Biometric data removed successfully' 
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to remove biometric data' 
+      });
+    }
+  } catch (error) {
+    console.error('Error removing biometric data:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to remove biometric data',
+      error: error.message 
+    });
+  }
+};
+
+// Get enrollment status (check if enrollment is active)
+const getEnrollmentStatus = async (req, res) => {
+  try {
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    const isActive = biometricIntegration.enrollmentMode && biometricIntegration.enrollmentMode.active;
+    
+    res.json({ 
+      success: true, 
+      data: {
+        active: isActive,
+        enrollmentMode: isActive ? biometricIntegration.enrollmentMode : null
+      }
+    });
+  } catch (error) {
+    console.error('Error getting enrollment status:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get enrollment status',
+      error: error.message 
+    });
+  }
+};
+
+// Get biometric events/logs
+const getBiometricEvents = async (req, res) => {
+  try {
+    const { memberId } = req.query;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    let query = `
+      SELECT be.*, m.name as member_name 
+      FROM biometric_events be
+      LEFT JOIN members m ON be.member_id = m.id
+    `;
+    let params = [];
+
+    if (memberId) {
+      query += ' WHERE be.member_id = ?';
+      params.push(memberId);
+    }
+
+    query += ' ORDER BY be.timestamp DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    const eventsResult = await pool.query(query, params);
+    const events = eventsResult.rows || [];
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM biometric_events';
+    let countParams = [];
+
+    if (memberId) {
+      countQuery += ' WHERE member_id = ?';
+      countParams.push(memberId);
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+    const totalCount = countResult.rows[0]?.total || 0;
+
+    res.json({ 
+      success: true, 
+      data: {
+        events,
+        total: totalCount,
+        limit,
+        offset
+      }
+    });
+  } catch (error) {
+    console.error('Error getting biometric events:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get biometric events',
+      error: error.message 
+    });
+  }
+};
+
+// Get system status
+const getSystemStatus = async (req, res) => {
+  try {
+    const status = {
+      biometricServiceAvailable: !!biometricIntegration,
+      enrollmentActive: false,
+      connectedDevices: 0,
+      lastActivity: null
+    };
+
+    if (biometricIntegration) {
+      status.enrollmentActive = biometricIntegration.enrollmentMode && 
+                               biometricIntegration.enrollmentMode.active;
+      status.connectedDevices = biometricIntegration.listener.clients.size;
+    }
+
+    res.json({ 
+      success: true, 
+      data: status 
+    });
+  } catch (error) {
+    console.error('Error getting system status:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get system status',
+      error: error.message 
+    });
+  }
+};
+
+// Get members without biometric data
+const getMembersWithoutBiometric = async (req, res) => {
+  try {
+    const query = `
+      SELECT id, name, email, phone, join_date 
+      FROM members 
+      WHERE (biometric_id IS NULL OR biometric_id = '') AND is_active = 1
+      ORDER BY name ASC
+    `;
+
+    const result = await pool.query(query);
+    const members = result.rows || [];
+
+    console.log(`Found ${members.length} members without biometric data`);
+
+    res.json({ 
+      success: true, 
+      data: members 
+    });
+  } catch (error) {
+    console.error('Error getting members without biometric:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get members without biometric data',
+      error: error.message 
+    });
+  }
+};
+
+// Test biometric connection
+const testConnection = async (req, res) => {
+  try {
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    // Send test message to devices
+    const testMessage = 'TEST:CONNECTION:' + new Date().toISOString();
+    biometricIntegration.listener.broadcast(testMessage);
+
+    res.json({ 
+      success: true, 
+      message: 'Test message sent to connected devices',
+      data: {
+        connectedDevices: biometricIntegration.listener.clients.size,
+        testMessage
+      }
+    });
+  } catch (error) {
+    console.error('Error testing connection:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to test connection',
+      error: error.message 
+    });
+  }
+};
+
+module.exports = {
+  setBiometricIntegration,
+  getMemberBiometricStatus,
+  startEnrollment,
+  stopEnrollment,
+  removeBiometricData,
+  getEnrollmentStatus,
+  getBiometricEvents,
+  getSystemStatus,
+  getMembersWithoutBiometric,
+  testConnection
+};
