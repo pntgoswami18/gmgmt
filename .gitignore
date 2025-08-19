@@ -12,3 +12,7 @@ yarn-error.log*
 
 # SQLite database files (main file and WAL/SHM sidecars)
 data/data/*.sqlite*
+
+# Uploaded assets
+public/uploads/*
+!public/uploads/.gitkeep
