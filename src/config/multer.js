@@ -2,9 +2,11 @@ const multer = require('multer');
 const path = require('path');
 
 const storage = multer.diskStorage({
-    destination: './public/uploads/',
+    destination: (req, file, cb) => cb(null, './public/uploads/'),
     filename: function(req, file, cb){
-        cb(null, 'logo' + path.extname(file.originalname));
+        const base = (req.body && req.body.prefix) ? String(req.body.prefix) : 'upload';
+        const unique = Date.now();
+        cb(null, `${base}-${unique}${path.extname(file.originalname)}`);
     }
 });
 
@@ -14,7 +16,11 @@ const upload = multer({
     fileFilter: function(req, file, cb){
         checkFileType(file, cb);
     }
-}).single('logo');
+});
+
+const uploadSingle = (field) => multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (req, file, cb) => checkFileType(file, cb) }).single(field);
+
+module.exports = { uploadSingle };
 
 function checkFileType(file, cb){
     const filetypes = /jpeg|jpg|png|gif/;

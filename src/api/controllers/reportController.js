@@ -192,3 +192,19 @@ exports.getUnpaidMembersThisMonth = async (_req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// Get members whose birthday is today (month and day match, year ignored)
+exports.getBirthdaysToday = async (_req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT id, name, phone, birthday
+            FROM members
+            WHERE birthday IS NOT NULL
+              AND substr(birthday, 6, 5) = substr(date('now','localtime'), 6, 5)
+            ORDER BY name ASC
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};

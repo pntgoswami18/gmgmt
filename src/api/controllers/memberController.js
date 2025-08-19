@@ -1,5 +1,6 @@
 const { pool } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
+const { uploadSingle } = require('../../config/multer');
 
 const isValidPhone = (value) => {
     if (!value) { return false; }
@@ -34,7 +35,7 @@ exports.getMemberById = async (req, res) => {
 
 // Create a new member (email removed)
 exports.createMember = async (req, res) => {
-    const { name, phone, membership_plan_id } = req.body;
+    const { name, phone, membership_plan_id, address, birthday, photo_url } = req.body;
     try {
         if (!phone) {
             return res.status(400).json({ message: 'Phone is required' });
@@ -46,7 +47,10 @@ exports.createMember = async (req, res) => {
             ? null
             : parseInt(membership_plan_id, 10);
 
-        await pool.query('INSERT INTO members (name, phone, membership_plan_id) VALUES ($1, $2, $3)', [name, phone || null, planId]);
+        await pool.query(
+            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url) VALUES ($1, $2, $3, $4, $5, $6)',
+            [name, phone || null, planId, address || null, birthday || null, photo_url || null]
+        );
         const newMember = await pool.query('SELECT * FROM members ORDER BY id DESC LIMIT 1');
 
         // Send welcome email (do not block on failures)
@@ -68,7 +72,7 @@ exports.createMember = async (req, res) => {
 // Update a member (email removed)
 exports.updateMember = async (req, res) => {
     const { id } = req.params;
-    const { name, phone } = req.body;
+    const { name, phone, address, birthday, photo_url } = req.body;
     try {
         if (!phone) {
             return res.status(400).json({ message: 'Phone is required' });
@@ -76,7 +80,10 @@ exports.updateMember = async (req, res) => {
         if (!isValidPhone(phone)) {
             return res.status(400).json({ message: 'Invalid phone number. Use 10–15 digits, with optional leading +' });
         }
-        await pool.query('UPDATE members SET name = $1, phone = $2 WHERE id = $3', [name, phone || null, id]);
+        await pool.query(
+            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5 WHERE id = $6',
+            [name, phone || null, address || null, birthday || null, photo_url || null, id]
+        );
         const updatedMember = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
         if (updatedMember.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });
@@ -137,3 +144,24 @@ exports.deleteMember = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+// Upload member photo
+exports.uploadMemberPhoto = [
+    (req, res, next) => { req.body.prefix = `member-${req.params.id || 'unknown'}`; next(); },
+    uploadSingle('photo'),
+    async (req, res) => {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ message: 'No file uploaded' });
+            }
+            const { id } = req.params;
+            const photoUrl = `/uploads/${req.file.filename}`;
+            if (id) {
+                await pool.query('UPDATE members SET photo_url = $1 WHERE id = $2', [photoUrl, id]);
+            }
+            res.json({ message: 'Photo uploaded successfully', photo_url: photoUrl });
+        } catch (err) {
+            res.status(500).json({ message: err.message });
+        }
+    }
+];

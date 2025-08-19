@@ -47,7 +47,10 @@ function initializeDatabase() {
        phone TEXT,
        membership_type TEXT,
        membership_plan_id INTEGER,
-       join_date TEXT DEFAULT (date('now'))
+       join_date TEXT DEFAULT (date('now')),
+       address TEXT,
+       birthday TEXT,
+       photo_url TEXT
      );`,
     `CREATE TABLE IF NOT EXISTS settings (
        key TEXT PRIMARY KEY,

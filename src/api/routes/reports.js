@@ -9,5 +9,6 @@ router.get('/revenue-stats', reportController.getRevenueStats);
 router.get('/summary', reportController.getSummaryStats);
 router.get('/financial-summary', reportController.getFinancialSummary);
 router.get('/unpaid-members-this-month', reportController.getUnpaidMembersThisMonth);
+router.get('/birthdays-today', reportController.getBirthdaysToday);
 
 module.exports = router;

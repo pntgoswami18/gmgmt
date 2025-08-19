@@ -49,7 +49,7 @@ const performCheckIn = async (resolvedMemberId, res) => {
     }
 
     await pool.query(
-        "INSERT INTO attendance (member_id, check_in_time) VALUES ($1, datetime('now'))",
+        "INSERT INTO attendance (member_id, check_in_time) VALUES ($1, datetime('now','localtime'))",
         [resolvedMemberId]
     );
     const newAttendance = await pool.query('SELECT * FROM attendance WHERE member_id = $1 ORDER BY id DESC LIMIT 1', [resolvedMemberId]);
