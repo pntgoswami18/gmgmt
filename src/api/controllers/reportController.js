@@ -8,7 +8,6 @@ exports.getMemberGrowth = async (req, res) => {
                 substr(join_date, 1, 7) as month,
                 COUNT(*) as new_members
             FROM members
-            WHERE date(join_date) >= date('now', '-12 months')
             GROUP BY substr(join_date, 1, 7)
             ORDER BY month ASC
         `);
@@ -26,7 +25,6 @@ exports.getAttendanceStats = async (req, res) => {
                 date(check_in_time) as date,
                 COUNT(*) as total_checkins
             FROM attendance
-            WHERE datetime(check_in_time) >= datetime('now', '-30 days')
             GROUP BY date(check_in_time)
             ORDER BY date ASC
         `);
@@ -66,7 +64,6 @@ exports.getRevenueStats = async (req, res) => {
                 substr(payment_date, 1, 7) as month,
                 SUM(amount) as total_revenue
             FROM payments
-            WHERE date(payment_date) >= date('now', '-12 months')
             GROUP BY substr(payment_date, 1, 7)
             ORDER BY month ASC
         `);
@@ -79,17 +76,24 @@ exports.getRevenueStats = async (req, res) => {
 // Get overall summary stats
 exports.getSummaryStats = async (req, res) => {
     try {
-        // Total members
-        const totalMembers = await pool.query('SELECT COUNT(*) as count FROM members');
-        
-        // Total revenue
-        const totalRevenue = await pool.query('SELECT SUM(amount) as total FROM payments');
-        
-        // Members this month
-        const membersThisMonth = await pool.query(`
+        // Active members: members explicitly marked active
+        const activeMembers = await pool.query(`
+            SELECT COUNT(*) AS count FROM members WHERE is_active = 1
+        `);
+
+        // Total revenue this month
+        const totalRevenueThisMonth = await pool.query(`
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM payments
+            WHERE strftime('%Y-%m', payment_date) = strftime('%Y-%m','now','localtime')
+        `);
+
+        // New members this month
+        const newMembersThisMonth = await pool.query(`
             SELECT COUNT(*) as count 
             FROM members 
-            WHERE date(join_date) >= date('now','start of month')
+            WHERE date(join_date) >= date('now','localtime','start of month')
+              AND date(join_date) < date('now','localtime','start of month','+1 month')
         `);
 
         // Members who have NOT made a payment in the current month
@@ -101,22 +105,22 @@ exports.getSummaryStats = async (req, res) => {
                 FROM payments p
                 JOIN invoices i ON p.invoice_id = i.id
                 WHERE i.member_id = m.id
-                  AND date(p.payment_date) >= date('now','start of month')
-                  AND date(p.payment_date) < date('now','start of month','+1 month')
+                  AND date(p.payment_date) >= date('now','localtime','start of month')
+                  AND date(p.payment_date) < date('now','localtime','start of month','+1 month')
             )
         `);
         
-        // Active schedules
+        // Active schedules (upcoming from now)
         const activeSchedules = await pool.query(`
             SELECT COUNT(*) as count 
             FROM class_schedules 
-            WHERE datetime(start_time) > datetime('now')
+            WHERE datetime(start_time) > datetime('now','localtime')
         `);
 
         const summary = {
-            totalMembers: totalMembers.rows[0].count,
-            totalRevenue: totalRevenue.rows[0].total || 0,
-            newMembersThisMonth: membersThisMonth.rows[0].count,
+            totalMembers: activeMembers.rows[0].count, // active members
+            totalRevenueThisMonth: totalRevenueThisMonth.rows[0].total || 0,
+            newMembersThisMonth: newMembersThisMonth.rows[0].count,
             activeSchedules: activeSchedules.rows[0].count,
             unpaidMembersThisMonth: unpaidMembersThisMonth.rows[0].count
         };

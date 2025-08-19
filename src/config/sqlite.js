@@ -50,7 +50,8 @@ function initializeDatabase() {
        join_date TEXT DEFAULT (date('now')),
        address TEXT,
        birthday TEXT,
-       photo_url TEXT
+       photo_url TEXT,
+       is_active INTEGER DEFAULT 1
      );`,
     `CREATE TABLE IF NOT EXISTS settings (
        key TEXT PRIMARY KEY,
@@ -118,7 +119,6 @@ function initializeDatabase() {
 
   const insertDefaultSettings = [
     ['currency', 'INR'],
-    ['membership_types', '["Weight Training", "Cardio", "Cardio & Weights Training"]'],
     ['gym_name', 'My Gym'],
     ['gym_logo', 'logo.svg'],
     ['primary_color', '#3f51b5'],
@@ -147,6 +147,16 @@ function initializeDatabase() {
     }
   });
   trx();
+
+  // Ensure legacy databases have is_active column
+  try {
+    const cols = db.prepare("PRAGMA table_info(members)").all();
+    const hasActive = cols.some(c => String(c.name).toLowerCase() === 'is_active');
+    if (!hasActive) {
+      db.prepare("ALTER TABLE members ADD COLUMN is_active INTEGER DEFAULT 1").run();
+      db.prepare("UPDATE members SET is_active = 1 WHERE is_active IS NULL").run();
+    }
+  } catch (_) {}
 }
 
 const pool = {

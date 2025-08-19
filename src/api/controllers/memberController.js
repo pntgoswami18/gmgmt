@@ -2,11 +2,26 @@ const { pool } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
 const { uploadSingle } = require('../../config/multer');
 
+const normalizePhone = (value) => {
+    if (value === undefined || value === null) {
+        return '';
+    }
+    const raw = String(value).trim();
+    const hasPlus = raw.startsWith('+');
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length < 10 || digits.length > 15) {
+        return '';
+    }
+    return hasPlus ? `+${digits}` : digits;
+};
+
 const isValidPhone = (value) => {
-    if (!value) { return false; }
-    const normalized = String(value).trim();
-    // Accept E.164 style or plain digits: 10 to 15 digits, optional leading +
-    return /^\+?[0-9]{10,15}$/.test(normalized);
+    if (value === undefined || value === null) {
+        return false;
+    }
+    const raw = String(value).trim();
+    const digits = raw.replace(/\D/g, '');
+    return digits.length >= 10 && digits.length <= 15;
 };
 
 // Get all members
@@ -48,7 +63,7 @@ exports.createMember = async (req, res) => {
             : parseInt(membership_plan_id, 10);
 
         await pool.query(
-            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url) VALUES ($1, $2, $3, $4, $5, $6)',
+            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active) VALUES ($1, $2, $3, $4, $5, $6, 1)',
             [name, phone || null, planId, address || null, birthday || null, photo_url || null]
         );
         const newMember = await pool.query('SELECT * FROM members ORDER BY id DESC LIMIT 1');
@@ -74,15 +89,32 @@ exports.updateMember = async (req, res) => {
     const { id } = req.params;
     const { name, phone, address, birthday, photo_url } = req.body;
     try {
-        if (!phone) {
-            return res.status(400).json({ message: 'Phone is required' });
+        // Load existing to allow partial updates while ensuring mandatory fields present post-update
+        const existingRes = await pool.query('SELECT name, phone, address, birthday, photo_url FROM members WHERE id = $1', [id]);
+        if (existingRes.rows.length === 0) {
+            return res.status(404).json({ message: 'Member not found' });
         }
-        if (!isValidPhone(phone)) {
-            return res.status(400).json({ message: 'Invalid phone number. Use 10–15 digits, with optional leading +' });
+        const existing = existingRes.rows[0];
+
+        const incomingName = String(name ?? '').trim();
+        const finalName = incomingName || String(existing.name || '').trim();
+        if (!finalName) {
+            return res.status(400).json({ message: 'Name is required' });
         }
+
+        const candidatePhone = (phone === undefined || String(phone).trim() === '') ? String(existing.phone || '') : String(phone || '');
+        const finalPhone = normalizePhone(candidatePhone);
+        if (!finalPhone) {
+            return res.status(400).json({ message: 'Phone is required and must be 10–15 digits (optional leading +).' });
+        }
+
+        const safeAddress = address === undefined ? existing.address || null : address || null;
+        const safeBirthday = birthday === undefined ? existing.birthday || null : birthday || null;
+        const safePhotoUrl = photo_url === undefined ? existing.photo_url || null : photo_url || null;
+
         await pool.query(
             'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5 WHERE id = $6',
-            [name, phone || null, address || null, birthday || null, photo_url || null, id]
+            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, id]
         );
         const updatedMember = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
         if (updatedMember.rows.length === 0) {
@@ -145,6 +177,23 @@ exports.deleteMember = async (req, res) => {
     }
 };
 
+// Toggle member active status
+exports.setActiveStatus = async (req, res) => {
+    const { id } = req.params;
+    const { is_active } = req.body;
+    try {
+        const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
+        if (existing.rowCount === 0) {
+            return res.status(404).json({ message: 'Member not found' });
+        }
+        const val = String(is_active) === '0' || is_active === false ? 0 : 1;
+        await pool.query('UPDATE members SET is_active = $1 WHERE id = $2', [val, id]);
+        const updated = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
+        res.json(updated.rows[0]);
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+};
 // Upload member photo
 exports.uploadMemberPhoto = [
     (req, res, next) => { req.body.prefix = `member-${req.params.id || 'unknown'}`; next(); },

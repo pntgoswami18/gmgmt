@@ -5,10 +5,13 @@ const performCheckIn = async (resolvedMemberId, res) => {
     if (resolvedMemberId === undefined || resolvedMemberId === null) {
         return res.status(400).json({ message: 'A valid memberId is required to check in.' });
     }
-    // Validate member exists
-    const member = await pool.query('SELECT id FROM members WHERE id = $1', [resolvedMemberId]);
+    // Validate member exists and is active
+    const member = await pool.query('SELECT id, is_active FROM members WHERE id = $1', [resolvedMemberId]);
     if (member.rows.length === 0) {
         return res.status(404).json({ message: 'Member not found' });
+    }
+    if (String(member.rows[0].is_active) === '0') {
+        return res.status(403).json({ message: 'Member is deactivated and cannot check in.' });
     }
 
     // Enforce configured session windows

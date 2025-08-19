@@ -11,14 +11,6 @@ exports.getAllSettings = async (req, res) => {
         const settings = {};
         for (const row of settingsResult.rows) {
             let value = row.value;
-            if (row.key === 'membership_types') {
-                try {
-                    value = JSON.parse(value);
-                } catch (e) {
-                    console.error('Failed to parse membership_types JSON:', value);
-                    value = [];
-                }
-            }
             settings[row.key] = value;
         }
         
@@ -39,9 +31,6 @@ exports.getSetting = async (req, res) => {
             return res.status(404).json({ message: 'Setting not found' });
         }
         let value = setting.rows[0].value;
-        if (key === 'membership_types') {
-            value = JSON.parse(value);
-        }
         res.json({ key, value });
     } catch (err) {
         res.status(500).json({ message: err.message });
@@ -58,9 +47,7 @@ exports.updateAllSettings = async (req, res) => {
             if (Object.hasOwnProperty.call(settings, key)) {
                 let value = settings[key];
 
-                if (key === 'membership_types') {
-                    value = JSON.stringify(value);
-                } else if (value === undefined || value === null) {
+                if (value === undefined || value === null) {
                     value = null;
                 } else if (typeof value !== 'string' && typeof value !== 'number') {
                     // Store booleans and other primitives as strings in TEXT column
