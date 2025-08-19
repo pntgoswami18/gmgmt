@@ -156,12 +156,47 @@ exports.getFinancialSummary = async (req, res) => {
                 m.id, 
                 m.name, 
                 m.email,
-                MAX(p.payment_date) as last_payment_date,
-                (SELECT i.status FROM invoices i WHERE i.member_id = m.id ORDER BY i.due_date DESC LIMIT 1) as last_invoice_status
+                m.join_date,
+                mp.name as plan_name,
+                mp.duration_days,
+                (
+                    SELECT MAX(p.payment_date) 
+                    FROM payments p 
+                    JOIN invoices i ON p.invoice_id = i.id 
+                    WHERE i.member_id = m.id
+                ) as last_payment_date,
+                (
+                    SELECT i.status 
+                    FROM invoices i 
+                    WHERE i.member_id = m.id 
+                    ORDER BY i.due_date DESC 
+                    LIMIT 1
+                ) as last_invoice_status,
+                CASE 
+                    WHEN mp.duration_days IS NULL THEN 0
+                    WHEN (
+                        SELECT MAX(p.payment_date) 
+                        FROM payments p 
+                        JOIN invoices i ON p.invoice_id = i.id 
+                        WHERE i.member_id = m.id
+                    ) IS NULL THEN 
+                        CASE 
+                            WHEN julianday('now') - julianday(m.join_date) > mp.duration_days THEN 1
+                            ELSE 0
+                        END
+                    ELSE 
+                        CASE 
+                            WHEN julianday('now') - julianday((
+                                SELECT MAX(p.payment_date) 
+                                FROM payments p 
+                                JOIN invoices i ON p.invoice_id = i.id 
+                                WHERE i.member_id = m.id
+                            )) > mp.duration_days THEN 1
+                            ELSE 0
+                        END
+                END as is_overdue_for_plan
             FROM members m
-            LEFT JOIN invoices i ON m.id = i.member_id
-            LEFT JOIN payments p ON i.id = p.invoice_id
-            GROUP BY m.id
+            LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
             ORDER BY m.name ASC
         `);
 
@@ -208,6 +243,92 @@ exports.getBirthdaysToday = async (_req, res) => {
             ORDER BY name ASC
         `);
         res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// Get payment reminders - invoices that are overdue based on payment_reminder_days setting
+exports.getPaymentReminders = async (_req, res) => {
+    try {
+        // Get payment reminder days setting
+        const settingResult = await pool.query(`
+            SELECT value FROM settings WHERE key = 'payment_reminder_days'
+        `);
+        const reminderDays = parseInt(settingResult.rows[0]?.value || '7', 10);
+        
+        // Get overdue invoices - due date + reminder days <= today
+        const result = await pool.query(`
+            SELECT 
+                i.id as invoice_id,
+                i.amount,
+                i.due_date,
+                i.created_at,
+                m.id as member_id,
+                m.name as member_name,
+                m.phone,
+                m.email,
+                mp.name as plan_name,
+                mp.duration_days,
+                julianday('now') - julianday(i.due_date) as days_overdue
+            FROM invoices i
+            JOIN members m ON i.member_id = m.id
+            LEFT JOIN membership_plans mp ON i.plan_id = mp.id
+            WHERE i.status = 'unpaid'
+              AND julianday('now') >= julianday(i.due_date, '+' || $1 || ' days')
+            ORDER BY i.due_date ASC
+        `, [reminderDays]);
+        
+        res.json({
+            reminder_days: reminderDays,
+            overdue_invoices: result.rows
+        });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// Get upcoming payment renewals based on membership plan duration
+exports.getUpcomingRenewals = async (_req, res) => {
+    try {
+        // Get payment reminder days setting for notification threshold
+        const settingResult = await pool.query(`
+            SELECT value FROM settings WHERE key = 'payment_reminder_days'
+        `);
+        const reminderDays = parseInt(settingResult.rows[0]?.value || '7', 10);
+        
+        // Find members whose membership expires within reminder days
+        const result = await pool.query(`
+            SELECT 
+                m.id as member_id,
+                m.name as member_name,
+                m.phone,
+                m.email,
+                m.join_date,
+                mp.name as plan_name,
+                mp.duration_days,
+                mp.price,
+                MAX(p.payment_date) as last_payment_date,
+                CASE 
+                    WHEN MAX(p.payment_date) IS NOT NULL 
+                    THEN date(MAX(p.payment_date), '+' || mp.duration_days || ' days')
+                    ELSE date(m.join_date, '+' || mp.duration_days || ' days')
+                END as next_due_date
+            FROM members m
+            LEFT JOIN invoices i ON m.id = i.member_id
+            LEFT JOIN payments p ON i.id = p.invoice_id
+            LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
+            WHERE mp.id IS NOT NULL
+            GROUP BY m.id, m.name, m.phone, m.email, m.join_date, mp.name, mp.duration_days, mp.price
+            HAVING julianday(next_due_date) - julianday('now') <= $1 
+               AND julianday(next_due_date) - julianday('now') >= 0
+            ORDER BY next_due_date ASC
+        `, [reminderDays]);
+        
+        res.json({
+            reminder_days: reminderDays,
+            upcoming_renewals: result.rows
+        });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }

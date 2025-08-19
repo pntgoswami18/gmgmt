@@ -11,7 +11,16 @@ exports.processPayment = async (_req, res) => {
 exports.createInvoice = async (req, res) => {
     const { member_id, plan_id, amount, due_date } = req.body;
     try {
-        await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id, plan_id || null, amount, due_date, 'unpaid']);
+        // If no plan_id provided, try to get member's current plan
+        let finalPlanId = plan_id;
+        if (!finalPlanId && member_id) {
+            const memberPlan = await pool.query('SELECT membership_plan_id FROM members WHERE id = $1', [member_id]);
+            if (memberPlan.rows.length > 0) {
+                finalPlanId = memberPlan.rows[0].membership_plan_id;
+            }
+        }
+        
+        await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id, finalPlanId || null, amount, due_date, 'unpaid']);
         const newInvoice = await pool.query('SELECT * FROM invoices ORDER BY id DESC LIMIT 1');
         res.status(201).json(newInvoice.rows[0]);
     } catch (err) {
@@ -32,13 +41,31 @@ exports.recordManualPayment = async (req, res) => {
         let ensuredInvoiceId = invoice_id ? parseInt(invoice_id, 10) : null;
 
         if (!ensuredInvoiceId) {
-            await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id || null, plan_id || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']);
+            // If no plan_id provided, try to get member's current plan
+            let finalPlanId = plan_id;
+            if (!finalPlanId && member_id) {
+                const memberPlan = await pool.query('SELECT membership_plan_id FROM members WHERE id = $1', [member_id]);
+                if (memberPlan.rows.length > 0) {
+                    finalPlanId = memberPlan.rows[0].membership_plan_id;
+                }
+            }
+            
+            await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id || null, finalPlanId || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']);
             const inv = await pool.query('SELECT id FROM invoices ORDER BY id DESC LIMIT 1');
             ensuredInvoiceId = inv.rows[0].id;
         } else {
             const existing = await pool.query('SELECT id FROM invoices WHERE id = $1', [ensuredInvoiceId]);
             if (existing.rowCount === 0) {
-                await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id || null, plan_id || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']);
+                // If no plan_id provided, try to get member's current plan
+                let finalPlanId = plan_id;
+                if (!finalPlanId && member_id) {
+                    const memberPlan = await pool.query('SELECT membership_plan_id FROM members WHERE id = $1', [member_id]);
+                    if (memberPlan.rows.length > 0) {
+                        finalPlanId = memberPlan.rows[0].membership_plan_id;
+                    }
+                }
+                
+                await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id || null, finalPlanId || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']);
                 const inv = await pool.query('SELECT id FROM invoices ORDER BY id DESC LIMIT 1');
                 ensuredInvoiceId = inv.rows[0].id;
             }
@@ -52,6 +79,44 @@ exports.recordManualPayment = async (req, res) => {
         res.status(201).json({ message: 'Manual payment recorded', payment: payment.rows[0], invoice_id: ensuredInvoiceId });
     } catch (err) {
         res.status(400).json({ message: err.message });
+    }
+};
+
+// Delete a payment and update invoice status back to unpaid
+exports.deletePayment = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const paymentId = parseInt(id, 10);
+        if (!paymentId || isNaN(paymentId)) {
+            return res.status(400).json({ message: 'Invalid payment ID' });
+        }
+
+        // Get payment details before deletion
+        const paymentResult = await pool.query('SELECT invoice_id, amount FROM payments WHERE id = $1', [paymentId]);
+        if (paymentResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Payment not found' });
+        }
+
+        const { invoice_id } = paymentResult.rows[0];
+
+        // Delete the payment
+        await pool.query('DELETE FROM payments WHERE id = $1', [paymentId]);
+
+        // Check if there are any remaining payments for this invoice
+        const remainingPayments = await pool.query('SELECT COUNT(*) as count FROM payments WHERE invoice_id = $1', [invoice_id]);
+        const hasRemainingPayments = parseInt(remainingPayments.rows[0].count, 10) > 0;
+
+        // Update invoice status based on remaining payments
+        const newStatus = hasRemainingPayments ? 'paid' : 'unpaid';
+        await pool.query('UPDATE invoices SET status = $1 WHERE id = $2', [newStatus, invoice_id]);
+
+        res.json({ 
+            message: 'Payment deleted successfully', 
+            invoice_id: invoice_id,
+            new_invoice_status: newStatus
+        });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
     }
 };
 
