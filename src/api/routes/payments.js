@@ -11,5 +11,7 @@ router.get('/:id/invoice', paymentController.getInvoiceByPaymentId);
 router.get('/invoice/:id', paymentController.getInvoiceByPaymentId);
 // Fetch invoice by invoice id directly
 router.get('/invoices/:id', paymentController.getInvoiceByInvoiceId);
+// Delete a payment
+router.delete('/:id', paymentController.deletePayment);
 
 module.exports = router;
