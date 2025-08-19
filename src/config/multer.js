@@ -34,5 +34,5 @@ function checkFileType(file, cb){
     }
 }
 
-module.exports = upload;
+// Do not overwrite the named exports
 
