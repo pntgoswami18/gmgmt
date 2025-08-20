@@ -265,6 +265,48 @@ The backend provides the following REST API endpoints:
 
 ---
 
+## Biometric Testing Commands
+
+The application includes cross-platform testing scripts to verify biometric device communication:
+
+### Available Test Scripts
+
+```bash
+# Check if biometric service is listening (cross-platform)
+npm run biometric:check
+
+# Send comprehensive test messages to verify communication (cross-platform)
+npm run biometric:test
+
+# Start the biometric listener service
+npm run biometric:start
+
+# Set up biometric database tables
+npm run biometric:setup
+
+# Get help for test options
+npm run biometric:help
+
+# Start main app with biometric integration enabled
+npm run start:with-biometric
+```
+
+### Environment Configuration
+
+Configure biometric settings in your `.env` file:
+
+```env
+ENABLE_BIOMETRIC=true
+BIOMETRIC_PORT=8080
+BIOMETRIC_HOST=0.0.0.0
+```
+
+**Note:** The test scripts automatically load environment variables from your `.env` file and work on both Windows and Unix-based systems.
+
+📖 **For complete biometric setup and configuration guide, see [BIOMETRIC_INTEGRATION_GUIDE.md](BIOMETRIC_INTEGRATION_GUIDE.md)**
+
+---
+
 ## Database Schema
 
 The application automatically creates the following database tables:
