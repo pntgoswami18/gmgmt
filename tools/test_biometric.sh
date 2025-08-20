@@ -5,6 +5,15 @@
 
 set -e
 
+# Load environment variables from .env file if it exists
+if [ -f ".env" ]; then
+    echo "Loading environment from .env file..."
+    export $(grep -v '^#' .env | xargs)
+elif [ -f "src/.env" ]; then
+    echo "Loading environment from src/.env file..."
+    export $(grep -v '^#' src/.env | xargs)
+fi
+
 # Configuration
 HOST=${BIOMETRIC_HOST:-"localhost"}
 PORT=${BIOMETRIC_PORT:-"8080"}
