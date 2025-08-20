@@ -69,6 +69,10 @@ class BiometricListener extends EventEmitter {
       if (message.startsWith('{')) {
         biometricData = JSON.parse(message);
       }
+      // If the message is XML (SecureEye S560 format)
+      else if (message.startsWith('<?xml') || message.includes('<Message>')) {
+        biometricData = this.parseSecureEyeXML(message);
+      }
       // If the message is comma-separated values
       else if (message.includes(',')) {
         const parts = message.split(',');
@@ -110,6 +114,81 @@ class BiometricListener extends EventEmitter {
     } catch (error) {
       console.error('Error parsing biometric data:', error);
       this.emit('parseError', message, error);
+    }
+  }
+
+  parseSecureEyeXML(xmlMessage) {
+    // Parse SecureEye S560 XML format
+    try {
+      // Extract key fields using regex (simple XML parsing)
+      const getUserId = (xml) => {
+        const match = xml.match(/<UserID>(\d+)<\/UserID>/);
+        return match ? match[1] : null;
+      };
+
+      const getField = (xml, fieldName) => {
+        const match = xml.match(new RegExp(`<${fieldName}>(.*?)<\/${fieldName}>`));
+        return match ? match[1] : null;
+      };
+
+      const userId = getUserId(xmlMessage);
+      const event = getField(xmlMessage, 'Event');
+      const verifMode = getField(xmlMessage, 'VerifMode');
+      const attendStat = getField(xmlMessage, 'AttendStat');
+      const terminalType = getField(xmlMessage, 'TerminalType');
+      const deviceUID = getField(xmlMessage, 'DeviceUID');
+      const transID = getField(xmlMessage, 'TransID');
+      
+      // Build timestamp from individual components
+      const year = getField(xmlMessage, 'Year');
+      const month = getField(xmlMessage, 'Month');
+      const day = getField(xmlMessage, 'Day');
+      const hour = getField(xmlMessage, 'Hour');
+      const minute = getField(xmlMessage, 'Minute');
+      const second = getField(xmlMessage, 'Second');
+      
+      let timestamp = new Date().toISOString();
+      if (year && month && day && hour && minute && second) {
+        // Create proper ISO timestamp
+        const isoDate = new Date(
+          parseInt(year),
+          parseInt(month) - 1, // Month is 0-indexed in JS
+          parseInt(day),
+          parseInt(hour),
+          parseInt(minute),
+          parseInt(second)
+        );
+        timestamp = isoDate.toISOString();
+      }
+
+      // Determine status based on event type and verification mode
+      let status = 'unknown';
+      if (event === 'TimeLog' && verifMode === 'FP' && userId) {
+        // Successful fingerprint attendance logging
+        status = 'authorized';
+      }
+
+      return {
+        userId: userId,
+        timestamp: timestamp,
+        status: status,
+        deviceId: deviceUID || terminalType,
+        event: event,
+        verifMode: verifMode,
+        attendStat: attendStat,
+        terminalType: terminalType,
+        transactionId: transID,
+        rawMessage: xmlMessage
+      };
+
+    } catch (error) {
+      console.error('Error parsing SecureEye XML:', error);
+      return {
+        rawMessage: xmlMessage,
+        timestamp: new Date().toISOString(),
+        status: 'parse_error',
+        error: error.message
+      };
     }
   }
 
