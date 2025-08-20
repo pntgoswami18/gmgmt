@@ -339,12 +339,92 @@ const testConnection = async (req, res) => {
   }
 };
 
+// Manual enrollment - assign device user ID to member
+const manualEnrollment = async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const { deviceUserId } = req.body;
+    
+    if (!deviceUserId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Device User ID is required' 
+      });
+    }
+
+    // Get member details
+    const memberResult = await pool.query('SELECT id, name, biometric_id FROM members WHERE id = ?', [memberId]);
+    const member = memberResult.rows[0];
+
+    if (!member) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Member not found' 
+      });
+    }
+
+    // Check if member already has biometric data
+    if (member.biometric_id) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Member already has biometric data enrolled. Remove existing data first.' 
+      });
+    }
+
+    // Check if device user ID is already assigned
+    const existingResult = await pool.query('SELECT id, name FROM members WHERE biometric_id = ?', [deviceUserId]);
+    if (existingResult.rows.length > 0) {
+      const existingMember = existingResult.rows[0];
+      return res.status(409).json({ 
+        success: false, 
+        message: `Device User ID ${deviceUserId} is already assigned to ${existingMember.name} (ID: ${existingMember.id})` 
+      });
+    }
+
+    // Assign device user ID to member
+    await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', [deviceUserId, memberId]);
+
+    // Log enrollment event
+    if (biometricIntegration) {
+      const enrollmentEvent = {
+        member_id: memberId,
+        biometric_id: deviceUserId,
+        event_type: 'manual_enrollment',
+        device_id: 'manual',
+        timestamp: new Date().toISOString(),
+        success: true,
+        raw_data: JSON.stringify({ method: 'manual', deviceUserId })
+      };
+
+      await biometricIntegration.logBiometricEvent(enrollmentEvent);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `Device User ID ${deviceUserId} successfully assigned to ${member.name}`,
+      data: {
+        memberId: memberId,
+        memberName: member.name,
+        deviceUserId: deviceUserId
+      }
+    });
+  } catch (error) {
+    console.error('Error in manual enrollment:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to assign device user ID',
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   setBiometricIntegration,
   getMemberBiometricStatus,
   startEnrollment,
   stopEnrollment,
   removeBiometricData,
+  manualEnrollment,
   getEnrollmentStatus,
   getBiometricEvents,
   getSystemStatus,

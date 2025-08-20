@@ -5,6 +5,7 @@ const {
   startEnrollment,
   stopEnrollment,
   removeBiometricData,
+  manualEnrollment,
   getEnrollmentStatus,
   getBiometricEvents,
   getSystemStatus,
@@ -21,6 +22,7 @@ router.post('/test-connection', testConnection);
 router.get('/members/without-biometric', getMembersWithoutBiometric);
 router.get('/members/:memberId/status', getMemberBiometricStatus);
 router.post('/members/:memberId/enroll', startEnrollment);
+router.post('/members/:memberId/manual-enroll', manualEnrollment);
 router.delete('/members/:memberId/biometric', removeBiometricData);
 
 // Enrollment management

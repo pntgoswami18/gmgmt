@@ -166,6 +166,12 @@ class BiometricListener extends EventEmitter {
       if (event === 'TimeLog' && verifMode === 'FP' && userId) {
         // Successful fingerprint attendance logging
         status = 'authorized';
+      } else if (event === 'Enroll' || event === 'EnrollUser' || event === 'UserEnroll') {
+        // Enrollment events
+        status = 'enrollment_success';
+      } else if (event === 'Delete' || event === 'DeleteUser') {
+        // User deletion events
+        status = 'user_deleted';
       }
 
       return {
