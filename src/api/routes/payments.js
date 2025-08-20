@@ -11,6 +11,10 @@ router.get('/:id/invoice', paymentController.getInvoiceByPaymentId);
 router.get('/invoice/:id', paymentController.getInvoiceByPaymentId);
 // Fetch invoice by invoice id directly
 router.get('/invoices/:id', paymentController.getInvoiceByInvoiceId);
+// Update an invoice
+router.put('/invoices/:id', paymentController.updateInvoice);
+// Delete an invoice
+router.delete('/invoices/:id', paymentController.deleteInvoice);
 // Delete a payment
 router.delete('/:id', paymentController.deletePayment);
 
