@@ -10,6 +10,7 @@
     "biometric:setup": "node tools/add_biometric_field.js",
     "biometric:test": "node tools/test_biometric.js test",
     "biometric:check": "node tools/test_biometric.js check",
+    "biometric:help": "node tools/test_biometric.js help",
     "start:with-biometric": "ENABLE_BIOMETRIC=true node src/app.js"
   },
   "keywords": [],

@@ -199,28 +199,45 @@ CREATE TABLE biometric_events (
 
 ## 🔧 Testing & Debugging
 
-### Test Commands
+### Test Commands (Cross-Platform)
 ```bash
 # Check if service is listening
 npm run biometric:check
 
-# Send test messages
+# Send comprehensive test messages
 npm run biometric:test
 
-# Manual testing
-echo "USER:12345:AUTHORIZED:TEST001" | nc localhost 8080
-
-# Monitor connections
-./tools/test_biometric.sh monitor
+# Get help for all available test options
+npm run biometric:help
 ```
+
+### Manual Testing
+**Unix/macOS:**
+```bash
+# Manual test with netcat
+echo "USER:12345:AUTHORIZED:TEST001" | nc localhost <BIOMETRIC_PORT>
+```
+
+**Windows:**
+```powershell
+# Manual test with PowerShell
+$client = New-Object System.Net.Sockets.TcpClient
+$client.Connect("localhost", <BIOMETRIC_PORT>)
+$stream = $client.GetStream()
+$data = [System.Text.Encoding]::ASCII.GetBytes("USER:12345:AUTHORIZED:TEST001`r`n")
+$stream.Write($data, 0, $data.Length)
+$client.Close()
+```
+
+**Note:** Replace `<BIOMETRIC_PORT>` with your configured port (from `.env` file)
 
 ### Common Issues & Solutions
 
 **1. Device Not Connecting**
 - ✅ Check network connectivity
-- ✅ Verify firewall settings (port 8080)
+- ✅ Verify firewall settings (check your `BIOMETRIC_PORT` in `.env`)
 - ✅ Confirm device IP configuration
-- ✅ Test with: `nc -l 8080`
+- ✅ Test with: `npm run biometric:check`
 
 **2. Messages Not Processing**
 - ✅ Check message format compatibility
