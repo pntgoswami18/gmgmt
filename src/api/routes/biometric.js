@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   getMemberBiometricStatus,
+  getMemberBiometricDetails,
   startEnrollment,
   stopEnrollment,
   removeBiometricData,
@@ -21,6 +22,7 @@ router.post('/test-connection', testConnection);
 // Member biometric management
 router.get('/members/without-biometric', getMembersWithoutBiometric);
 router.get('/members/:memberId/status', getMemberBiometricStatus);
+router.get('/members/:memberId/details', getMemberBiometricDetails);
 router.post('/members/:memberId/enroll', startEnrollment);
 router.post('/members/:memberId/manual-enroll', manualEnrollment);
 router.delete('/members/:memberId/biometric', removeBiometricData);

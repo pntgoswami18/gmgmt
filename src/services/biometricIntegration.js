@@ -48,18 +48,25 @@ class BiometricIntegration {
 
   async handleAccessGranted(biometricData) {
     try {
-      const { userId, timestamp } = biometricData;
+      const { userId, memberId, timestamp } = biometricData;
       
-      // Find member by biometric ID or user ID
-      const member = await this.findMemberByBiometricId(userId);
+      console.log(`🔓 Access granted - Biometric data received:`);
+      console.log(`   - User ID: ${userId}`);
+      console.log(`   - Member ID: ${memberId || 'Not provided'}`);
+      console.log(`   - Raw data:`, JSON.stringify(biometricData, null, 2));
+      
+      // Find member using both sensor member ID and device user ID
+      const { member, identificationMethod } = await this.findMemberByAnyBiometricId(userId, memberId);
       
       if (member) {
-        // Log attendance
-        await this.logMemberAttendance(member, timestamp);
+        console.log(`👤 Member identified using: ${identificationMethod}`);
+        
+        // Log attendance with identification method info
+        await this.logMemberAttendance(member, timestamp, identificationMethod, biometricData);
         
         // Check if member has active plan
         if (await this.hasActivePlan(member)) {
-          console.log(`Access granted: ${member.name} (ID: ${member.id})`);
+          console.log(`✅ Access granted: ${member.name} (ID: ${member.id}) via ${identificationMethod}`);
           
           // You can add additional actions here:
           // - Send welcome message to display
@@ -70,11 +77,11 @@ class BiometricIntegration {
           await this.updateLastVisit(member);
           this.notifyAccessGranted(member, biometricData);
         } else {
-          console.log(`Member ${member.name} has no active plan`);
+          console.log(`❌ Member ${member.name} has no active plan`);
           this.notifyPlanExpired(member, biometricData);
         }
       } else {
-        console.log(`Unknown biometric ID: ${userId}`);
+        console.log(`❌ Unknown biometric - User ID: ${userId}, Sensor Member ID: ${memberId || 'Not provided'}`);
         this.notifyUnknownUser(biometricData);
       }
     } catch (error) {
@@ -107,11 +114,72 @@ class BiometricIntegration {
     }
   }
 
-  async logMemberAttendance(member, timestamp) {
+  async findMemberBySensorId(sensorMemberId) {
+    try {
+      // Look up member by sensor member ID
+      const query = 'SELECT * FROM members WHERE biometric_sensor_member_id = ?';
+      const result = await pool.query(query, [sensorMemberId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error finding member by sensor member ID:', error);
+      return null;
+    }
+  }
+
+  async findMemberByAnyBiometricId(userId, sensorMemberId) {
+    try {
+      let member = null;
+      let identificationMethod = null;
+
+      // Priority 1: Try sensor member ID first (if provided and different from userId)
+      if (sensorMemberId && sensorMemberId !== userId) {
+        console.log(`🔍 Trying to find member by sensor member ID: ${sensorMemberId}`);
+        member = await this.findMemberBySensorId(sensorMemberId);
+        if (member) {
+          identificationMethod = 'sensor_member_id';
+          console.log(`✅ Member found by sensor member ID: ${member.name} (ID: ${member.id})`);
+        }
+      }
+
+      // Priority 2: Try device user ID (biometric_id) if sensor ID didn't work
+      if (!member && userId) {
+        console.log(`🔍 Trying to find member by device user ID: ${userId}`);
+        member = await this.findMemberByBiometricId(userId);
+        if (member) {
+          identificationMethod = 'device_user_id';
+          console.log(`✅ Member found by device user ID: ${member.name} (ID: ${member.id})`);
+        }
+      }
+
+      // Priority 3: If sensor member ID is same as user ID, try it anyway
+      if (!member && sensorMemberId && sensorMemberId === userId) {
+        console.log(`🔍 Sensor member ID same as user ID, already tried: ${sensorMemberId}`);
+      }
+
+      if (!member) {
+        console.log(`❌ No member found for user ID: ${userId}, sensor member ID: ${sensorMemberId || 'Not provided'}`);
+      }
+
+      return {
+        member,
+        identificationMethod
+      };
+    } catch (error) {
+      console.error('Error finding member by any biometric ID:', error);
+      return { member: null, identificationMethod: null };
+    }
+  }
+
+  async logMemberAttendance(member, timestamp, identificationMethod = null, biometricData = null) {
     try {
       const now = timestamp ? new Date(timestamp) : new Date();
       const dateStr = now.toISOString().split('T')[0];
       const timeStr = now.toISOString();
+
+      // Enhanced logging with identification method
+      const idMethodText = identificationMethod ? ` (identified via ${identificationMethod})` : '';
+      const sensorMemberId = biometricData?.memberId || 'N/A';
+      const deviceUserId = biometricData?.userId || 'N/A';
 
       // Check if member already checked in today
       const existingCheckIn = await this.getTodayCheckIn(member.id, dateStr);
@@ -119,8 +187,27 @@ class BiometricIntegration {
       if (existingCheckIn && !existingCheckIn.check_out_time) {
         // Member is checking out
         await this.checkOutMember(existingCheckIn.id, timeStr);
-        console.log(`✅ ${member.name} checked OUT at ${now.toLocaleTimeString()}`);
+        console.log(`✅ ${member.name} checked OUT at ${now.toLocaleTimeString()}${idMethodText}`);
+        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
         this.notifyCheckOut(member, now);
+        
+        // Log biometric event for checkout
+        if (biometricData) {
+          await this.logBiometricEvent({
+            member_id: member.id,
+            biometric_id: biometricData.userId,
+            sensor_member_id: biometricData.memberId,
+            event_type: 'checkout',
+            device_id: biometricData.deviceId || 'unknown',
+            timestamp: timeStr,
+            success: true,
+            raw_data: JSON.stringify({ 
+              ...biometricData, 
+              identificationMethod,
+              action: 'checkout'
+            })
+          });
+        }
       } else if (!existingCheckIn) {
         // Member is checking in for the first time today
         const attendanceData = {
@@ -130,12 +217,50 @@ class BiometricIntegration {
         };
         
         await this.createAttendanceRecord(attendanceData);
-        console.log(`✅ ${member.name} checked IN at ${now.toLocaleTimeString()}`);
+        console.log(`✅ ${member.name} checked IN at ${now.toLocaleTimeString()}${idMethodText}`);
+        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
         this.notifyCheckIn(member, now);
+        
+        // Log biometric event for checkin
+        if (biometricData) {
+          await this.logBiometricEvent({
+            member_id: member.id,
+            biometric_id: biometricData.userId,
+            sensor_member_id: biometricData.memberId,
+            event_type: 'checkin',
+            device_id: biometricData.deviceId || 'unknown',
+            timestamp: timeStr,
+            success: true,
+            raw_data: JSON.stringify({ 
+              ...biometricData, 
+              identificationMethod,
+              action: 'checkin'
+            })
+          });
+        }
       } else {
         // Member already completed their session today
-        console.log(`ℹ️ ${member.name} already completed their session today`);
+        console.log(`ℹ️ ${member.name} already completed their session today${idMethodText}`);
+        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
         this.notifyAlreadyCompleted(member);
+        
+        // Log biometric event for already completed
+        if (biometricData) {
+          await this.logBiometricEvent({
+            member_id: member.id,
+            biometric_id: biometricData.userId,
+            sensor_member_id: biometricData.memberId,
+            event_type: 'already_completed',
+            device_id: biometricData.deviceId || 'unknown',
+            timestamp: timeStr,
+            success: true,
+            raw_data: JSON.stringify({ 
+              ...biometricData, 
+              identificationMethod,
+              action: 'already_completed'
+            })
+          });
+        }
       }
     } catch (error) {
       console.error('Error logging attendance:', error);
@@ -369,14 +494,24 @@ class BiometricIntegration {
 
   async saveBiometricEnrollment(memberId, biometricId, enrollmentData) {
     try {
-      // Update member with biometric ID
-      const updateMemberQuery = 'UPDATE members SET biometric_id = ? WHERE id = ?';
-      await pool.query(updateMemberQuery, [biometricId, memberId]);
+      // Extract sensor member ID from enrollment data 
+      // Priority: memberId (if device sends it) -> userId -> biometricId as fallback
+      const sensorMemberId = enrollmentData.memberId || enrollmentData.userId || biometricId || null;
+      
+      console.log(`📋 Storing biometric enrollment for member ${memberId}:`);
+      console.log(`   - Device User ID (biometric_id): ${biometricId}`);
+      console.log(`   - Sensor Member ID (from device): ${sensorMemberId}`);
+      console.log(`   - Raw enrollment data:`, JSON.stringify(enrollmentData, null, 2));
+      
+      // Update member with biometric ID and sensor member ID
+      const updateMemberQuery = 'UPDATE members SET biometric_id = ?, biometric_sensor_member_id = ? WHERE id = ?';
+      await pool.query(updateMemberQuery, [biometricId, sensorMemberId, memberId]);
 
       // Log enrollment event
       const enrollmentEvent = {
         member_id: memberId,
         biometric_id: biometricId,
+        sensor_member_id: sensorMemberId,
         event_type: 'enrollment',
         device_id: enrollmentData.deviceId || 'unknown',
         timestamp: new Date().toISOString(),
@@ -398,14 +533,15 @@ class BiometricIntegration {
     try {
       const query = `
         INSERT INTO biometric_events (
-          member_id, biometric_id, event_type, device_id, 
+          member_id, biometric_id, sensor_member_id, event_type, device_id, 
           timestamp, success, error_message, raw_data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       
       const result = await pool.query(query, [
         eventData.member_id,
         eventData.biometric_id,
+        eventData.sensor_member_id || null,
         eventData.event_type,
         eventData.device_id,
         eventData.timestamp,
@@ -422,13 +558,14 @@ class BiometricIntegration {
 
   async removeBiometricId(memberId) {
     try {
-      const query = 'UPDATE members SET biometric_id = NULL WHERE id = ?';
+      const query = 'UPDATE members SET biometric_id = NULL, biometric_sensor_member_id = NULL WHERE id = ?';
       await pool.query(query, [memberId]);
 
       // Log removal event
       await this.logBiometricEvent({
         member_id: memberId,
         biometric_id: null,
+        sensor_member_id: null,
         event_type: 'removal',
         device_id: 'admin',
         timestamp: new Date().toISOString(),
@@ -446,7 +583,7 @@ class BiometricIntegration {
 
   async getMemberBiometricStatus(memberId) {
     try {
-      const query = 'SELECT id, name, biometric_id FROM members WHERE id = ?';
+      const query = 'SELECT id, name, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?';
       
       const memberResult = await pool.query(query, [memberId]);
       const member = memberResult.rows[0];
@@ -470,6 +607,7 @@ class BiometricIntegration {
         member,
         hasFingerprint: !!member.biometric_id,
         biometricId: member.biometric_id,
+        sensorMemberId: member.biometric_sensor_member_id,
         enrollmentHistory: history
       };
     } catch (error) {

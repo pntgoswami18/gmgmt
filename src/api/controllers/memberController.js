@@ -136,7 +136,7 @@ exports.updateMember = async (req, res) => {
 // Upsert biometric data for a member
 exports.upsertBiometric = async (req, res) => {
     const { id } = req.params; // member id
-    const { device_user_id, template } = req.body; // template may be base64 string
+    const { device_user_id, sensor_member_id, template } = req.body; // template may be base64 string
 
     if (!device_user_id && !template) {
         return res.status(400).json({ message: 'device_user_id or template is required' });
@@ -144,19 +144,39 @@ exports.upsertBiometric = async (req, res) => {
 
     try {
         // Ensure member exists
-        const member = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
-        if (member.rowCount === 0) {
+        const member = await pool.query('SELECT id FROM members WHERE id = ?', [id]);
+        if (member.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });
         }
 
+        // Check if device_user_id is already assigned to another member
+        if (device_user_id) {
+            const existingMember = await pool.query('SELECT id, name FROM members WHERE biometric_id = ? AND id != ?', [device_user_id, id]);
+            if (existingMember.rows.length > 0) {
+                return res.status(409).json({ 
+                    message: `Device User ID ${device_user_id} is already assigned to another member` 
+                });
+            }
+        }
+
+        // Update member with biometric data
         await pool.query(
-            `INSERT INTO member_biometrics (member_id, device_user_id, template)
-             VALUES ($1, $2, $3)
-             ON CONFLICT(device_user_id) DO UPDATE SET member_id = excluded.member_id, template = excluded.template`,
-            [id, device_user_id || null, template || null]
+            'UPDATE members SET biometric_id = ?, biometric_sensor_member_id = ? WHERE id = ?',
+            [device_user_id || null, sensor_member_id || null, id]
         );
-        const upsert = await pool.query('SELECT * FROM member_biometrics WHERE device_user_id = $1', [device_user_id || null]);
-        res.json({ message: 'Biometric data saved', biometric: upsert.rows[0] });
+
+        // Get updated member data
+        const updatedMember = await pool.query('SELECT id, name, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?', [id]);
+        
+        res.json({ 
+            message: 'Biometric data saved', 
+            member: updatedMember.rows[0],
+            biometric: {
+                device_user_id: device_user_id || null,
+                sensor_member_id: sensor_member_id || null,
+                template: template || null
+            }
+        });
     } catch (err) {
         res.status(400).json({ message: err.message });
     }

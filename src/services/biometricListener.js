@@ -68,6 +68,10 @@ class BiometricListener extends EventEmitter {
       // If the message is JSON
       if (message.startsWith('{')) {
         biometricData = JSON.parse(message);
+        // Ensure we have a memberId field - could be same as userId or different
+        if (!biometricData.memberId && biometricData.userId) {
+          biometricData.memberId = biometricData.memberId || biometricData.employeeId || biometricData.userId;
+        }
       }
       // If the message is XML (SecureEye S560 format)
       else if (message.startsWith('<?xml') || message.includes('<Message>')) {
@@ -78,6 +82,7 @@ class BiometricListener extends EventEmitter {
         const parts = message.split(',');
         biometricData = {
           userId: parts[0],
+          memberId: parts[4] || parts[0], // Member ID might be in 5th position, fallback to userId
           timestamp: parts[1],
           status: parts[2], // 'authorized' or 'unauthorized'
           deviceId: parts[3]
@@ -132,6 +137,9 @@ class BiometricListener extends EventEmitter {
       };
 
       const userId = getUserId(xmlMessage);
+      
+      // Also try to extract MemberID if the device sends it separately
+      const memberId = getField(xmlMessage, 'MemberID') || getField(xmlMessage, 'EmployeeID') || userId;
       const event = getField(xmlMessage, 'Event');
       const verifMode = getField(xmlMessage, 'VerifMode');
       const attendStat = getField(xmlMessage, 'AttendStat');
@@ -176,6 +184,7 @@ class BiometricListener extends EventEmitter {
 
       return {
         userId: userId,
+        memberId: memberId, // Sensor-provided member ID (may be different from userId)
         timestamp: timestamp,
         status: status,
         deviceId: deviceUID || terminalType,
