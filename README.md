@@ -32,7 +32,7 @@ The application is built with a comprehensive feature set that includes:
 
 -   **Backend:**
     -   Node.js with Express.js framework
-    -   SQLite (recommended for standalone Windows build) or PostgreSQL (legacy/dev)
+    -   SQLite database for local data storage
     -   (Optional) Payment gateway integration — currently disabled
     -   Nodemailer for automated email communications
     -   JWT for authentication (ready for future implementation)
@@ -50,7 +50,7 @@ Follow these steps to get the application running on your local machine.
 ### Prerequisites
 
 -   [Node.js](https://nodejs.org/) (which includes npm)
--   [PostgreSQL](https://www.postgresql.org/download/) (only if running the legacy Postgres setup)
+-   SQLite (automatically included with Node.js dependencies)
 
 ### 1. Install Dependencies
 
@@ -73,14 +73,13 @@ This project provides an end‑to‑end gym management system with an admin dash
 
 ## Technology Stack
 
-- Backend: Node.js, Express, PostgreSQL, Axios, Nodemailer
+- Backend: Node.js, Express, SQLite, Axios, Nodemailer
 - Frontend: React, React Router, Material UI, Recharts
 
 ## Installation & Setup
 
 ### Prerequisites
 - Node.js and npm
-- PostgreSQL server
 
 ### 1) Install dependencies
 
@@ -94,22 +93,13 @@ npm install
 cd ..
 ```
 
-### 2) Create the database
-
-```sql
-CREATE DATABASE gym_management;
-```
-
-### 3) Configure environment variables
+### 2) Configure environment variables
 
 Create a `.env` file in the project root:
 
 ```env
-DB_USER=your_postgres_user
-DB_HOST=localhost
-DB_DATABASE=gym_management
-DB_PASSWORD=your_database_password
-DB_PORT=5432
+# Database will be automatically created as SQLite file
+# No additional database configuration required
 
 # Optional integrations
 # Payment gateway disabled; no secret key required
@@ -117,15 +107,15 @@ EMAIL_USER=your_email
 EMAIL_PASS=your_app_password
 ```
 
-### 4) Start the backend
+### 3) Start the backend
 
 ```bash
 npm start
 ```
 
-The API runs at `http://localhost:3001` and auto‑creates tables on first start.
+The API runs at `http://localhost:3001` and auto‑creates the SQLite database and tables on first start.
 
-### 5) Start the frontend
+### 4) Start the frontend
 
 ```bash
 cd client
@@ -141,28 +131,15 @@ npm install
 cd ..
 ```
 
-### 2. Set Up PostgreSQL Database
+### 2. Configure Environment Variables
 
-You need to have a PostgreSQL server running. Then, create a new database for the application.
-
-```sql
--- Using psql or a GUI tool like pgAdmin
-CREATE DATABASE gym_management;
-```
-
-### 3. Configure Environment Variables
-
-Create a `.env` file in the root of the project (`gmgmt/`). This file will store your database credentials and other secret keys.
+Create a `.env` file in the root of the project (`gmgmt/`). This file will store your configuration and secret keys.
 
 Copy the following into the `.env` file and replace the placeholder values with your actual credentials.
 
 ```env
-# PostgreSQL Database Configuration
-DB_USER=your_postgres_user
-DB_HOST=localhost
-DB_DATABASE=gym_management
-DB_PASSWORD=your_database_password
-DB_PORT=5432
+# SQLite Database (automatically created)
+# No database configuration required
 
 # JSON Web Token Secret (for future authentication features)
 JWT_SECRET=your_super_secret_jwt_key
@@ -183,7 +160,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 **Note:** Card payment gateway is disabled in this build. Use manual payments.
 
-The application will automatically create the required tables when it first connects to the database.
+The application will automatically create the SQLite database file and required tables when it first starts.
 
 ---
 
@@ -432,13 +409,13 @@ This section documents how to ship GMgmt as a self-contained Windows application
 - NSIS or WiX Toolset for building the installer (examples below use NSIS).
 - Optional: NSSM if you prefer service install via command line instead of bundling `node-windows`.
 
-### 1) Switch backend database to SQLite
+### 1) Database Configuration
 
-1. Replace PostgreSQL with SQLite dependency:
+The application uses SQLite by default:
 
    ```bash
-   npm uninstall pg
-   npm install better-sqlite3@^9
+   # SQLite dependency is already included
+   # No additional database setup required
    ```
 
 2. Add a small adapter `src/config/sqlite.js` that:
@@ -558,10 +535,10 @@ SectionEnd
 - If building on CI for x86, run `npm ci` with `npm_config_target_arch=ia32`.
 - Use Node 18 for x86; x64 can also use Node 18+ (keep in sync with native deps).
 
-### 7) Optional: Migrate data from PostgreSQL
+### 7) Data Import (Optional)
 
-- Export tables from Postgres to CSV.
-- Initialize a fresh SQLite DB (created on first run) and import CSVs using the SQLite CLI:
+- If migrating from another database system, export tables to CSV.
+- Import CSVs using the SQLite CLI:
 
 ```sql
 .mode csv
