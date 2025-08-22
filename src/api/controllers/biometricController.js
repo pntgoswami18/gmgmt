@@ -492,6 +492,151 @@ const getMemberBiometricDetails = async (req, res) => {
   }
 };
 
+// ESP32 Device Control Functions
+const unlockDoorRemotely = async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { reason = 'admin_unlock' } = req.body;
+    
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    await biometricIntegration.unlockDoorRemotely(deviceId, reason);
+    
+    res.json({ 
+      success: true, 
+      message: `Remote unlock command sent to device ${deviceId}`,
+      deviceId: deviceId,
+      reason: reason
+    });
+  } catch (error) {
+    console.error('Error unlocking door remotely:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to unlock door remotely',
+      error: error.message 
+    });
+  }
+};
+
+const startRemoteEnrollment = async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    const { memberId } = req.body;
+    
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    if (!memberId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Member ID is required' 
+      });
+    }
+
+    const result = await biometricIntegration.startRemoteEnrollment(deviceId, memberId);
+    
+    res.json({ 
+      success: true, 
+      message: `Remote enrollment started for member ${memberId} on device ${deviceId}`,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error starting remote enrollment:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to start remote enrollment',
+      error: error.message 
+    });
+  }
+};
+
+const getDeviceStatus = async (req, res) => {
+  try {
+    const { deviceId } = req.params;
+    
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    const status = await biometricIntegration.getDeviceStatus(deviceId);
+    
+    res.json({ 
+      success: true, 
+      deviceId: deviceId,
+      status: status
+    });
+  } catch (error) {
+    console.error('Error getting device status:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get device status',
+      error: error.message 
+    });
+  }
+};
+
+const getAllDevices = async (req, res) => {
+  try {
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    // Get all devices that have sent heartbeats in the last 24 hours
+    const query = `
+      SELECT DISTINCT device_id, 
+             MAX(timestamp) as last_seen,
+             COUNT(*) as event_count
+      FROM biometric_events 
+      WHERE device_id IS NOT NULL 
+        AND timestamp > datetime('now', '-24 hours')
+      GROUP BY device_id
+      ORDER BY last_seen DESC
+    `;
+    
+    const result = await pool.query(query);
+    const devices = result.rows || [];
+    
+    // Get status for each device
+    const devicesWithStatus = await Promise.all(
+      devices.map(async (device) => {
+        const status = await biometricIntegration.getDeviceStatus(device.device_id);
+        return {
+          ...device,
+          ...status
+        };
+      })
+    );
+    
+    res.json({ 
+      success: true, 
+      devices: devicesWithStatus,
+      count: devicesWithStatus.length
+    });
+  } catch (error) {
+    console.error('Error getting all devices:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get devices',
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   setBiometricIntegration,
   getMemberBiometricStatus,
@@ -504,5 +649,10 @@ module.exports = {
   getBiometricEvents,
   getSystemStatus,
   getMembersWithoutBiometric,
-  testConnection
+  testConnection,
+  // ESP32 specific endpoints
+  unlockDoorRemotely,
+  startRemoteEnrollment,
+  getDeviceStatus,
+  getAllDevices
 };

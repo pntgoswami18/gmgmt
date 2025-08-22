@@ -11,7 +11,12 @@ const {
   getBiometricEvents,
   getSystemStatus,
   getMembersWithoutBiometric,
-  testConnection
+  testConnection,
+  // ESP32 specific endpoints
+  unlockDoorRemotely,
+  startRemoteEnrollment,
+  getDeviceStatus,
+  getAllDevices
 } = require('../controllers/biometricController');
 
 // System status and info
@@ -32,5 +37,11 @@ router.post('/enrollment/stop', stopEnrollment);
 
 // Events and logs
 router.get('/events', getBiometricEvents);
+
+// ESP32 Device Control Routes
+router.post('/devices/:deviceId/unlock', unlockDoorRemotely);
+router.post('/devices/:deviceId/enroll', startRemoteEnrollment);
+router.get('/devices/:deviceId/status', getDeviceStatus);
+router.get('/devices', getAllDevices);
 
 module.exports = router;

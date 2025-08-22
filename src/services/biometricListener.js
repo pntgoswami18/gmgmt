@@ -1,5 +1,6 @@
 const net = require('net');
 const EventEmitter = require('events');
+const os = require('os');
 
 class BiometricListener extends EventEmitter {
   constructor(port = 8080, host = '0.0.0.0') {
@@ -11,8 +12,11 @@ class BiometricListener extends EventEmitter {
   }
 
   start() {
+    console.log(`🖥️  Starting biometric listener on ${os.platform()} ${os.arch()}`);
+    
     this.server = net.createServer((socket) => {
-      console.log(`Biometric device connected: ${socket.remoteAddress}:${socket.remotePort}`);
+      console.log(`📱 Biometric device connected: ${socket.remoteAddress}:${socket.remotePort}`);
+      console.log(`🌐 Server platform: ${os.platform()}, Total connections: ${this.clients.size + 1}`);
       this.clients.add(socket);
 
       // Handle incoming data
@@ -71,6 +75,12 @@ class BiometricListener extends EventEmitter {
         // Ensure we have a memberId field - could be same as userId or different
         if (!biometricData.memberId && biometricData.userId) {
           biometricData.memberId = biometricData.memberId || biometricData.employeeId || biometricData.userId;
+        }
+        
+        // ESP32 specific handling
+        if (biometricData.deviceType === 'esp32_door_lock') {
+          console.log(`📱 ESP32 Door Lock message from ${biometricData.deviceId}`);
+          biometricData.isESP32Device = true;
         }
       }
       // If the message is XML (SecureEye S560 format)

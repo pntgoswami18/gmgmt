@@ -1,5 +1,7 @@
 const BiometricListener = require('./biometricListener');
 const { pool } = require('../config/sqlite');
+const path = require('path');
+const os = require('os');
 
 class BiometricIntegration {
   constructor(port = 8080) {
@@ -359,6 +361,14 @@ class BiometricIntegration {
     const message = `WELCOME:${member.name}`;
     this.listener.broadcast(message);
     
+    // ESP32 specific responses
+    if (biometricData.isESP32Device) {
+      this.sendESP32Command(biometricData.deviceId, 'access_granted', {
+        memberName: member.name,
+        memberId: member.id
+      });
+    }
+    
     // You could also emit events for your frontend to show notifications
     console.log(`✅ Access granted: ${member.name}`);
   }
@@ -613,6 +623,117 @@ class BiometricIntegration {
     } catch (error) {
       console.error('Error getting member biometric status:', error);
       return null;
+    }
+  }
+
+  // ESP32 specific methods
+  sendESP32Command(deviceId, command, data = {}) {
+    const commandMessage = {
+      deviceId: deviceId,
+      command: command,
+      data: data,
+      timestamp: new Date().toISOString(),
+      source: 'gym_management_system'
+    };
+
+    const jsonMessage = JSON.stringify(commandMessage);
+    console.log(`📱 Sending command to ESP32 ${deviceId}: ${command}`);
+    
+    this.listener.broadcast(jsonMessage);
+    
+    // Log the command
+    this.logESP32Command(deviceId, command, data);
+  }
+
+  async unlockDoorRemotely(deviceId, reason = 'admin_unlock') {
+    console.log(`🔓 Remote unlock requested for device: ${deviceId}`);
+    
+    this.sendESP32Command(deviceId, 'unlock_door', {
+      reason: reason,
+      duration: 5000 // 5 seconds
+    });
+
+    // Log the remote unlock
+    await this.logBiometricEvent({
+      member_id: null,
+      biometric_id: null,
+      sensor_member_id: null,
+      event_type: 'remote_unlock',
+      device_id: deviceId,
+      timestamp: new Date().toISOString(),
+      success: true,
+      raw_data: JSON.stringify({ reason, action: 'remote_unlock' })
+    });
+  }
+
+  async startRemoteEnrollment(deviceId, memberId) {
+    console.log(`👆 Remote enrollment started for member ${memberId} on device ${deviceId}`);
+    
+    this.sendESP32Command(deviceId, 'start_enrollment', {
+      memberId: memberId,
+      enrollmentId: memberId // Use member ID as enrollment ID
+    });
+
+    return { success: true, message: 'Remote enrollment started' };
+  }
+
+  async logESP32Command(deviceId, command, data) {
+    try {
+      await this.logBiometricEvent({
+        member_id: null,
+        biometric_id: null,
+        sensor_member_id: null,
+        event_type: 'esp32_command',
+        device_id: deviceId,
+        timestamp: new Date().toISOString(),
+        success: true,
+        raw_data: JSON.stringify({ command, data })
+      });
+    } catch (error) {
+      console.error('Error logging ESP32 command:', error);
+    }
+  }
+
+  async getDeviceStatus(deviceId) {
+    try {
+      // Get latest heartbeat from device
+      const query = `
+        SELECT * FROM biometric_events 
+        WHERE device_id = ? AND event_type = 'heartbeat'
+        ORDER BY timestamp DESC 
+        LIMIT 1
+      `;
+      
+      const result = await pool.query(query, [deviceId]);
+      const lastHeartbeat = result.rows[0];
+      
+      if (!lastHeartbeat) {
+        return { status: 'unknown', lastSeen: null };
+      }
+
+      const lastSeen = new Date(lastHeartbeat.timestamp);
+      const now = new Date();
+      const timeDiff = now - lastSeen;
+      
+      // Consider device offline if no heartbeat for 5 minutes
+      const isOnline = timeDiff < 300000; // 5 minutes in milliseconds
+      
+      let parsedData = {};
+      try {
+        parsedData = JSON.parse(lastHeartbeat.raw_data);
+      } catch (e) {
+        // Handle parsing errors gracefully
+      }
+
+      return {
+        status: isOnline ? 'online' : 'offline',
+        lastSeen: lastSeen,
+        timeSinceLastSeen: timeDiff,
+        deviceData: parsedData
+      };
+    } catch (error) {
+      console.error('Error getting device status:', error);
+      return { status: 'error', lastSeen: null };
     }
   }
 }
