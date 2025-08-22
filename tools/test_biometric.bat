@@ -23,7 +23,7 @@ if exist ".env" (
 
 REM Configuration
 if not defined BIOMETRIC_HOST set BIOMETRIC_HOST=localhost
-if not defined BIOMETRIC_PORT set BIOMETRIC_PORT=8080
+if not defined BIOMETRIC_PORT set BIOMETRIC_PORT=5005
 
 echo.
 echo 🔐 Biometric Communication Test Tool

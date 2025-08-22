@@ -9,7 +9,7 @@ const net = require('net');
 
 // Configuration
 const BIOMETRIC_HOST = 'localhost';
-const BIOMETRIC_PORT = 8080;
+const BIOMETRIC_PORT = 5005;
 
 console.log('🧪 Sensor Member ID Attendance Test Script');
 console.log('==========================================');

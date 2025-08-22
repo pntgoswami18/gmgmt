@@ -16,3 +16,4 @@ data/data/*.sqlite*
 # Uploaded assets
 public/uploads/*
 !public/uploads/.gitkeep
+.vscode/settings.json
