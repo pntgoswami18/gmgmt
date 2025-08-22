@@ -7,9 +7,9 @@ const BiometricIntegration = require('./services/biometricIntegration');
 const PORT = process.env.BIOMETRIC_PORT || 8080;
 const HOST = process.env.BIOMETRIC_HOST || '0.0.0.0';
 
-console.log('🔐 Starting SecureEye Biometric Integration...');
+console.log('🔐 Starting ESP32 Biometric Integration...');
 console.log(`📡 Listening on ${HOST}:${PORT}`);
-console.log('📋 Make sure your SecureEye device is configured to send data to this address');
+console.log('📋 Make sure your ESP32 devices are configured to send data to this address');
 
 const biometricIntegration = new BiometricIntegration(PORT);
 

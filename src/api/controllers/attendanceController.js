@@ -96,7 +96,7 @@ exports.checkIn = async (req, res) => {
     }
 };
 
-// Device webhook compatible with Secureye push formats
+// Device webhook compatible with ESP32 device formats
 exports.deviceWebhook = async (req, res) => {
     try {
         const deviceUserId = req.body?.device_user_id || req.body?.userId || req.body?.UserID || req.body?.EmpCode || req.body?.emp_code;

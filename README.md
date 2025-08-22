@@ -8,7 +8,7 @@ The application is built with a comprehensive feature set that includes:
 
 ### Backend API Features
 *   **Member Management:** Full CRUD (Create, Read, Update, Delete) operations for gym members with automated welcome emails.
-*   **Biometric Attendance:** API endpoints to log member check-ins from biometric devices (Secureye S‑B100CB or similar) with attendance history tracking and configurable working hours.
+*   **Biometric Attendance:** API endpoints to log member check-ins from ESP32 fingerprint devices with attendance history tracking and configurable working hours.
 *   **Class & Schedule Management:** Complete system for creating fitness classes and scheduling them with capacity management.
 *   **Online Booking System:** Members can book and cancel class spots with overbooking prevention and automated confirmation emails.
 *   **Billing & Payments:** Membership plans, invoices, and manual payment recording.
@@ -341,42 +341,37 @@ The dashboard provides comprehensive analytics including:
 
 ---
 
-## Biometric Device Integration (Secureye S‑B100CB)
+## ESP32 Biometric Door Lock Integration
 
-This project supports integrating the Secureye S‑B100CB Biometric Fingerprint Scanner for attendance check-ins over IP (Ethernet) or via a small gateway. The device offers TCP/IP communication, 2000 user capacity, and access-control support per the vendor details. See the product page for reference: [Secureye S‑B100CB Biometric Fingerprint Scanner – IP (Ethernet & USB)](https://www.secureye.com/product/s-b100cb-biometric-fingerprint-scanner-ip-ethernet-usb-biometric).
+This project supports ESP32-based fingerprint door lock systems for attendance check-ins and access control. The ESP32 devices connect via WiFi and communicate using JSON over TCP/IP.
 
 ### What we store
-- A mapping between your app’s `member_id` and the device’s `device_user_id` in a new table `member_biometrics`.
-- Optionally, a fingerprint template string (e.g., base64) if you enroll/capture via an SDK or external tool.
+- A mapping between your app's `member_id` and the device's `device_user_id` in the `member_biometrics` table.
+- Optionally, a fingerprint template string for backup/migration purposes.
 
 ### Configurable working hours
 Working hours are editable in Settings and enforced by the backend during check-in:
 - Morning session: `morning_session_start`–`morning_session_end` (default 05:00–11:00)
 - Evening session: `evening_session_start`–`evening_session_end` (default 16:00–22:00)
 
-### How to wire the device
-There are two common ways to integrate the device with the backend:
-
-1) Device push → Backend webhook
-- Configure the device (or its management software) to push user events to the backend:
-  - URL: `POST /api/attendance/device-webhook`
-  - Body: must include a device user field (any of `device_user_id`, `userId`, `UserID`, `EmpCode`, `emp_code`)
-  - Example JSON: `{ "device_user_id": "1234" }`
-- The backend resolves `device_user_id` → `member_id` via `member_biometrics` and performs the standard check-in with working-hours validation and “one check-in per day”.
-
-2) Local gateway → Backend
-- If the device cannot post directly, run a lightweight gateway on the same LAN that reads the device’s logs (via TCP/IP or vendor SDK) and POSTs to `POST /api/attendance/device-webhook` using the same schema as above.
+### Device Communication
+ESP32 devices communicate via TCP/IP using JSON messages:
+- **Connection**: ESP32 connects to server via WiFi
+- **Protocol**: JSON over TCP/IP
+- **Events**: Real-time fingerprint scan events and device status
+- **Control**: Remote door unlock and fingerprint enrollment
 
 ### Managing biometric links for members
-- In the admin UI, open Members → “Biometric” on a member.
-- Enter the Secureye `device_user_id` you configured on the device (or paste a template if available).
-- This calls `PUT /api/members/:id/biometric` and stores the mapping/template.
-- You can also upsert via API directly:
+- In the admin UI, open Members → "Biometric" on a member.
+- Enter the `device_user_id` configured on the ESP32 device.
+- This calls `PUT /api/members/:id/biometric` and stores the mapping.
+- You can also manage via API:
   - `PUT /api/members/:id/biometric`
   - Body: `{ "device_user_id": "1234", "template": "<optional base64>" }`
 
 ### Check-in from devices or apps
-- Direct app/server call: `POST /api/attendance/check-in` with either `{ memberId: 42 }` or `{ device_user_id: "1234" }`
+- ESP32 device call: Automatic JSON message sent on fingerprint scan
+- Direct app/server call: `POST /api/attendance/check-in` with `{ memberId: 42 }` or `{ device_user_id: "1234" }`
 - Device/webhook call: `POST /api/attendance/device-webhook` with `{ device_user_id: "1234" }`
 
 ### Error handling
@@ -384,12 +379,14 @@ There are two common ways to integrate the device with the backend:
 - Duplicate daily check-in: backend returns `409` with `Member has already checked in today.`
 - Unknown device user: backend returns `404` if no `member_biometrics` mapping is present.
 
-### Notes
-- The device supports TCP/IP and USB. For production, prefer an IP-based configuration and a small webhook/gateway approach for reliability.
-- If you use vendor SDKs for template management, store a template string with the member for future migrations; the backend does not need to interpret the template, it only stores it.
-- Ensure the device’s internal user IDs match the `device_user_id` you set for each member.
+### ESP32 Features
+- **Hardware**: ESP32 + AS608 Optical Fingerprint Sensor + Door Lock Control
+- **Connectivity**: WiFi-based, no additional gateway required
+- **Real-time**: Live event streaming and device monitoring
+- **Remote Control**: Unlock doors and enroll fingerprints remotely
+- **Status Monitoring**: Device health, connectivity, and performance tracking
 
-Reference: [Secureye S‑B100CB Biometric Fingerprint Scanner – IP (Ethernet & USB)](https://www.secureye.com/product/s-b100cb-biometric-fingerprint-scanner-ip-ethernet-usb-biometric)
+📖 **For complete ESP32 setup and configuration guide, see [ESP32_DEPLOYMENT_GUIDE.md](ESP32_DEPLOYMENT_GUIDE.md)**
 
 ## Windows standalone build (Service + Installer, SQLite)
 

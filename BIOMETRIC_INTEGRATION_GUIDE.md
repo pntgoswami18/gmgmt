@@ -1,6 +1,6 @@
-# 🔐 Biometric Integration Guide
+# 🔐 ESP32 Biometric Integration Guide
 
-Complete setup and usage guide for SecureEye biometric integration with your gym management system.
+Complete setup and usage guide for ESP32 biometric device integration with your gym management system.
 
 ## 📋 Table of Contents
 
@@ -19,7 +19,7 @@ Complete setup and usage guide for SecureEye biometric integration with your gym
 
 ## Overview
 
-Your gym management system integrates with SecureEye biometric devices to provide:
+Your gym management system integrates with ESP32 biometric devices to provide:
 
 - **Automated Check-ins**: Fingerprint-based attendance tracking
 - **Access Control**: Plan validation and membership verification
@@ -28,7 +28,7 @@ Your gym management system integrates with SecureEye biometric devices to provid
 
 ### System Architecture
 ```
-SecureEye Device → TCP/IP → Biometric Listener → Integration Service → Database
+ESP32 Device → WiFi/TCP → Biometric Listener → Integration Service → Database
                                       ↓
 Frontend Dashboard ← REST API ← Controller ← Integration Service
 ```
@@ -68,7 +68,7 @@ npm run biometric:check
 
 ## Device Setup
 
-### SecureEye Device Configuration
+### ESP32 Device Configuration
 
 **Network Settings:**
 - Configure device to send data to your server's IP address
@@ -422,7 +422,7 @@ For technical support:
 1. Check this troubleshooting guide
 2. Review console logs for error messages
 3. Test network connectivity manually
-4. Consult SecureEye device documentation
+4. Consult ESP32 device documentation and firmware
 
 **Testing Tools:**
 - `npm run biometric:help` - All available commands

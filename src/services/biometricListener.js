@@ -25,7 +25,7 @@ class BiometricListener extends EventEmitter {
           const message = data.toString().trim();
           console.log('Received biometric data:', message);
           
-          // Parse the message based on SecureEye protocol
+          // Parse the message based on device protocol
           this.parseAndHandleBiometricData(message, socket);
         } catch (error) {
           console.error('Error processing biometric data:', error);
@@ -62,8 +62,8 @@ class BiometricListener extends EventEmitter {
   }
 
   parseAndHandleBiometricData(message, socket) {
-    // This method needs to be customized based on SecureEye's message format
-    // Common formats might be JSON, XML, or custom delimited strings
+    // This method handles various message formats from biometric devices
+    // Common formats: JSON, CSV, or custom delimited strings
     
     try {
       // Example parsing - adjust based on your device's actual format
@@ -83,10 +83,7 @@ class BiometricListener extends EventEmitter {
           biometricData.isESP32Device = true;
         }
       }
-      // If the message is XML (SecureEye S560 format)
-      else if (message.startsWith('<?xml') || message.includes('<Message>')) {
-        biometricData = this.parseSecureEyeXML(message);
-      }
+      // ESP32 devices use JSON format primarily
       // If the message is comma-separated values
       else if (message.includes(',')) {
         const parts = message.split(',');
@@ -132,90 +129,7 @@ class BiometricListener extends EventEmitter {
     }
   }
 
-  parseSecureEyeXML(xmlMessage) {
-    // Parse SecureEye S560 XML format
-    try {
-      // Extract key fields using regex (simple XML parsing)
-      const getUserId = (xml) => {
-        const match = xml.match(/<UserID>(\d+)<\/UserID>/);
-        return match ? match[1] : null;
-      };
 
-      const getField = (xml, fieldName) => {
-        const match = xml.match(new RegExp(`<${fieldName}>(.*?)<\/${fieldName}>`));
-        return match ? match[1] : null;
-      };
-
-      const userId = getUserId(xmlMessage);
-      
-      // Also try to extract MemberID if the device sends it separately
-      const memberId = getField(xmlMessage, 'MemberID') || getField(xmlMessage, 'EmployeeID') || userId;
-      const event = getField(xmlMessage, 'Event');
-      const verifMode = getField(xmlMessage, 'VerifMode');
-      const attendStat = getField(xmlMessage, 'AttendStat');
-      const terminalType = getField(xmlMessage, 'TerminalType');
-      const deviceUID = getField(xmlMessage, 'DeviceUID');
-      const transID = getField(xmlMessage, 'TransID');
-      
-      // Build timestamp from individual components
-      const year = getField(xmlMessage, 'Year');
-      const month = getField(xmlMessage, 'Month');
-      const day = getField(xmlMessage, 'Day');
-      const hour = getField(xmlMessage, 'Hour');
-      const minute = getField(xmlMessage, 'Minute');
-      const second = getField(xmlMessage, 'Second');
-      
-      let timestamp = new Date().toISOString();
-      if (year && month && day && hour && minute && second) {
-        // Create proper ISO timestamp
-        const isoDate = new Date(
-          parseInt(year),
-          parseInt(month) - 1, // Month is 0-indexed in JS
-          parseInt(day),
-          parseInt(hour),
-          parseInt(minute),
-          parseInt(second)
-        );
-        timestamp = isoDate.toISOString();
-      }
-
-      // Determine status based on event type and verification mode
-      let status = 'unknown';
-      if (event === 'TimeLog' && verifMode === 'FP' && userId) {
-        // Successful fingerprint attendance logging
-        status = 'authorized';
-      } else if (event === 'Enroll' || event === 'EnrollUser' || event === 'UserEnroll') {
-        // Enrollment events
-        status = 'enrollment_success';
-      } else if (event === 'Delete' || event === 'DeleteUser') {
-        // User deletion events
-        status = 'user_deleted';
-      }
-
-      return {
-        userId: userId,
-        memberId: memberId, // Sensor-provided member ID (may be different from userId)
-        timestamp: timestamp,
-        status: status,
-        deviceId: deviceUID || terminalType,
-        event: event,
-        verifMode: verifMode,
-        attendStat: attendStat,
-        terminalType: terminalType,
-        transactionId: transID,
-        rawMessage: xmlMessage
-      };
-
-    } catch (error) {
-      console.error('Error parsing SecureEye XML:', error);
-      return {
-        rawMessage: xmlMessage,
-        timestamp: new Date().toISOString(),
-        status: 'parse_error',
-        error: error.message
-      };
-    }
-  }
 
   sendAcknowledgment(socket, data) {
     // Send acknowledgment back to the biometric device
