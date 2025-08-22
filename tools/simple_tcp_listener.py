@@ -88,13 +88,26 @@ class SimpleBiometricListener:
             
             print(f"🔍 Parsed data: {json.dumps(biometric_data, indent=2)}")
             
-            # Determine action based on status
-            if biometric_data.get('status') in ['authorized', '1', 'AUTHORIZED']:
+            # Determine action based on status and message type
+            status = biometric_data.get('status', '').lower()
+            message_type = biometric_data.get('messageType', '').lower()
+            
+            # Handle time logging events (common in biometric systems)
+            if message_type in ['timelog', 'time_log', 'attendance']:
+                self.handle_time_log(biometric_data)
+                self.send_response(client_socket, "ACK:TIMELOG")
+            # Handle access control events (authorized status or valid userId with no status)
+            elif (status in ['authorized', '1', 'granted', 'allowed', 'access granted'] or 
+                  (biometric_data.get('userId') and not status)):
                 self.handle_access_granted(biometric_data)
                 self.send_response(client_socket, "ACK:GRANTED")
-            elif biometric_data.get('status') in ['unauthorized', '0', 'DENIED']:
+            elif status in ['unauthorized', '0', 'denied', 'rejected', 'access denied']:
                 self.handle_access_denied(biometric_data)
                 self.send_response(client_socket, "ACK:DENIED")
+            # Handle attendance status events (clock in/out, overtime, etc.)
+            elif any(keyword in status for keyword in ['overtime', 'clock', 'checkin', 'checkout', 'break', 'lunch']):
+                self.handle_attendance_event(biometric_data)
+                self.send_response(client_socket, "ACK:ATTENDANCE")
             else:
                 self.handle_unknown_message(biometric_data)
                 self.send_response(client_socket, "ACK:UNKNOWN")
@@ -105,99 +118,124 @@ class SimpleBiometricListener:
     
     def parse_message(self, message):
         """Parse different message formats"""
-        # Try JSON first
+        cleaned_message = message.strip().rstrip('\x00').strip()
+        
+        print(f"🔍 Parsing message (length: {len(message)} -> {len(cleaned_message)} after cleaning)")
+        print(f"📄 Message preview: {cleaned_message[:100]}..." if len(cleaned_message) > 100 else f"📄 Full message: {cleaned_message}")
+        
+        # Try different parsing methods in order
+        return (self._try_json_parse(cleaned_message) or
+                self._try_xml_parse(cleaned_message) or
+                self._try_csv_parse(message) or
+                self._try_colon_parse(message) or
+                self._default_parse())
+    
+    def _try_json_parse(self, message):
+        """Try to parse as JSON"""
         try:
             return json.loads(message)
         except json.JSONDecodeError:
-            pass
-        
-        # Try XML parsing
+            return None
+    
+    def _try_xml_parse(self, message):
+        """Try to parse as XML"""
         try:
             root = ET.fromstring(message)
             xml_data = {}
             
-            # Extract common biometric fields from XML
-            # Handle different XML structures
+            # Parse child elements and attributes
+            self._extract_xml_elements(root, xml_data)
+            self._extract_xml_attributes(root, xml_data)
+            self._extract_nested_xml(root, xml_data)
             
-            # Method 1: Direct child elements
-            for child in root:
-                tag_name = child.tag.lower()
-                # Map common XML tag names to our standard field names
-                if tag_name in ['userid', 'user_id', 'user', 'id', 'memberid', 'member_id']:
-                    xml_data['userId'] = child.text
-                elif tag_name in ['status', 'access', 'result', 'auth_status']:
-                    xml_data['status'] = child.text
-                elif tag_name in ['deviceid', 'device_id', 'device', 'terminal', 'reader']:
-                    xml_data['deviceId'] = child.text
-                elif tag_name in ['timestamp', 'time', 'datetime', 'event_time']:
-                    xml_data['timestamp'] = child.text
-                elif tag_name in ['messagetype', 'message_type', 'type', 'event_type']:
-                    xml_data['messageType'] = child.text
-                else:
-                    # Store any other fields with their original tag name
-                    xml_data[tag_name] = child.text
-            
-            # Method 2: Check for attributes in root element
-            for attr_name, attr_value in root.attrib.items():
-                attr_name_lower = attr_name.lower()
-                if attr_name_lower in ['userid', 'user_id', 'user', 'id']:
-                    xml_data['userId'] = attr_value
-                elif attr_name_lower in ['status', 'access', 'result']:
-                    xml_data['status'] = attr_value
-                elif attr_name_lower in ['deviceid', 'device_id', 'device']:
-                    xml_data['deviceId'] = attr_value
-                elif attr_name_lower in ['timestamp', 'time', 'datetime']:
-                    xml_data['timestamp'] = attr_value
-                elif attr_name_lower in ['messagetype', 'message_type', 'type']:
-                    xml_data['messageType'] = attr_value
-            
-            # Method 3: Handle nested structures (look for common parent elements)
-            if not xml_data.get('userId'):
-                user_elem = root.find('.//user') or root.find('.//User') or root.find('.//USER')
-                if user_elem is not None:
-                    xml_data['userId'] = user_elem.text or user_elem.get('id')
-            
-            if not xml_data.get('status'):
-                status_elem = root.find('.//status') or root.find('.//Status') or root.find('.//access')
-                if status_elem is not None:
-                    xml_data['status'] = status_elem.text
-            
-            if not xml_data.get('deviceId'):
-                device_elem = root.find('.//device') or root.find('.//Device') or root.find('.//terminal')
-                if device_elem is not None:
-                    xml_data['deviceId'] = device_elem.text or device_elem.get('id')
-            
-            # If root element has text content and no children, use root tag as message type
+            # Handle simple text content
             if not list(root) and root.text:
                 xml_data['messageType'] = root.tag
                 xml_data['content'] = root.text
             
+            self._debug_xml_results(xml_data)
             return xml_data
             
-        except ET.ParseError:
-            pass
+        except ET.ParseError as e:
+            print(f"⚠️  XML parsing failed: {e}")
+            return None
+    
+    def _extract_xml_elements(self, root, xml_data):
+        """Extract data from XML child elements"""
+        for child in root:
+            tag_name = child.tag.lower()
+            if tag_name in ['userid', 'user_id', 'user', 'id', 'memberid', 'member_id']:
+                xml_data['userId'] = child.text
+            elif tag_name in ['status', 'access', 'result', 'auth_status', 'attendstat', 'attend_stat']:
+                xml_data['status'] = child.text
+            elif tag_name in ['deviceid', 'device_id', 'device', 'terminal', 'reader', 'terminalid', 'terminal_id']:
+                xml_data['deviceId'] = child.text
+            elif tag_name in ['timestamp', 'time', 'datetime', 'event_time']:
+                xml_data['timestamp'] = child.text
+            elif tag_name in ['messagetype', 'message_type', 'type', 'event_type', 'event']:
+                xml_data['messageType'] = child.text
+            else:
+                xml_data[tag_name] = child.text
+    
+    def _extract_xml_attributes(self, root, xml_data):
+        """Extract data from XML attributes"""
+        for attr_name, attr_value in root.attrib.items():
+            attr_name_lower = attr_name.lower()
+            if attr_name_lower in ['userid', 'user_id', 'user', 'id']:
+                xml_data['userId'] = attr_value
+            elif attr_name_lower in ['status', 'access', 'result']:
+                xml_data['status'] = attr_value
+            elif attr_name_lower in ['deviceid', 'device_id', 'device']:
+                xml_data['deviceId'] = attr_value
+    
+    def _extract_nested_xml(self, root, xml_data):
+        """Extract data from nested XML elements"""
+        if not xml_data.get('userId'):
+            user_elem = root.find('.//user') or root.find('.//User') or root.find('.//USER')
+            if user_elem is not None:
+                xml_data['userId'] = user_elem.text or user_elem.get('id')
         
-        # Try comma-separated values
-        if ',' in message:
-            parts = message.split(',')
-            return {
-                'userId': parts[0] if len(parts) > 0 else None,
-                'timestamp': parts[1] if len(parts) > 1 else None,
-                'status': parts[2] if len(parts) > 2 else None,
-                'deviceId': parts[3] if len(parts) > 3 else None,
-            }
-        
-        # Try colon-separated format (USER:12345:AUTHORIZED:DEVICE001)
-        if ':' in message:
-            parts = message.split(':')
-            return {
-                'messageType': parts[0] if len(parts) > 0 else None,
-                'userId': parts[1] if len(parts) > 1 else None,
-                'status': parts[2] if len(parts) > 2 else None,
-                'deviceId': parts[3] if len(parts) > 3 else None,
-            }
-        
-        # Default: treat as raw message
+        if not xml_data.get('status'):
+            status_elem = root.find('.//status') or root.find('.//Status') or root.find('.//access')
+            if status_elem is not None:
+                xml_data['status'] = status_elem.text
+    
+    def _debug_xml_results(self, xml_data):
+        """Print XML parsing debug information"""
+        print(f"🔍 XML parsed successfully. Extracted fields: {list(xml_data.keys())}")
+        if xml_data.get('userId'):
+            print(f"👤 User ID: {xml_data['userId']}")
+        if xml_data.get('status'):
+            print(f"📊 Status: {xml_data['status']}")
+        if xml_data.get('deviceId'):
+            print(f"🖥️  Device ID: {xml_data['deviceId']}")
+    
+    def _try_csv_parse(self, message):
+        """Try to parse as comma-separated values"""
+        if ',' not in message:
+            return None
+        parts = message.split(',')
+        return {
+            'userId': parts[0] if len(parts) > 0 else None,
+            'timestamp': parts[1] if len(parts) > 1 else None,
+            'status': parts[2] if len(parts) > 2 else None,
+            'deviceId': parts[3] if len(parts) > 3 else None,
+        }
+    
+    def _try_colon_parse(self, message):
+        """Try to parse as colon-separated format"""
+        if ':' not in message:
+            return None
+        parts = message.split(':')
+        return {
+            'messageType': parts[0] if len(parts) > 0 else None,
+            'userId': parts[1] if len(parts) > 1 else None,
+            'status': parts[2] if len(parts) > 2 else None,
+            'deviceId': parts[3] if len(parts) > 3 else None,
+        }
+    
+    def _default_parse(self):
+        """Default fallback parsing"""
         return {
             'userId': None,
             'status': 'unknown',
@@ -230,6 +268,40 @@ class SimpleBiometricListener:
         # 4. Alert security if needed
         
         self.log_event('ACCESS_DENIED', data)
+    
+    def handle_time_log(self, data):
+        """Handle time logging events"""
+        user_id = data.get('userId', 'Unknown')
+        status = data.get('status', 'Unknown')
+        device_id = data.get('deviceId', 'Unknown')
+        
+        print(f"⏰ TIME LOG - User: {user_id}, Status: {status}, Device: {device_id}")
+        
+        # Here you would:
+        # 1. Look up member in database
+        # 2. Log attendance/time entry
+        # 3. Calculate work hours
+        # 4. Update attendance records
+        # 5. Check for overtime rules
+        
+        self.log_event('TIME_LOG', data)
+    
+    def handle_attendance_event(self, data):
+        """Handle attendance-related events (clock in/out, breaks, etc.)"""
+        user_id = data.get('userId', 'Unknown')
+        status = data.get('status', 'Unknown')
+        device_id = data.get('deviceId', 'Unknown')
+        
+        print(f"📋 ATTENDANCE EVENT - User: {user_id}, Status: {status}, Device: {device_id}")
+        
+        # Here you would:
+        # 1. Parse attendance action (clock in, clock out, break start, etc.)
+        # 2. Update member's current status
+        # 3. Calculate time intervals
+        # 4. Apply business rules (break limits, overtime, etc.)
+        # 5. Update payroll systems if needed
+        
+        self.log_event('ATTENDANCE_EVENT', data)
     
     def handle_unknown_message(self, data):
         """Handle unknown message format"""
