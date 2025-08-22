@@ -7,6 +7,7 @@ Alternative implementation for testing or different deployment scenarios
 import socket
 import threading
 import json
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 class SimpleBiometricListener:
@@ -105,6 +106,72 @@ class SimpleBiometricListener:
         try:
             return json.loads(message)
         except json.JSONDecodeError:
+            pass
+        
+        # Try XML parsing
+        try:
+            root = ET.fromstring(message)
+            xml_data = {}
+            
+            # Extract common biometric fields from XML
+            # Handle different XML structures
+            
+            # Method 1: Direct child elements
+            for child in root:
+                tag_name = child.tag.lower()
+                # Map common XML tag names to our standard field names
+                if tag_name in ['userid', 'user_id', 'user', 'id', 'memberid', 'member_id']:
+                    xml_data['userId'] = child.text
+                elif tag_name in ['status', 'access', 'result', 'auth_status']:
+                    xml_data['status'] = child.text
+                elif tag_name in ['deviceid', 'device_id', 'device', 'terminal', 'reader']:
+                    xml_data['deviceId'] = child.text
+                elif tag_name in ['timestamp', 'time', 'datetime', 'event_time']:
+                    xml_data['timestamp'] = child.text
+                elif tag_name in ['messagetype', 'message_type', 'type', 'event_type']:
+                    xml_data['messageType'] = child.text
+                else:
+                    # Store any other fields with their original tag name
+                    xml_data[tag_name] = child.text
+            
+            # Method 2: Check for attributes in root element
+            for attr_name, attr_value in root.attrib.items():
+                attr_name_lower = attr_name.lower()
+                if attr_name_lower in ['userid', 'user_id', 'user', 'id']:
+                    xml_data['userId'] = attr_value
+                elif attr_name_lower in ['status', 'access', 'result']:
+                    xml_data['status'] = attr_value
+                elif attr_name_lower in ['deviceid', 'device_id', 'device']:
+                    xml_data['deviceId'] = attr_value
+                elif attr_name_lower in ['timestamp', 'time', 'datetime']:
+                    xml_data['timestamp'] = attr_value
+                elif attr_name_lower in ['messagetype', 'message_type', 'type']:
+                    xml_data['messageType'] = attr_value
+            
+            # Method 3: Handle nested structures (look for common parent elements)
+            if not xml_data.get('userId'):
+                user_elem = root.find('.//user') or root.find('.//User') or root.find('.//USER')
+                if user_elem is not None:
+                    xml_data['userId'] = user_elem.text or user_elem.get('id')
+            
+            if not xml_data.get('status'):
+                status_elem = root.find('.//status') or root.find('.//Status') or root.find('.//access')
+                if status_elem is not None:
+                    xml_data['status'] = status_elem.text
+            
+            if not xml_data.get('deviceId'):
+                device_elem = root.find('.//device') or root.find('.//Device') or root.find('.//terminal')
+                if device_elem is not None:
+                    xml_data['deviceId'] = device_elem.text or device_elem.get('id')
+            
+            # If root element has text content and no children, use root tag as message type
+            if not list(root) and root.text:
+                xml_data['messageType'] = root.tag
+                xml_data['content'] = root.text
+            
+            return xml_data
+            
+        except ET.ParseError:
             pass
         
         # Try comma-separated values
