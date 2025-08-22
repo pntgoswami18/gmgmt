@@ -14,7 +14,7 @@ import platform
 from datetime import datetime
 
 class SimpleBiometricListener:
-    def __init__(self, host='0.0.0.0', port=8080):
+    def __init__(self, host='0.0.0.0', port=5005):
         self.host = host
         self.port = port
         self.socket = None
@@ -396,7 +396,7 @@ def main():
     
     # Configuration
     HOST = '0.0.0.0'  # Listen on all interfaces
-    PORT = 8080       # Default port
+    PORT = 5005       # Default port
     
     # Allow command line arguments
     if len(sys.argv) > 1:
