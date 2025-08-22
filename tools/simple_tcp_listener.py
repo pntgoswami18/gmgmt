@@ -8,6 +8,9 @@ import socket
 import threading
 import json
 import xml.etree.ElementTree as ET
+import os
+import tempfile
+import platform
 from datetime import datetime
 
 class SimpleBiometricListener:
@@ -242,9 +245,64 @@ class SimpleBiometricListener:
             'data': data
         }
         
-        # Log to file (you could also log to database)
-        with open('/tmp/biometric_access.log', 'a') as f:
-            f.write(f"{json.dumps(log_entry)}\n")
+        # Determine log file path - try multiple cross-platform locations
+        log_filename = 'biometric_access.log'
+        
+        # Build platform-specific log paths
+        log_paths = []
+        
+        # 1. System temporary directory (works on all platforms)
+        temp_dir = tempfile.gettempdir()
+        log_paths.append(os.path.join(temp_dir, log_filename))
+        
+        # 2. Platform-specific user data directory
+        if platform.system() == 'Windows':
+            # Windows: Use AppData/Local
+            appdata = os.environ.get('LOCALAPPDATA')
+            if appdata:
+                log_paths.append(os.path.join(appdata, 'BiometricListener', log_filename))
+        elif platform.system() == 'Darwin':  # macOS
+            # macOS: Use ~/Library/Logs
+            log_paths.append(os.path.expanduser('~/Library/Logs/' + log_filename))
+        else:  # Linux and other Unix-like systems
+            # Linux: Use ~/.local/share or ~/.cache
+            log_paths.append(os.path.expanduser('~/.local/share/' + log_filename))
+        
+        # 3. User home directory (fallback for all platforms)
+        log_paths.append(os.path.expanduser('~/' + log_filename))
+        
+        # 4. Current directory (last resort)
+        log_paths.append(os.path.join('.', log_filename))
+        
+        # Try each log path until one works
+        for log_path in log_paths:
+            try:
+                # Ensure directory exists
+                log_dir = os.path.dirname(os.path.abspath(log_path))
+                if log_dir and not os.path.exists(log_dir):
+                    os.makedirs(log_dir, exist_ok=True)
+                
+                # Test write access by attempting to create/append to the file
+                with open(log_path, 'a', encoding='utf-8') as f:
+                    f.write(f"{json.dumps(log_entry, ensure_ascii=False)}\n")
+                
+                # If successful, log the path being used (only on first successful write)
+                if not hasattr(self, '_log_path_announced'):
+                    print(f"📁 Logging to: {log_path}")
+                    self._log_path_announced = True
+                
+                # Break out of the loop on success
+                break
+                
+            except (OSError, IOError, UnicodeError) as e:
+                # If this is the last path, print the error
+                if log_path == log_paths[-1]:
+                    print("⚠️  Warning: Could not write to any log file location")
+                    print(f"❌ Last error: {e}")
+                    print(f"📝 Log entry: {json.dumps(log_entry, ensure_ascii=False)}")
+                else:
+                    # Try next path silently
+                    continue
     
     def send_response(self, client_socket, response):
         """Send response back to device"""
