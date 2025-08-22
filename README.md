@@ -280,7 +280,7 @@ BIOMETRIC_HOST=0.0.0.0
 
 **Note:** The test scripts automatically load environment variables from your `.env` file and work on both Windows and Unix-based systems.
 
-📖 **For complete biometric setup and configuration guide, see [BIOMETRIC_INTEGRATION_GUIDE.md](BIOMETRIC_INTEGRATION_GUIDE.md)**
+📖 **For complete biometric setup and configuration guide, see [ESP32_SETUP_GUIDE.md](ESP32_SETUP_GUIDE.md)**
 
 ---
 
@@ -386,7 +386,7 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 - **Remote Control**: Unlock doors and enroll fingerprints remotely
 - **Status Monitoring**: Device health, connectivity, and performance tracking
 
-📖 **For complete ESP32 setup and configuration guide, see [ESP32_DEPLOYMENT_GUIDE.md](ESP32_DEPLOYMENT_GUIDE.md)**
+📖 **For complete ESP32 setup and configuration guide, see [ESP32_SETUP_GUIDE.md](ESP32_SETUP_GUIDE.md)**
 
 ## Windows standalone build (Service + Installer, SQLite)
 
