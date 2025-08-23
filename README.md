@@ -18,11 +18,13 @@ The application is built with a comprehensive feature set that includes:
 ### Frontend Admin Dashboard Features
 *   **Multi-page Navigation:** Professional dashboard with React Router navigation between different management sections.
 *   **Member Management Interface:** Add, view, edit, and delete gym members with real-time data updates.
-*   **Class Management Interface:** Create and manage fitness classes with instructor and duration details.
-*   **Schedule Management Interface:** Schedule classes with datetime pickers, capacity settings, and visual schedule display.
+*   **Consolidated Biometric Management:** Unified ESP32 fingerprint enrollment with device selection, guided enrollment process, manual member-device linking, and real-time enrollment monitoring.
+*   **Class & Schedule Management:** Create and manage fitness classes with integrated schedule management (schedules accessible as a tab under Classes).
 *   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date.
 *   **Financial Management Interface:** Create membership plans and manage billing. Record manual payments against invoices, including auto-creating an invoice if none exists.
 *   **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics. Dashboard cards are clickable and deep-link to filtered sections (e.g., unpaid members, pending payments).
+*   **Advanced Settings Management:** Centralized settings with tabbed interface including General settings and comprehensive ESP32 device management (Device Manager, Monitor, Analytics accessible as tabs under Settings).
+*   **ESP32 Configuration:** User-configurable ESP32 connection settings including device host/port and local listener host/port with clear defaults and help text.
 *   **Material UI Navigation:** Enhanced left navigation with icons and active-route highlighting.
 *   **Branding & Accent Colors:** Configure Primary and Secondary accents as Solid or Gradient in Settings. A gradient editor lets you adjust mode (Linear/Radial), angle, and color stops. Accents are used across buttons, headings, and section headers.
 *   **Dashboard Card Visibility:** Toggle which summary cards are shown on the Dashboard in Settings.
@@ -195,10 +197,11 @@ Once both servers are running, you can access the different sections of the admi
 
 - **Dashboard:** Analytics and reporting overview
 - **Members:** Manage gym members (add, edit, delete)
-- **Classes:** Manage fitness classes
-- **Schedules:** Schedule classes and manage capacity
+- **Biometric:** Consolidated ESP32 fingerprint enrollment and device management
+- **Classes:** Manage fitness classes and schedules (schedules now under Classes tab)
 - **Attendance:** Track member attendance and simulate check-ins
 - **Financials:** Manage membership plans and view payment integration
+- **Settings:** General settings and ESP32 device management (Device Manager, Monitor, Analytics tabs)
 
 ---
 
@@ -279,6 +282,21 @@ BIOMETRIC_HOST=0.0.0.0
 ```
 
 **Note:** The test scripts automatically load environment variables from your `.env` file and work on both Windows and Unix-based systems.
+
+### Web-based ESP32 Configuration
+
+In addition to environment variables, ESP32 connection settings can now be configured through the web interface:
+
+1. Navigate to **Settings → General** in the admin dashboard
+2. Scroll to **ESP32 Biometric Reader Configuration** section
+3. Configure the following settings:
+   - **ESP32 Device Host Address** (default: 192.168.1.100)
+   - **ESP32 Device Port** (default: 8080)
+   - **Local Listen Host** (default: 0.0.0.0)
+   - **Local Listen Port** (default: 8080)
+4. Click **Save All Settings** to apply changes
+
+These settings allow you to easily adjust ESP32 connectivity without editing configuration files.
 
 📖 **For complete biometric setup and configuration guide, see [ESP32_SETUP_GUIDE.md](ESP32_SETUP_GUIDE.md)**
 

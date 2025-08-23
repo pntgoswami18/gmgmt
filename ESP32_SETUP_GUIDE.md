@@ -72,13 +72,15 @@ npm run esp32:help
 1. **WiFi**: Connect ESP32 to same network as server
 2. **Server IP**: Configure ESP32 to send data to server IP:8080
 3. **Device ID**: Set unique device identifier (default: "DOOR_001")
+4. **Web Configuration**: Use Settings → General → ESP32 Biometric Reader Configuration to set connection parameters
 
 ## 👤 Member Enrollment
 
 ### Web Dashboard Method
-1. Go to Members → Select Member → "Biometric"
-2. Enter device user ID and save
-3. Use ESP32 enrollment interface or physical enrollment button
+1. Go to **Biometric** section in the main navigation
+2. Select member from "Members without Biometric" list
+3. Click "Enroll Fingerprint" and follow the guided enrollment process
+4. Or use "Manual Assignment" to link existing device user IDs
 
 ### Direct Device Method
 1. Press enrollment button on ESP32 device
@@ -87,21 +89,32 @@ npm run esp32:help
 
 ## 📱 Web Interface Features
 
-### Device Management (`/esp32-devices`)
+### Consolidated Biometric Management (`/biometric`)
+- Unified fingerprint enrollment with guided process
+- Device selection and real-time enrollment monitoring
+- Manual member-device linking
+- View biometric events and enrollment status
+
+### ESP32 Device Management (`/settings/esp32-devices`)
 - View all connected ESP32 devices
 - Remote door unlock
 - Device status monitoring
 - Start remote enrollment
 
-### Real-time Monitor (`/esp32-monitor`)
+### Real-time Monitor (`/settings/esp32-monitor`)
 - Live event stream
 - Device health monitoring
 - Connection status
 
-### Analytics (`/esp32-analytics`)
+### Analytics (`/settings/esp32-analytics`)
 - Usage statistics
 - Access logs
 - Performance metrics
+
+### ESP32 Configuration (`/settings`)
+- Configure ESP32 device host and port settings
+- Set local listener host and port
+- Network configuration with helpful defaults
 
 ## 🛠️ Essential Commands
 
@@ -133,6 +146,8 @@ npm run biometric:check      # Check service status
 - Ensure both backend (port 3001) and frontend (port 3000) are running
 - Check browser console for errors
 - Verify ESP32 API endpoints are responsive
+- Access ESP32 features through Settings → ESP32 Devices/Monitor/Analytics tabs
+- Use Biometric section for unified enrollment management
 
 ### Database Issues
 ```bash
