@@ -68,6 +68,99 @@ npm run esp32:help
 - **Buzzer**: Pin23
 - **Buttons**: Enroll→Pin25, Override→Pin26
 
+#### Connection Diagram
+```mermaid
+graph TD
+    subgraph "ESP32 DevKit"
+        ESP32["ESP32"]
+        Pin16["Pin 16 (RX)"]
+        Pin17["Pin 17 (TX)"]
+        Pin18["Pin 18 (Relay)"]
+        Pin19["Pin 19 (Green LED)"]
+        Pin21["Pin 21 (Red LED)"]
+        Pin22["Pin 22 (Blue LED)"]
+        Pin23["Pin 23 (Buzzer)"]
+        Pin25["Pin 25 (Enroll Btn)"]
+        Pin26["Pin 26 (Override Btn)"]
+        VCC_5V["5V"]
+        VCC_3V["3.3V"]
+        GND["GND"]
+        VIN["VIN (12V)"]
+    end
+
+    subgraph "AS608 Fingerprint Sensor"
+        AS608["AS608 Module"]
+        AS608_TX["TX"]
+        AS608_RX["RX"]
+        AS608_VCC["VCC"]
+        AS608_GND["GND"]
+    end
+
+    subgraph "Door Lock System"
+        Relay["Relay Module"]
+        DoorLock["Door Lock"]
+        PowerSupply["12V Power Supply"]
+    end
+
+    subgraph "Status Indicators"
+        GreenLED["Green LED<br/>(Access Granted)"]
+        RedLED["Red LED<br/>(Access Denied)"]
+        BlueLED["Blue LED<br/>(System Ready)"]
+        Buzzer["Buzzer<br/>(Audio Feedback)"]
+    end
+
+    subgraph "Control Buttons"
+        EnrollBtn["Enroll Button<br/>(Add Fingerprint)"]
+        OverrideBtn["Override Button<br/>(Manual Open)"]
+    end
+
+    %% AS608 Connections
+    Pin16 --> AS608_TX
+    Pin17 --> AS608_RX
+    VCC_5V --> AS608_VCC
+    GND --> AS608_GND
+
+    %% Door Lock Connections
+    Pin18 --> Relay
+    Relay --> DoorLock
+    PowerSupply --> DoorLock
+    VIN --> PowerSupply
+
+    %% LED Connections
+    Pin19 --> GreenLED
+    Pin21 --> RedLED
+    Pin22 --> BlueLED
+
+    %% Audio Feedback
+    Pin23 --> Buzzer
+
+    %% Button Connections
+    Pin25 --> EnrollBtn
+    Pin26 --> OverrideBtn
+
+    %% Power Distribution
+    VCC_3V --> GreenLED
+    VCC_3V --> RedLED
+    VCC_3V --> BlueLED
+    VCC_3V --> Buzzer
+    VCC_3V --> EnrollBtn
+    VCC_3V --> OverrideBtn
+
+    %% Ground Connections
+    GND --> GreenLED
+    GND --> RedLED
+    GND --> BlueLED
+    GND --> Buzzer
+    GND --> EnrollBtn
+    GND --> OverrideBtn
+
+    style ESP32 fill:#e1f5fe
+    style AS608 fill:#f3e5f5
+    style Relay fill:#fff3e0
+    style DoorLock fill:#e8f5e8
+    style PowerSupply fill:#ffebee
+```
+
 ### Device Settings
 1. **WiFi**: Connect ESP32 to same network as server
 2. **Server IP**: Configure ESP32 to send data to server IP:8080
