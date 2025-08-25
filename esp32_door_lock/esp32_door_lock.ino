@@ -66,8 +66,17 @@ String deviceStatus = "ready";
 
 // ==================== SETUP FUNCTION ====================
 void setup() {
+  // IMPORTANT: Set your Serial Monitor to 115200 baud rate
+  // Garbled characters at startup are ESP32 boot messages (sent at 74880 baud)
   Serial.begin(115200);
-  Serial.println("\n🔐 ESP32 Fingerprint Door Lock Starting...");
+  delay(1000);  // Wait for serial monitor to stabilize
+  
+  // Clear any boot messages and provide clear start indicator
+  Serial.println();
+  Serial.println("========================================");
+  Serial.println("ESP32 Fingerprint Door Lock Starting...");
+  Serial.println("Baud Rate: 115200");
+  Serial.println("========================================");
   
   // Initialize hardware
   initializePins();
@@ -90,9 +99,13 @@ void setup() {
   setStatusLED("ready");
   playTone(1000, 100);
   
-  Serial.println("✅ System Ready - Waiting for fingerprints...");
-  Serial.printf("🌐 Device IP: %s\n", WiFi.localIP().toString().c_str());
-  Serial.printf("🔗 Web Interface: http://%s\n", WiFi.localIP().toString().c_str());
+  Serial.println();
+  Serial.println("========================================");
+  Serial.println("SYSTEM READY - Waiting for fingerprints");
+  Serial.printf("Device IP: %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf("Web Interface: http://%s\n", WiFi.localIP().toString().c_str());
+  Serial.println("========================================");
+  Serial.println();
 }
 
 // ==================== MAIN LOOP ====================
@@ -153,7 +166,7 @@ void initializePins() {
   digitalWrite(BLUE_LED_PIN, LOW);
   digitalWrite(BUZZER_PIN, LOW);
   
-  Serial.println("✅ GPIO pins initialized");
+  Serial.println("GPIO pins initialized");
 }
 
 void initializeFingerprint() {
@@ -163,21 +176,21 @@ void initializeFingerprint() {
   
   // Test if sensor is responding
   if (finger.verifyPassword()) {
-    Serial.println("✅ AS608 Fingerprint sensor connected");
+    Serial.println("AS608 Fingerprint sensor connected");
     
     finger.getParameters();
-    Serial.printf("📊 Sensor info: Status=0x%X, Capacity=%d, Security=%d\n", 
+    Serial.printf("Sensor info: Status=0x%X, Capacity=%d, Security=%d\n", 
                   finger.status_reg, finger.capacity, finger.security_level);
-    Serial.printf("📊 Enrolled fingerprints: %d\n", finger.templateCount);
+    Serial.printf("Enrolled fingerprints: %d\n", finger.templateCount);
   } else {
-    Serial.println("❌ AS608 Fingerprint sensor not found");
+    Serial.println("AS608 Fingerprint sensor not found");
     setStatusLED("error");
     // Continue anyway - sensor might be connected later
   }
 }
 
 void connectToWiFi() {
-  Serial.printf("🌐 Connecting to WiFi: %s", WIFI_SSID);
+  Serial.printf("Connecting to WiFi: %s", WIFI_SSID);
   
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   
@@ -189,16 +202,16 @@ void connectToWiFi() {
   
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println();
-    Serial.printf("✅ WiFi connected! IP: %s\n", WiFi.localIP().toString().c_str());
-    Serial.printf("📶 Signal strength: %d dBm\n", WiFi.RSSI());
+    Serial.printf("WiFi connected! IP: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("Signal strength: %d dBm\n", WiFi.RSSI());
   } else {
     Serial.println();
-    Serial.println("❌ WiFi connection failed - continuing in offline mode");
+    Serial.println("WiFi connection failed - continuing in offline mode");
   }
 }
 
 void reconnectWiFi() {
-  Serial.println("🔄 Reconnecting to WiFi...");
+  Serial.println("Reconnecting to WiFi...");
   WiFi.disconnect();
   WiFi.reconnect();
   
@@ -208,7 +221,7 @@ void reconnectWiFi() {
   }
   
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("✅ WiFi reconnected");
+    Serial.println("WiFi reconnected");
   }
 }
 
@@ -217,7 +230,7 @@ void checkFingerprint() {
   fingerprintID = getFingerprintID();
   
   if (fingerprintID > 0) {
-    Serial.printf("✅ Fingerprint matched: ID %d\n", fingerprintID);
+    Serial.printf("Fingerprint matched: ID %d\n", fingerprintID);
     
     // Grant access
     unlockDoor();
@@ -229,7 +242,7 @@ void checkFingerprint() {
     delay(2000);
   } else if (fingerprintID == -2) {
     // Fingerprint detected but not matched
-    Serial.println("❌ Fingerprint not recognized");
+    Serial.println("Fingerprint not recognized");
     
     accessDenied();
     sendBiometricData(-1, "unauthorized");
@@ -265,7 +278,7 @@ int getFingerprintID() {
 
 // ==================== ACCESS CONTROL FUNCTIONS ====================
 void unlockDoor() {
-  Serial.println("🔓 Door unlocked!");
+  Serial.println("Door unlocked!");
   
   // Visual and audio feedback
   setStatusLED("granted");
@@ -283,11 +296,11 @@ void unlockDoor() {
   digitalWrite(RELAY_PIN, LOW);
   setStatusLED("ready");
   
-  Serial.println("🔒 Door locked");
+  Serial.println("Door locked");
 }
 
 void accessDenied() {
-  Serial.println("❌ Access denied!");
+  Serial.println("Access denied!");
   
   // Visual and audio feedback
   setStatusLED("denied");
@@ -300,7 +313,7 @@ void accessDenied() {
 }
 
 void emergencyUnlock() {
-  Serial.println("🚨 Emergency unlock activated!");
+  Serial.println("Emergency unlock activated!");
   
   unlockDoor();
   sendBiometricData(-999, "emergency_unlock");
@@ -311,8 +324,8 @@ void startEnrollmentMode() {
   enrollmentMode = true;
   enrollmentID = getNextAvailableID();
   
-  Serial.printf("🎯 Enrollment mode started for ID: %d\n", enrollmentID);
-  Serial.println("👆 Please place finger on sensor...");
+  Serial.printf("Enrollment mode started for ID: %d\n", enrollmentID);
+  Serial.println("Please place finger on sensor...");
   
   setStatusLED("enrollment");
 }
@@ -322,7 +335,7 @@ void handleEnrollment() {
   
   if (result == 1) {
     // Enrollment successful
-    Serial.printf("✅ Fingerprint enrolled successfully! ID: %d\n", enrollmentID);
+    Serial.printf("Fingerprint enrolled successfully! ID: %d\n", enrollmentID);
     
     enrollmentMode = false;
     setStatusLED("ready");
@@ -339,7 +352,7 @@ void handleEnrollment() {
     
   } else if (result == -1) {
     // Enrollment failed
-    Serial.println("❌ Fingerprint enrollment failed");
+    Serial.println("Fingerprint enrollment failed");
     
     enrollmentMode = false;
     setStatusLED("error");
@@ -455,7 +468,7 @@ int getNextAvailableID() {
 // ==================== COMMUNICATION FUNCTIONS ====================
 void sendBiometricData(int memberID, String status) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("⚠️ WiFi not connected - data not sent");
+    Serial.println("WiFi not connected - data not sent");
     return;
   }
   
@@ -479,7 +492,7 @@ void sendBiometricData(int memberID, String status) {
 
 void sendEnrollmentData(int memberID, String status) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("⚠️ WiFi not connected - enrollment data not sent");
+    Serial.println("WiFi not connected - enrollment data not sent");
     return;
   }
   
@@ -529,13 +542,13 @@ void sendToServer(String jsonData) {
   
   if (httpResponseCode > 0) {
     String response = http.getString();
-    Serial.printf("✅ Data sent successfully (HTTP %d)\n", httpResponseCode);
+    Serial.printf("Data sent successfully (HTTP %d)\n", httpResponseCode);
     
     if (httpResponseCode != 200) {
-      Serial.printf("⚠️ Server response: %s\n", response.c_str());
+      Serial.printf("Server response: %s\n", response.c_str());
     }
   } else {
-    Serial.printf("❌ HTTP POST failed: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.printf("HTTP POST failed: %s\n", http.errorToString(httpResponseCode).c_str());
   }
   
   http.end();
@@ -545,14 +558,14 @@ void sendToServer(String jsonData) {
 void checkButtons() {
   // Check enrollment button
   if (digitalRead(ENROLL_BUTTON_PIN) == LOW) {
-    Serial.println("🎯 Enrollment button pressed");
+    Serial.println("Enrollment button pressed");
     startEnrollmentMode();
     delay(500);  // Prevent multiple triggers
   }
   
   // Check override button
   if (digitalRead(OVERRIDE_BUTTON_PIN) == LOW) {
-    Serial.println("🚨 Override button pressed");
+    Serial.println("Override button pressed");
     emergencyUnlock();
     delay(500);  // Prevent multiple triggers
   }
@@ -639,21 +652,21 @@ void initializeWebServer() {
   webServer.on("/config", HTTP_POST, handleConfigSave);
   
   webServer.begin();
-  Serial.println("🌐 Web server started on port 80");
+  Serial.println("Web server started on port 80");
 }
 
 void handleRoot() {
   String html = "<!DOCTYPE html><html><head><title>ESP32 Door Lock</title></head><body>";
-  html += "<h1>🔐 ESP32 Door Lock System</h1>";
+  html += "<h1>ESP32 Door Lock System</h1>";
   html += "<p><strong>Device ID:</strong> " + String(DEVICE_ID) + "</p>";
   html += "<p><strong>Status:</strong> " + deviceStatus + "</p>";
   html += "<p><strong>WiFi:</strong> " + String(WIFI_SSID) + " (" + String(WiFi.RSSI()) + " dBm)</p>";
   html += "<p><strong>Server:</strong> " + String(GYM_SERVER_IP) + ":" + String(GYM_SERVER_PORT) + "</p>";
   html += "<p><strong>Enrolled Fingerprints:</strong> " + String(finger.templateCount) + "</p>";
   html += "<hr>";
-  html += "<button onclick=\"fetch('/unlock', {method:'POST'})\">🔓 Emergency Unlock</button><br><br>";
-  html += "<button onclick=\"fetch('/enroll', {method:'POST'})\">👆 Start Enrollment</button><br><br>";
-  html += "<a href='/status'>📊 JSON Status</a> | <a href='/config'>⚙️ Configuration</a>";
+  html += "<button onclick=\"fetch('/unlock', {method:'POST'})\">Emergency Unlock</button><br><br>";
+  html += "<button onclick=\"fetch('/enroll', {method:'POST'})\">Start Enrollment</button><br><br>";
+  html += "<a href='/status'>JSON Status</a> | <a href='/config'>Configuration</a>";
   html += "</body></html>";
   
   webServer.send(200, "text/html", html);
@@ -692,14 +705,14 @@ void handleWebEnroll() {
 
 void handleConfig() {
   String html = "<!DOCTYPE html><html><head><title>Configuration</title></head><body>";
-  html += "<h1>⚙️ Door Lock Configuration</h1>";
+  html += "<h1>Door Lock Configuration</h1>";
   html += "<form method='POST'>";
   html += "<p>Device ID: <input type='text' name='device_id' value='" + String(DEVICE_ID) + "'></p>";
   html += "<p>Server IP: <input type='text' name='server_ip' value='" + String(GYM_SERVER_IP) + "'></p>";
   html += "<p>Server Port: <input type='number' name='server_port' value='" + String(GYM_SERVER_PORT) + "'></p>";
   html += "<p><input type='submit' value='Save Configuration'></p>";
   html += "</form>";
-  html += "<a href='/'>← Back to Home</a>";
+  html += "<a href='/'>&lt; Back to Home</a>";
   html += "</body></html>";
   
   webServer.send(200, "text/html", html);

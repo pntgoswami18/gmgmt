@@ -21,7 +21,7 @@ cd client && npm install && cd ..
 cp env.sample .env
 # Edit .env and set:
 # ENABLE_BIOMETRIC=true
-# BIOMETRIC_PORT=5005  # or your preferred port
+# BIOMETRIC_PORT=8080  # Port where gym server listens for ESP32 data
 # BIOMETRIC_HOST=0.0.0.0
 
 # Setup database
@@ -59,6 +59,9 @@ Before uploading the firmware, install these libraries in Arduino IDE:
 4. Connect ESP32 to computer via USB
 5. Select the correct port: **Tools → Port → (your ESP32 port)**
 6. Click **Upload** button
+7. **Open Serial Monitor** and set baud rate to **115200** to see status messages
+   - You'll see garbled characters first (normal ESP32 boot messages) - ignore these
+   - Clear, readable messages will appear after separator lines (`========================================`)
 
 ### 4. Start the System
 
@@ -80,6 +83,12 @@ npm run esp32:test
 npm run esp32:help
 ```
 
+**Serial Monitor Check:**
+- Open Serial Monitor at **115200 baud**
+- Look for separator lines (`========================================`)
+- Device should show "SYSTEM READY - Waiting for fingerprints"
+- ESP32 IP address should be displayed
+
 ## 🔧 ESP32 Device Configuration
 
 ### Hardware Connections
@@ -87,7 +96,7 @@ npm run esp32:help
 - **Door Lock**: Relay→Pin18, 12V power supply
 - **Status LEDs**: Green→Pin19, Red→Pin21, Blue→Pin22
 - **Buzzer**: Pin23
-- **Buttons**: Enroll→Pin25, Override→Pin26
+- **Buttons**: Enroll→Pin4, Override→Pin5
 
 #### Connection Diagram
 ```mermaid
@@ -101,8 +110,8 @@ graph TD
         Pin21["Pin 21 (Red LED)"]
         Pin22["Pin 22 (Blue LED)"]
         Pin23["Pin 23 (Buzzer)"]
-        Pin25["Pin 25 (Enroll Btn)"]
-        Pin26["Pin 26 (Override Btn)"]
+        Pin4["Pin 4 (Enroll Btn)"]
+        Pin5["Pin 5 (Override Btn)"]
         VCC_5V["5V"]
         VCC_3V["3.3V"]
         GND["GND"]
@@ -156,8 +165,8 @@ graph TD
     Pin23 --> Buzzer
 
     %% Button Connections
-    Pin25 --> EnrollBtn
-    Pin26 --> OverrideBtn
+    Pin4 --> EnrollBtn
+    Pin5 --> OverrideBtn
 
     %% Power Distribution
     VCC_3V --> GreenLED
@@ -184,9 +193,10 @@ graph TD
 
 ### Device Settings
 1. **WiFi**: Connect ESP32 to same network as server
-2. **Server IP**: Configure ESP32 to send data to server IP:8080
+2. **Server Communication**: ESP32 sends data to server on BIOMETRIC_PORT (default: 8080)
 3. **Device ID**: Set unique device identifier (default: "DOOR_001")
-4. **Web Configuration**: Use Settings → General → ESP32 Biometric Reader Configuration to set connection parameters
+4. **ESP32 Web Interface**: Available on port 80 (http://ESP32_IP/)
+5. **Web Configuration**: Use Settings → ESP32 Devices → Configuration to set connection parameters
 
 ## 👤 Member Enrollment
 
@@ -257,6 +267,14 @@ npm run biometric:check      # Check service status
 - **`ledcSetup` not declared**: Code includes compatibility layer for both ESP32 Arduino Core 2.x and 3.x
 - **ESP32 core version issues**: The code automatically detects and uses the correct API for your Arduino core version
 
+### Serial Monitor Issues
+- **Garbled characters at startup** (`��������������������������`): These are normal ESP32 boot messages sent at 74880 baud rate
+- **Solution**: Set your Serial Monitor to **115200 baud rate** and ignore the initial garbled text
+- **Arduino IDE**: Tools → Serial Monitor → Set baud rate to 115200 (bottom-right dropdown)
+- **PlatformIO**: Use `pio device monitor --baud 115200` or set `monitor_speed = 115200` in `platformio.ini`
+- **Expected output**: Garbled boot messages followed by clear text after separator lines (`========================================`)
+- **Note**: The garbled characters cannot be eliminated - they're hardware-level boot messages and are completely normal
+
 ### Device Not Connecting
 - Check WiFi credentials in ESP32 code
 - Verify server IP and port match your `.env` file (`BIOMETRIC_PORT`)
@@ -297,7 +315,7 @@ SELECT * FROM devices;
 
 ### Security
 - Use WPA3 WiFi encryption
-- Configure firewall for port 8080
+- Configure firewall for ports 80 (ESP32 web interface) and 8080 (biometric data)
 - Set strong device passwords
 - Enable HTTPS in production
 
