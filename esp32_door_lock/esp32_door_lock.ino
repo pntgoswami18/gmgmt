@@ -23,12 +23,12 @@
 
 // ==================== CONFIGURATION ====================
 // WiFi Configuration - Update these for your network
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID = "FTTH BSNL_5GEXT";
+const char* WIFI_PASSWORD = "vireng101167";
 
 // Gym Management System Configuration
-const char* GYM_SERVER_IP = "192.168.1.100";  // Update to your server IP
-const int GYM_SERVER_PORT = 8080;             // Your BIOMETRIC_PORT
+const char* GYM_SERVER_IP = "192.168.1.101";  // Update to your server IP
+const int GYM_SERVER_PORT = 5005;             // Your BIOMETRIC_PORT
 const char* DEVICE_ID = "DOOR_001";            // Unique identifier for this door
 
 // Pin Definitions
@@ -159,7 +159,10 @@ void initializePins() {
 void initializeFingerprint() {
   fingerprintSerial.begin(57600, SERIAL_8N1, FINGERPRINT_RX_PIN, FINGERPRINT_TX_PIN);
   
-  if (finger.begin(57600)) {
+  finger.begin(57600);
+  
+  // Test if sensor is responding
+  if (finger.verifyPassword()) {
     Serial.println("✅ AS608 Fingerprint sensor connected");
     
     finger.getParameters();
@@ -588,13 +591,23 @@ void setStatusLED(String status) {
 }
 
 void playTone(int frequency, int duration) {
-  // Simple tone generation using PWM
-  int channel = 0;
-  ledcSetup(channel, frequency, 8);
-  ledcAttachPin(BUZZER_PIN, channel);
-  ledcWriteTone(channel, frequency);
-  delay(duration);
-  ledcWriteTone(channel, 0);
+  // Simple tone generation using PWM with newer ESP32 Arduino core API
+  #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    // For ESP32 Arduino Core 3.x and newer
+    ledcAttach(BUZZER_PIN, frequency, 8);
+    ledcWriteTone(BUZZER_PIN, frequency);
+    delay(duration);
+    ledcWriteTone(BUZZER_PIN, 0);
+    ledcDetach(BUZZER_PIN);
+  #else
+    // For ESP32 Arduino Core 2.x and older
+    int channel = 0;
+    ledcSetup(channel, frequency, 8);
+    ledcAttachPin(BUZZER_PIN, channel);
+    ledcWriteTone(channel, frequency);
+    delay(duration);
+    ledcWriteTone(channel, 0);
+  #endif
 }
 
 String getISO8601Time() {

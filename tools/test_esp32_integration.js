@@ -9,11 +9,13 @@ const net = require('net');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-// Configuration
-const GYM_SERVER_HOST = 'localhost';
-const GYM_SERVER_PORT = 8080; // Your BIOMETRIC_PORT
-const API_BASE_URL = `http://localhost:3000/api/biometric`;
+// Configuration from environment variables
+const GYM_SERVER_HOST = process.env.BIOMETRIC_HOST || 'localhost';
+const GYM_SERVER_PORT = process.env.BIOMETRIC_PORT || 8080;
+const API_PORT = process.env.PORT || 3001;
+const API_BASE_URL = `http://localhost:${API_PORT}/api/biometric`;
 
 // Test device data
 const TEST_DEVICE_ID = 'DOOR_TEST_001';
@@ -384,7 +386,9 @@ function checkSystemRequirements() {
 
 // Windows-specific debugging info
 function showWindowsDebugInfo() {
-  if (os.platform() !== 'win32') return;
+  if (os.platform() !== 'win32') {
+    return;
+  }
   
   console.log('\n🪟 Windows-Specific Debug Information');
   console.log('=====================================');

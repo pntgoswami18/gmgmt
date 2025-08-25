@@ -21,25 +21,46 @@ cd client && npm install && cd ..
 cp env.sample .env
 # Edit .env and set:
 # ENABLE_BIOMETRIC=true
-# BIOMETRIC_PORT=8080
+# BIOMETRIC_PORT=5005  # or your preferred port
 # BIOMETRIC_HOST=0.0.0.0
 
 # Setup database
 npm run esp32:setup
 ```
 
-### 2. Upload ESP32 Firmware
+### 2. Install Required Arduino Libraries
+
+Before uploading the firmware, install these libraries in Arduino IDE:
+
+**Method 1: Using Arduino IDE Library Manager**
+1. Open Arduino IDE
+2. Go to **Tools → Manage Libraries...**
+3. Search and install the following libraries:
+   - `ArduinoJson` by Benoit Blanchon (version 6.x)
+   - `Adafruit Fingerprint Sensor Library` by Adafruit
+
+**Method 2: Using Arduino IDE Board Manager**
+1. Go to **File → Preferences**
+2. Add ESP32 board URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_dev_index.json`
+3. Go to **Tools → Board → Boards Manager**
+4. Search and install `esp32` by Espressif Systems
+
+### 3. Upload ESP32 Firmware
 
 1. Open `esp32_door_lock.ino` in Arduino IDE
-2. Update WiFi credentials and server IP:
+2. Select the correct board: **Tools → Board → ESP32 Arduino → ESP32 Dev Module**
+3. Update WiFi credentials and server IP:
    ```cpp
-   const char* ssid = "YOUR_WIFI_NAME";
-   const char* password = "YOUR_WIFI_PASSWORD";
-   const char* serverURL = "http://YOUR_SERVER_IP:8080";
+   const char* WIFI_SSID = "YOUR_WIFI_NAME";
+   const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+   const char* GYM_SERVER_IP = "YOUR_SERVER_IP";  // e.g., "192.168.1.100"
+   const int GYM_SERVER_PORT = 5005;              // Your BIOMETRIC_PORT from .env
    ```
-3. Upload to ESP32 device
+4. Connect ESP32 to computer via USB
+5. Select the correct port: **Tools → Port → (your ESP32 port)**
+6. Click **Upload** button
 
-### 3. Start the System
+### 4. Start the System
 
 ```bash
 # Start server with ESP32 support
@@ -49,7 +70,7 @@ npm run start:with-biometric
 # Frontend dashboard at http://localhost:3000
 ```
 
-### 4. Verify Setup
+### 5. Verify Setup
 
 ```bash
 # Test ESP32 integration
@@ -225,10 +246,22 @@ npm run biometric:check      # Check service status
 
 ## 🔍 Troubleshooting
 
+### Library Installation Issues
+- **ArduinoJson.h not found**: Install `ArduinoJson` library via Arduino IDE Library Manager
+- **Adafruit_Fingerprint.h not found**: Install `Adafruit Fingerprint Sensor Library` via Library Manager
+- **ESP32 board not found**: Add ESP32 board URL in Preferences and install via Board Manager
+- **Compilation errors**: Ensure you're using ArduinoJson version 6.x (not 7.x which has breaking changes)
+
+### Compilation Errors
+- **`finger.begin()` void to bool error**: Code has been updated to use `finger.verifyPassword()` for sensor detection
+- **`ledcSetup` not declared**: Code includes compatibility layer for both ESP32 Arduino Core 2.x and 3.x
+- **ESP32 core version issues**: The code automatically detects and uses the correct API for your Arduino core version
+
 ### Device Not Connecting
 - Check WiFi credentials in ESP32 code
-- Verify server IP and port (8080)
-- Check firewall settings
+- Verify server IP and port match your `.env` file (`BIOMETRIC_PORT`)
+- Ensure ESP32 code port matches the `BIOMETRIC_PORT` in your `.env` file
+- Check firewall settings for the configured port
 
 ### Fingerprint Not Working
 - Ensure AS608 sensor is wired correctly
