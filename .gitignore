@@ -17,3 +17,5 @@ data/data/*.sqlite*
 public/uploads/*
 !public/uploads/.gitkeep
 .vscode/settings.json
+esp32_door_lock/config.h
+.DS_Store
