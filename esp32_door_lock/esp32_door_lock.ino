@@ -750,7 +750,10 @@ void sendHeartbeat() {
 }
 
 void sendToServer(String jsonData) {
-  http.begin(String("http://") + gym_server_ip + ":" + gym_server_port);
+  // Send to the ESP32 webhook endpoint
+  String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/esp32-webhook";
+  
+  http.begin(url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
   
@@ -758,13 +761,13 @@ void sendToServer(String jsonData) {
   
   if (httpResponseCode > 0) {
     String response = http.getString();
-    Serial.printf("Data sent successfully (HTTP %d)\n", httpResponseCode);
+    Serial.printf("Data sent successfully (HTTP %d) to %s\n", httpResponseCode, url.c_str());
     
     if (httpResponseCode != 200) {
       Serial.printf("Server response: %s\n", response.c_str());
     }
   } else {
-    Serial.printf("HTTP POST failed: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.printf("HTTP POST failed to %s: %s\n", url.c_str(), http.errorToString(httpResponseCode).c_str());
   }
   
   http.end();

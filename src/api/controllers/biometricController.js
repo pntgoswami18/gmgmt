@@ -683,6 +683,115 @@ const getAllDevices = async (req, res) => {
   }
 };
 
+// ESP32 Device Webhook - receives data from ESP32 devices
+const esp32Webhook = async (req, res) => {
+  try {
+    const eventData = req.body;
+    
+    if (!eventData) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No data provided' 
+      });
+    }
+
+    // Log the received data for debugging
+    console.log('📱 ESP32 webhook data received:', JSON.stringify(eventData, null, 2));
+
+    // Extract common fields
+    const {
+      deviceId,
+      deviceType,
+      event,
+      status,
+      timestamp,
+      userId,
+      memberId,
+      ip_address,
+      wifi_rssi,
+      free_heap,
+      enrolled_prints
+    } = eventData;
+
+    if (!biometricIntegration) {
+      console.warn('⚠️ Biometric integration not available, storing raw event');
+      return res.json({ 
+        success: true, 
+        message: 'Event received but biometric integration not active',
+        stored: false
+      });
+    }
+
+    // Determine event type and handle accordingly
+    let eventType = 'unknown';
+    let memberIdToUse = null;
+    let biometricId = null;
+    let success = true;
+
+    if (event === 'heartbeat') {
+      eventType = 'heartbeat';
+    } else if (event === 'TimeLog') {
+      if (status === 'authorized') {
+        eventType = 'checkin'; // Could be checkin or checkout
+        memberIdToUse = userId || memberId;
+        biometricId = userId;
+        
+        // Find member by biometric ID for attendance logging
+        if (biometricId) {
+          const member = await biometricIntegration.findMemberByBiometricId(biometricId);
+          if (member) {
+            memberIdToUse = member.id;
+            await biometricIntegration.logMemberAttendance(member, timestamp, eventData);
+          }
+        }
+      } else if (status === 'unauthorized') {
+        eventType = 'access_denied';
+        success = false;
+      }
+    } else if (event === 'Enroll') {
+      eventType = status === 'enrollment_success' ? 'enrollment' : 'enrollment_failed';
+      memberIdToUse = userId || memberId;
+      biometricId = userId;
+      success = status === 'enrollment_success';
+    }
+
+    // Log the biometric event
+    const biometricEvent = {
+      member_id: memberIdToUse,
+      biometric_id: biometricId,
+      event_type: eventType,
+      device_id: deviceId || 'unknown',
+      timestamp: timestamp || new Date().toISOString(),
+      success: success,
+      raw_data: JSON.stringify({
+        ...eventData,
+        ip_address: ip_address || req.ip,
+        user_agent: req.get('User-Agent')
+      })
+    };
+
+    await biometricIntegration.logBiometricEvent(biometricEvent);
+
+    console.log(`✅ ESP32 event logged: ${eventType} from device ${deviceId}`);
+
+    // Send acknowledgment
+    res.json({ 
+      success: true, 
+      message: `Event processed: ${eventType}`,
+      device_id: deviceId,
+      timestamp: timestamp
+    });
+
+  } catch (error) {
+    console.error('❌ Error processing ESP32 webhook:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to process ESP32 data',
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   setBiometricIntegration,
   getMemberBiometricStatus,
@@ -700,5 +809,6 @@ module.exports = {
   unlockDoorRemotely,
   startRemoteEnrollment,
   getDeviceStatus,
-  getAllDevices
+  getAllDevices,
+  esp32Webhook
 };

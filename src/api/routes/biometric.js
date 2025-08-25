@@ -16,7 +16,8 @@ const {
   unlockDoorRemotely,
   startRemoteEnrollment,
   getDeviceStatus,
-  getAllDevices
+  getAllDevices,
+  esp32Webhook
 } = require('../controllers/biometricController');
 
 // System status and info
@@ -43,5 +44,8 @@ router.post('/devices/:deviceId/unlock', unlockDoorRemotely);
 router.post('/devices/:deviceId/enroll', startRemoteEnrollment);
 router.get('/devices/:deviceId/status', getDeviceStatus);
 router.get('/devices', getAllDevices);
+
+// ESP32 Webhook - receives data from ESP32 devices
+router.post('/esp32-webhook', esp32Webhook);
 
 module.exports = router;

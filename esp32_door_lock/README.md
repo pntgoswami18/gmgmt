@@ -134,6 +134,48 @@ const updateResponse = await fetch('http://192.168.1.100/api/config', {
 });
 ```
 
+## Data Communication
+
+The ESP32 automatically sends biometric data and heartbeats to your gym management server:
+
+**Endpoint**: `POST http://{gym_server_ip}:{gym_server_port}/api/biometric/esp32-webhook`
+
+**Data Types Sent**:
+- **Heartbeats**: Sent every 60 seconds to keep device status updated
+- **Fingerprint Recognition**: When authorized/unauthorized access attempts occur  
+- **Enrollment Events**: When fingerprint enrollment succeeds or fails
+- **System Events**: Emergency unlocks, button presses, etc.
+
+**Example Heartbeat**:
+```json
+{
+  "deviceId": "DOOR_001",
+  "deviceType": "esp32_door_lock", 
+  "status": "ready",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "event": "heartbeat",
+  "wifi_rssi": -45,
+  "free_heap": 234560,
+  "enrolled_prints": 5,
+  "ip_address": "192.168.1.100"
+}
+```
+
+**Example Access Event**:
+```json
+{
+  "userId": "3",
+  "memberId": "3", 
+  "timestamp": "2024-01-15T10:30:15Z",
+  "status": "authorized",
+  "deviceId": "DOOR_001",
+  "event": "TimeLog",
+  "verifMode": "FP",
+  "deviceType": "esp32_door_lock",
+  "location": "main_entrance"
+}
+```
+
 ## Migration from Hardcoded Configuration
 
 If you're upgrading from hardcoded credentials:

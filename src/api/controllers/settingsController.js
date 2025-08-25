@@ -14,6 +14,11 @@ exports.getAllSettings = async (req, res) => {
             settings[row.key] = value;
         }
         
+        // Add environment-based settings that are not stored in database
+        settings.main_server_port = process.env.PORT || '3001';
+        settings.biometric_port_env = process.env.BIOMETRIC_PORT || '8080';
+        settings.biometric_host_env = process.env.BIOMETRIC_HOST || '0.0.0.0';
+        
         console.log('Final settings object:', settings);
         res.json(settings);
     } catch (err) {
