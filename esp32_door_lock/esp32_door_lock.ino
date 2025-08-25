@@ -21,15 +21,37 @@
 #include <Update.h>
 #include <time.h>
 
-// ==================== CONFIGURATION ====================
-// WiFi Configuration - Update these for your network
-const char* WIFI_SSID = "FTTH BSNL_5GEXT";
-const char* WIFI_PASSWORD = "vireng101167";
+// Include configuration file if it exists (optional for custom defaults)
+#ifdef CONFIG_H
+#include "config.h"
+#endif
 
-// Gym Management System Configuration
-const char* GYM_SERVER_IP = "192.168.1.101";  // Update to your server IP
-const int GYM_SERVER_PORT = 5005;             // Your BIOMETRIC_PORT
-const char* DEVICE_ID = "DOOR_001";            // Unique identifier for this door
+// ==================== CONFIGURATION ====================
+// Default WiFi Configuration (fallback values - will be overridden by stored preferences)
+#ifndef DEFAULT_WIFI_SSID
+const char* DEFAULT_WIFI_SSID = "ESP32_Setup";
+#endif
+#ifndef DEFAULT_WIFI_PASSWORD
+const char* DEFAULT_WIFI_PASSWORD = "configure_me";
+#endif
+
+// Default Gym Management System Configuration  
+#ifndef DEFAULT_GYM_SERVER_IP
+const char* DEFAULT_GYM_SERVER_IP = "192.168.1.101";
+#endif
+#ifndef DEFAULT_GYM_SERVER_PORT
+const int DEFAULT_GYM_SERVER_PORT = 8080;
+#endif
+#ifndef DEFAULT_DEVICE_ID
+const char* DEFAULT_DEVICE_ID = "DOOR_001";
+#endif
+
+// Runtime configuration variables (loaded from preferences)
+String wifi_ssid = "";
+String wifi_password = "";
+String gym_server_ip = "";
+int gym_server_port = 8080;
+String device_id = "";
 
 // Pin Definitions
 #define FINGERPRINT_RX_PIN    16
@@ -64,6 +86,58 @@ unsigned long lastButtonCheck = 0;
 int fingerprintID = -1;
 String deviceStatus = "ready";
 
+// ==================== CONFIGURATION FUNCTIONS ====================
+void loadConfiguration() {
+  Serial.println("Loading configuration from preferences...");
+  
+  // Load WiFi configuration
+  wifi_ssid = preferences.getString("wifi_ssid", DEFAULT_WIFI_SSID);
+  wifi_password = preferences.getString("wifi_password", DEFAULT_WIFI_PASSWORD);
+  
+  // Load server configuration  
+  gym_server_ip = preferences.getString("server_ip", DEFAULT_GYM_SERVER_IP);
+  gym_server_port = preferences.getInt("server_port", DEFAULT_GYM_SERVER_PORT);
+  device_id = preferences.getString("device_id", DEFAULT_DEVICE_ID);
+  
+  Serial.println("Configuration loaded:");
+  Serial.printf("  WiFi SSID: %s\n", wifi_ssid.c_str());
+  Serial.printf("  WiFi Password: %s (length: %d)\n", maskPassword(wifi_password.c_str()).c_str(), wifi_password.length());
+  Serial.printf("  Server IP: %s\n", gym_server_ip.c_str());
+  Serial.printf("  Server Port: %d\n", gym_server_port);
+  Serial.printf("  Device ID: %s\n", device_id.c_str());
+}
+
+void saveConfiguration() {
+  Serial.println("Saving configuration to preferences...");
+  
+  // Save WiFi configuration
+  preferences.putString("wifi_ssid", wifi_ssid);
+  preferences.putString("wifi_password", wifi_password);
+  
+  // Save server configuration
+  preferences.putString("server_ip", gym_server_ip);
+  preferences.putInt("server_port", gym_server_port);
+  preferences.putString("device_id", device_id);
+  
+  Serial.println("Configuration saved successfully!");
+}
+
+void resetConfiguration() {
+  Serial.println("Resetting configuration to defaults...");
+  
+  // Reset to default values
+  wifi_ssid = DEFAULT_WIFI_SSID;
+  wifi_password = DEFAULT_WIFI_PASSWORD;
+  gym_server_ip = DEFAULT_GYM_SERVER_IP;
+  gym_server_port = DEFAULT_GYM_SERVER_PORT;
+  device_id = DEFAULT_DEVICE_ID;
+  
+  // Save defaults
+  saveConfiguration();
+  
+  Serial.println("Configuration reset complete!");
+}
+
 // ==================== SETUP FUNCTION ====================
 void setup() {
   // IMPORTANT: Set your Serial Monitor to 115200 baud rate
@@ -91,8 +165,9 @@ void setup() {
   // Initialize web server
   initializeWebServer();
   
-  // Initialize preferences
+  // Initialize preferences and load configuration
   preferences.begin("doorlock", false);
+  loadConfiguration();
   
   // System ready
   systemReady = true;
@@ -190,39 +265,110 @@ void initializeFingerprint() {
 }
 
 void connectToWiFi() {
-  Serial.printf("Connecting to WiFi: %s", WIFI_SSID);
+  Serial.println("========================================");
+  Serial.println("WiFi Connection Attempt");
+  Serial.println("========================================");
+  Serial.printf("SSID: %s\n", wifi_ssid.c_str());
+  Serial.printf("Password: %s (length: %d)\n", maskPassword(wifi_password.c_str()).c_str(), wifi_password.length());
+  Serial.printf("Timeout: %d seconds\n", WIFI_TIMEOUT / 1000);
+  Serial.println("----------------------------------------");
   
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Disconnect any previous connection
+  WiFi.disconnect(true);
+  delay(1000);
+  
+  Serial.printf("Starting connection to: %s", wifi_ssid.c_str());
+  WiFi.begin(wifi_ssid.c_str(), wifi_password.c_str());
   
   unsigned long startTime = millis();
+  int dotCount = 0;
+  
   while (WiFi.status() != WL_CONNECTED && millis() - startTime < WIFI_TIMEOUT) {
     delay(500);
     Serial.print(".");
+    dotCount++;
+    
+    // Show intermediate status every 10 dots (5 seconds)
+    if (dotCount % 10 == 0) {
+      Serial.printf(" [%s] ", getWiFiStatusText(WiFi.status()).c_str());
+    }
   }
   
+  Serial.println(); // New line after dots
+  
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println();
-    Serial.printf("WiFi connected! IP: %s\n", WiFi.localIP().toString().c_str());
-    Serial.printf("Signal strength: %d dBm\n", WiFi.RSSI());
+    Serial.println("========================================");
+    Serial.println("WiFi CONNECTION SUCCESSFUL!");
+    Serial.println("========================================");
+    Serial.printf("SSID: %s\n", WiFi.SSID().c_str());
+    Serial.printf("IP Address: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
+    Serial.printf("DNS: %s\n", WiFi.dnsIP().toString().c_str());
+    Serial.printf("Signal Strength: %d dBm (%s)\n", WiFi.RSSI(), getSignalQuality(WiFi.RSSI()).c_str());
+    Serial.printf("MAC Address: %s\n", WiFi.macAddress().c_str());
+    Serial.printf("Connection Time: %d ms\n", millis() - startTime);
+    Serial.println("========================================");
   } else {
+    Serial.println("========================================");
+    Serial.println("WiFi CONNECTION FAILED!");
+    Serial.println("========================================");
+    Serial.printf("Final Status: %s\n", getWiFiStatusText(WiFi.status()).c_str());
+    Serial.printf("Attempted SSID: %s\n", wifi_ssid.c_str());
+    Serial.printf("Time Elapsed: %d ms (timeout: %d ms)\n", millis() - startTime, WIFI_TIMEOUT);
     Serial.println();
-    Serial.println("WiFi connection failed - continuing in offline mode");
+    Serial.println("TROUBLESHOOTING TIPS:");
+    Serial.println("1. Check SSID spelling and case sensitivity");
+    Serial.println("2. Verify password is correct");
+    Serial.println("3. Ensure network is 2.4GHz (ESP32 doesn't support 5GHz)");
+    Serial.println("4. Check if network has MAC address filtering");
+    Serial.println("5. Verify network is not hidden");
+    Serial.println("6. Check router logs for connection attempts");
+    Serial.println("========================================");
+    Serial.println("Continuing in OFFLINE mode...");
   }
 }
 
 void reconnectWiFi() {
-  Serial.println("Reconnecting to WiFi...");
+  Serial.println("========================================");
+  Serial.println("WiFi RECONNECTION Attempt");
+  Serial.println("========================================");
+  Serial.printf("Previous Status: %s\n", getWiFiStatusText(WiFi.status()).c_str());
+  Serial.printf("Target SSID: %s\n", wifi_ssid.c_str());
+  Serial.println("----------------------------------------");
+  
   WiFi.disconnect();
+  delay(500);
   WiFi.reconnect();
   
   unsigned long startTime = millis();
+  int dotCount = 0;
+  
   while (WiFi.status() != WL_CONNECTED && millis() - startTime < 10000) {
     delay(500);
+    Serial.print(".");
+    dotCount++;
+    
+    // Show status every 4 dots (2 seconds)
+    if (dotCount % 4 == 0) {
+      Serial.printf(" [%s] ", getWiFiStatusText(WiFi.status()).c_str());
+    }
   }
   
+  Serial.println(); // New line after dots
+  
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("WiFi reconnected");
+    Serial.println("WiFi RECONNECTION SUCCESSFUL!");
+    Serial.printf("IP: %s | Signal: %d dBm (%s)\n", 
+                  WiFi.localIP().toString().c_str(), 
+                  WiFi.RSSI(), 
+                  getSignalQuality(WiFi.RSSI()).c_str());
+    Serial.printf("Reconnection time: %d ms\n", millis() - startTime);
+  } else {
+    Serial.println("WiFi RECONNECTION FAILED!");
+    Serial.printf("Final Status: %s\n", getWiFiStatusText(WiFi.status()).c_str());
+    Serial.println("Will retry on next heartbeat cycle...");
   }
+  Serial.println("========================================");
 }
 
 // ==================== FINGERPRINT FUNCTIONS ====================
@@ -478,7 +624,7 @@ void sendBiometricData(int memberID, String status) {
   doc["memberId"] = String(memberID);
   doc["timestamp"] = getISO8601Time();
   doc["status"] = status;
-  doc["deviceId"] = DEVICE_ID;
+  doc["deviceId"] = device_id;
   doc["event"] = "TimeLog";
   doc["verifMode"] = "FP";
   doc["deviceType"] = "esp32_door_lock";
@@ -501,7 +647,7 @@ void sendEnrollmentData(int memberID, String status) {
   doc["memberId"] = String(memberID);
   doc["timestamp"] = getISO8601Time();
   doc["status"] = status;
-  doc["deviceId"] = DEVICE_ID;
+  doc["deviceId"] = device_id;
   doc["event"] = "Enroll";
   doc["deviceType"] = "esp32_door_lock";
   doc["enrollmentStep"] = "complete";
@@ -518,7 +664,7 @@ void sendHeartbeat() {
   }
   
   StaticJsonDocument<200> doc;
-  doc["deviceId"] = DEVICE_ID;
+  doc["deviceId"] = device_id;
   doc["deviceType"] = "esp32_door_lock";
   doc["status"] = deviceStatus;
   doc["timestamp"] = getISO8601Time();
@@ -534,7 +680,7 @@ void sendHeartbeat() {
 }
 
 void sendToServer(String jsonData) {
-  http.begin(String("http://") + GYM_SERVER_IP + ":" + GYM_SERVER_PORT);
+  http.begin(String("http://") + gym_server_ip + ":" + gym_server_port);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
   
@@ -635,6 +781,51 @@ String getISO8601Time() {
   return String(timeString) + "Z";
 }
 
+String maskPassword(const char* password) {
+  String masked = "";
+  int len = strlen(password);
+  
+  if (len == 0) {
+    return "[EMPTY]";
+  } else if (len <= 2) {
+    return "**";
+  } else if (len <= 4) {
+    return String(password[0]) + "**" + String(password[len-1]);
+  } else {
+    // Show first 2 and last 1 characters, mask the rest
+    masked = String(password[0]) + String(password[1]);
+    for (int i = 2; i < len - 1; i++) {
+      masked += "*";
+    }
+    masked += String(password[len-1]);
+  }
+  
+  return masked;
+}
+
+String getWiFiStatusText(wl_status_t status) {
+  switch (status) {
+    case WL_IDLE_STATUS:     return "IDLE";
+    case WL_NO_SSID_AVAIL:   return "NO_SSID_AVAILABLE";
+    case WL_SCAN_COMPLETED:  return "SCAN_COMPLETED";
+    case WL_CONNECTED:       return "CONNECTED";
+    case WL_CONNECT_FAILED:  return "CONNECT_FAILED";
+    case WL_CONNECTION_LOST: return "CONNECTION_LOST";
+    case WL_WRONG_PASSWORD:  return "WRONG_PASSWORD";
+    case WL_DISCONNECTED:    return "DISCONNECTED";
+    default:                 return "UNKNOWN(" + String(status) + ")";
+  }
+}
+
+String getSignalQuality(int rssi) {
+  if (rssi > -30) return "Amazing";
+  if (rssi > -50) return "Excellent";
+  if (rssi > -60) return "Good";
+  if (rssi > -70) return "Fair";
+  if (rssi > -80) return "Weak";
+  return "Very Weak";
+}
+
 // ==================== WEB SERVER FUNCTIONS ====================
 void initializeWebServer() {
   // Root page
@@ -651,6 +842,10 @@ void initializeWebServer() {
   webServer.on("/config", HTTP_GET, handleConfig);
   webServer.on("/config", HTTP_POST, handleConfigSave);
   
+  // API endpoints for remote configuration
+  webServer.on("/api/config", HTTP_GET, handleApiConfig);
+  webServer.on("/api/config", HTTP_POST, handleApiConfigSave);
+  
   webServer.begin();
   Serial.println("Web server started on port 80");
 }
@@ -658,10 +853,10 @@ void initializeWebServer() {
 void handleRoot() {
   String html = "<!DOCTYPE html><html><head><title>ESP32 Door Lock</title></head><body>";
   html += "<h1>ESP32 Door Lock System</h1>";
-  html += "<p><strong>Device ID:</strong> " + String(DEVICE_ID) + "</p>";
+  html += "<p><strong>Device ID:</strong> " + device_id + "</p>";
   html += "<p><strong>Status:</strong> " + deviceStatus + "</p>";
-  html += "<p><strong>WiFi:</strong> " + String(WIFI_SSID) + " (" + String(WiFi.RSSI()) + " dBm)</p>";
-  html += "<p><strong>Server:</strong> " + String(GYM_SERVER_IP) + ":" + String(GYM_SERVER_PORT) + "</p>";
+  html += "<p><strong>WiFi:</strong> " + wifi_ssid + " (" + String(WiFi.RSSI()) + " dBm)</p>";
+  html += "<p><strong>Server:</strong> " + gym_server_ip + ":" + String(gym_server_port) + "</p>";
   html += "<p><strong>Enrolled Fingerprints:</strong> " + String(finger.templateCount) + "</p>";
   html += "<hr>";
   html += "<button onclick=\"fetch('/unlock', {method:'POST'})\">Emergency Unlock</button><br><br>";
@@ -674,14 +869,14 @@ void handleRoot() {
 
 void handleStatus() {
   StaticJsonDocument<400> doc;
-  doc["device_id"] = DEVICE_ID;
+  doc["device_id"] = device_id;
   doc["status"] = deviceStatus;
   doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
-  doc["wifi_ssid"] = WIFI_SSID;
+  doc["wifi_ssid"] = wifi_ssid;
   doc["wifi_rssi"] = WiFi.RSSI();
   doc["ip_address"] = WiFi.localIP().toString();
-  doc["server_ip"] = GYM_SERVER_IP;
-  doc["server_port"] = GYM_SERVER_PORT;
+  doc["server_ip"] = gym_server_ip;
+  doc["server_port"] = gym_server_port;
   doc["enrolled_prints"] = finger.templateCount;
   doc["free_heap"] = ESP.getFreeHeap();
   doc["uptime"] = millis();
@@ -704,23 +899,204 @@ void handleWebEnroll() {
 }
 
 void handleConfig() {
-  String html = "<!DOCTYPE html><html><head><title>Configuration</title></head><body>";
-  html += "<h1>Door Lock Configuration</h1>";
-  html += "<form method='POST'>";
-  html += "<p>Device ID: <input type='text' name='device_id' value='" + String(DEVICE_ID) + "'></p>";
-  html += "<p>Server IP: <input type='text' name='server_ip' value='" + String(GYM_SERVER_IP) + "'></p>";
-  html += "<p>Server Port: <input type='number' name='server_port' value='" + String(GYM_SERVER_PORT) + "'></p>";
-  html += "<p><input type='submit' value='Save Configuration'></p>";
+  String html = "<!DOCTYPE html><html><head><title>Configuration</title>";
+  html += "<style>body{font-family:Arial;margin:20px;}input,select{width:300px;padding:8px;margin:5px 0;}button{padding:10px 20px;margin:10px 5px;}</style>";
+  html += "</head><body>";
+  html += "<h1>ESP32 Door Lock Configuration</h1>";
+  
+  html += "<form method='POST' action='/config'>";
+  html += "<h3>WiFi Settings</h3>";
+  html += "<p>SSID: <br><input type='text' name='wifi_ssid' value='" + wifi_ssid + "' required></p>";
+  html += "<p>Password: <br><input type='password' name='wifi_password' value='" + wifi_password + "' required></p>";
+  
+  html += "<h3>Server Settings</h3>";
+  html += "<p>Device ID: <br><input type='text' name='device_id' value='" + device_id + "' required></p>";
+  html += "<p>Server IP: <br><input type='text' name='server_ip' value='" + gym_server_ip + "' required></p>";
+  html += "<p>Server Port: <br><input type='number' name='server_port' value='" + String(gym_server_port) + "' min='1' max='65535' required></p>";
+  
+  html += "<p><button type='submit' name='action' value='save'>Save Configuration</button>";
+  html += "<button type='submit' name='action' value='reset' onclick='return confirm(\"Reset to defaults?\")'>Reset to Defaults</button></p>";
   html += "</form>";
-  html += "<a href='/'>&lt; Back to Home</a>";
+  
+  html += "<hr><h3>Current Status</h3>";
+  html += "<p><strong>WiFi Status:</strong> " + getWiFiStatusText(WiFi.status()) + "</p>";
+  if (WiFi.status() == WL_CONNECTED) {
+    html += "<p><strong>IP Address:</strong> " + WiFi.localIP().toString() + "</p>";
+    html += "<p><strong>Signal Strength:</strong> " + String(WiFi.RSSI()) + " dBm</p>";
+  }
+  
+  html += "<p><a href='/'>&lt; Back to Home</a></p>";
   html += "</body></html>";
   
   webServer.send(200, "text/html", html);
 }
 
 void handleConfigSave() {
-  // In a production system, you would save these to preferences
-  // and restart the system with new configuration
-  String message = "Configuration saved successfully! Restart device to apply changes.";
-  webServer.send(200, "text/plain", message);
+  String action = webServer.arg("action");
+  
+  if (action == "reset") {
+    resetConfiguration();
+    webServer.send(200, "text/html", 
+      "<html><body><h2>Configuration Reset</h2>"
+      "<p>Configuration has been reset to defaults.</p>"
+      "<p>Device will restart in 3 seconds...</p>"
+      "<script>setTimeout(function(){window.location='/';},3000);</script>"
+      "</body></html>");
+    delay(3000);
+    ESP.restart();
+    return;
+  }
+  
+  // Save new configuration
+  bool needsRestart = false;
+  
+  // Check if WiFi settings changed
+  String new_wifi_ssid = webServer.arg("wifi_ssid");
+  String new_wifi_password = webServer.arg("wifi_password");
+  
+  if (new_wifi_ssid != wifi_ssid || new_wifi_password != wifi_password) {
+    needsRestart = true;
+    wifi_ssid = new_wifi_ssid;
+    wifi_password = new_wifi_password;
+  }
+  
+  // Update server settings
+  String new_device_id = webServer.arg("device_id");
+  String new_server_ip = webServer.arg("server_ip");
+  int new_server_port = webServer.arg("server_port").toInt();
+  
+  if (new_server_ip != gym_server_ip || new_server_port != gym_server_port) {
+    needsRestart = true;
+  }
+  
+  device_id = new_device_id;
+  gym_server_ip = new_server_ip;
+  gym_server_port = new_server_port;
+  
+  // Save to preferences
+  saveConfiguration();
+  
+  String message = "<html><body><h2>Configuration Saved</h2>";
+  message += "<p>New configuration has been saved successfully!</p>";
+  
+  if (needsRestart) {
+    message += "<p><strong>WiFi or server settings changed.</strong></p>";
+    message += "<p>Device will restart in 5 seconds to apply changes...</p>";
+    message += "<script>setTimeout(function(){window.location='/';},5000);</script>";
+  } else {
+    message += "<p><a href='/'>Return to Home</a></p>";
+  }
+  
+  message += "</body></html>";
+  webServer.send(200, "text/html", message);
+  
+  if (needsRestart) {
+    delay(5000);
+    ESP.restart();
+  }
+}
+
+void handleApiConfig() {
+  // Return current configuration as JSON
+  StaticJsonDocument<500> doc;
+  
+  doc["wifi_ssid"] = wifi_ssid;
+  doc["wifi_password_masked"] = maskPassword(wifi_password.c_str());
+  doc["device_id"] = device_id;
+  doc["gym_server_ip"] = gym_server_ip;
+  doc["gym_server_port"] = gym_server_port;
+  doc["wifi_status"] = getWiFiStatusText(WiFi.status());
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    doc["ip_address"] = WiFi.localIP().toString();
+    doc["wifi_rssi"] = WiFi.RSSI();
+  }
+  
+  String jsonString;
+  serializeJson(doc, jsonString);
+  
+  webServer.send(200, "application/json", jsonString);
+}
+
+void handleApiConfigSave() {
+  // Accept JSON configuration
+  if (!webServer.hasArg("plain")) {
+    webServer.send(400, "application/json", "{\"error\":\"No JSON body provided\"}");
+    return;
+  }
+  
+  String body = webServer.arg("plain");
+  StaticJsonDocument<500> doc;
+  
+  if (deserializeJson(doc, body)) {
+    webServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+  
+  bool needsRestart = false;
+  bool configChanged = false;
+  
+  // Update WiFi settings if provided
+  if (doc.containsKey("wifi_ssid")) {
+    String new_ssid = doc["wifi_ssid"].as<String>();
+    if (new_ssid != wifi_ssid) {
+      wifi_ssid = new_ssid;
+      needsRestart = true;
+      configChanged = true;
+    }
+  }
+  
+  if (doc.containsKey("wifi_password")) {
+    String new_password = doc["wifi_password"].as<String>();
+    if (new_password != wifi_password) {
+      wifi_password = new_password;
+      needsRestart = true;
+      configChanged = true;
+    }
+  }
+  
+  // Update server settings if provided
+  if (doc.containsKey("device_id")) {
+    device_id = doc["device_id"].as<String>();
+    configChanged = true;
+  }
+  
+  if (doc.containsKey("gym_server_ip")) {
+    String new_ip = doc["gym_server_ip"].as<String>();
+    if (new_ip != gym_server_ip) {
+      gym_server_ip = new_ip;
+      needsRestart = true;
+      configChanged = true;
+    }
+  }
+  
+  if (doc.containsKey("gym_server_port")) {
+    int new_port = doc["gym_server_port"].as<int>();
+    if (new_port != gym_server_port) {
+      gym_server_port = new_port;
+      needsRestart = true;
+      configChanged = true;
+    }
+  }
+  
+  if (configChanged) {
+    saveConfiguration();
+    
+    StaticJsonDocument<200> response;
+    response["success"] = true;
+    response["message"] = "Configuration updated successfully";
+    response["restart_required"] = needsRestart;
+    
+    String responseString;
+    serializeJson(response, responseString);
+    
+    webServer.send(200, "application/json", responseString);
+    
+    if (needsRestart && doc.containsKey("auto_restart") && doc["auto_restart"].as<bool>()) {
+      delay(1000);
+      ESP.restart();
+    }
+  } else {
+    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"No changes detected\"}");
+  }
 }

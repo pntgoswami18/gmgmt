@@ -1,0 +1,37 @@
+/*
+ * ESP32 Door Lock Configuration Template
+ * 
+ * Instructions:
+ * 1. Copy this file to "config.h" 
+ * 2. Update the values below with your actual configuration
+ * 3. Add "config.h" to your .gitignore to keep credentials secure
+ * 
+ * Note: These are fallback/default values. The ESP32 will load 
+ * saved preferences first, then use these if no saved config exists.
+ */
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ==================== WiFi Configuration ====================
+// Default WiFi credentials (can be changed via web interface)
+#define DEFAULT_WIFI_SSID "YourWiFiNetwork"
+#define DEFAULT_WIFI_PASSWORD "YourWiFiPassword"
+
+// ==================== Server Configuration ====================
+// Gym Management System server details
+#define DEFAULT_GYM_SERVER_IP "192.168.1.100"    // Your server's IP address
+#define DEFAULT_GYM_SERVER_PORT 8080              // Must match BIOMETRIC_PORT in .env
+#define DEFAULT_DEVICE_ID "DOOR_001"              // Unique identifier for this door
+
+// ==================== Advanced Settings ====================
+// WiFi connection timeout (milliseconds)
+#define WIFI_TIMEOUT 30000
+
+// Heartbeat interval (milliseconds) 
+#define HEARTBEAT_INTERVAL 60000
+
+// Door unlock duration (milliseconds)
+#define DOOR_UNLOCK_TIME 3000
+
+#endif // CONFIG_H
