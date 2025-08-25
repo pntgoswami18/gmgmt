@@ -310,6 +310,8 @@ const getMembersWithoutBiometric = async (req, res) => {
 // Test biometric connection
 const testConnection = async (req, res) => {
   try {
+    const { host, port } = req.body;
+    
     if (!biometricIntegration) {
       return res.status(503).json({ 
         success: false, 
@@ -317,7 +319,64 @@ const testConnection = async (req, res) => {
       });
     }
 
-    // Send test message to devices
+    // If host and port are provided, test specific ESP32 device connectivity
+    if (host && port) {
+      const net = require('net');
+      
+      return new Promise((resolve) => {
+        const socket = new net.Socket();
+        const timeout = 5000; // 5 second timeout
+        
+        socket.setTimeout(timeout);
+        
+        socket.on('connect', () => {
+          socket.destroy();
+          res.json({
+            success: true,
+            message: `ESP32 device is reachable at ${host}:${port}`,
+            data: {
+              host,
+              port,
+              status: 'reachable'
+            }
+          });
+          resolve();
+        });
+        
+        socket.on('timeout', () => {
+          socket.destroy();
+          res.json({
+            success: false,
+            message: `Connection timeout to ${host}:${port}. Device may be offline or unreachable.`,
+            data: {
+              host,
+              port,
+              status: 'timeout'
+            }
+          });
+          resolve();
+        });
+        
+        socket.on('error', (err) => {
+          socket.destroy();
+          res.json({
+            success: false,
+            message: `Cannot reach ESP32 device at ${host}:${port}. Error: ${err.code || err.message}`,
+            data: {
+              host,
+              port,
+              status: 'error',
+              error: err.code || err.message
+            }
+          });
+          resolve();
+        });
+        
+        socket.connect(port, host);
+      });
+    }
+
+    // If no specific host/port, test existing connected devices
     const testMessage = 'TEST:CONNECTION:' + new Date().toISOString();
     biometricIntegration.listener.broadcast(testMessage);
 
