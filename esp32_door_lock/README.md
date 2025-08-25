@@ -73,9 +73,11 @@ For development convenience, you can create a `config.h` file:
 
 ## Configuration Priority
 
-1. **Saved Preferences** (highest priority)
-2. **config.h values** (if file exists)
-3. **Built-in defaults** (lowest priority)
+1. **config.h values** (highest priority - deployment/developer defaults)
+2. **Saved Preferences** (medium priority - user web interface overrides)
+3. **Built-in defaults** (lowest priority - fallback values)
+
+**Important**: When `config.h` exists, its values take precedence on startup. User preferences from the web interface will only override `config.h` values after being explicitly saved through the configuration interface.
 
 ## Integration with Gym Management System
 

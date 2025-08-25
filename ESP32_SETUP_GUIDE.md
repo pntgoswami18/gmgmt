@@ -345,16 +345,22 @@ curl -X POST http://192.168.1.100/api/config \
 - Update network and server settings
 - Changes applied remotely via API
 
-#### 4. Configuration Header File (Development)
-**Optional**: Create `config.h` for custom development defaults:
+#### 4. Configuration Header File (Recommended for Deployment)
+**Priority Configuration**: Create `config.h` for deployment-specific defaults:
 
 ```bash
 # Copy template
 cp esp32_door_lock/config.h.example esp32_door_lock/config.h
 
-# Edit with your defaults
+# Edit with your deployment defaults
 nano esp32_door_lock/config.h
 ```
+
+**Key Benefits**:
+- `config.h` values take **highest priority** on device startup
+- Perfect for consistent deployment across multiple devices
+- Can still be overridden via web interface when needed
+- Survives firmware updates when properly managed
 
 ### Configuration Storage & Security
 
@@ -370,9 +376,11 @@ nano esp32_door_lock/config.h
 - **Access Control**: Web interface can be secured with authentication
 
 #### **Configuration Priority**
-1. **Saved Preferences** (highest priority - user configured)
-2. **config.h Values** (medium priority - developer defaults)
+1. **config.h Values** (highest priority - developer/deployment defaults)
+2. **Saved Preferences** (medium priority - user web interface overrides)
 3. **Built-in Defaults** (lowest priority - fallback values)
+
+**Note**: When `config.h` exists, its values take precedence. User preferences will only override `config.h` values after explicitly saving through the web interface.
 
 ### Default Configuration Values
 
@@ -390,18 +398,25 @@ Device ID: "DOOR_001"
 
 **If upgrading from an older version**:
 
-1. **Upload New Firmware**: Flash the updated ESP32 code
-2. **Initial Boot**: Device starts with safe default values
-3. **Configure via Web**: Access `http://ESP32_IP/config` to set your credentials
-4. **Verify Connection**: Check serial monitor for successful connection
-5. **Clean Up**: Remove any hardcoded credentials from source code
+1. **Create config.h**: Copy `config.h.example` and set your deployment defaults
+2. **Upload New Firmware**: Flash the updated ESP32 code with your `config.h`
+3. **Initial Boot**: Device starts with your `config.h` values (highest priority)
+4. **Optional Web Config**: Override specific settings via `http://ESP32_IP/config` if needed
+5. **Verify Connection**: Check serial monitor for configuration source and connection success
+
+**Configuration Priority After Migration**:
+1. **config.h values** - Your deployment defaults (primary)
+2. **User web overrides** - Only if explicitly configured via web interface
+3. **Built-in defaults** - Fallback if config.h missing
 
 **Benefits of New System**:
-- ✅ **No Recompilation**: Change WiFi/server settings without re-flashing
-- ✅ **Remote Management**: Configure devices from central dashboard
+- ✅ **config.h Priority**: Your deployment settings always take precedence
+- ✅ **Consistent Deployment**: Same configuration across multiple devices
+- ✅ **Selective Overrides**: Web interface can override specific settings when needed
+- ✅ **Easy Reset**: Clear preferences to restore config.h priority
+- ✅ **Version Control**: config.h can be managed with your codebase
+- ✅ **No Recompilation**: Change settings without re-flashing firmware
 - ✅ **Enhanced Security**: Encrypted storage and masked logging
-- ✅ **Easy Deployment**: Same firmware works across different networks
-- ✅ **Troubleshooting**: Detailed connection logs and status reporting
 
 ## 🛠️ Essential Commands
 

@@ -57,18 +57,18 @@ class BiometricIntegration {
       console.log(`   - Member ID: ${memberId || 'Not provided'}`);
       console.log(`   - Raw data:`, JSON.stringify(biometricData, null, 2));
       
-      // Find member using both sensor member ID and device user ID
-      const { member, identificationMethod } = await this.findMemberByAnyBiometricId(userId, memberId);
+      // Find member using device user ID
+      const member = await this.findMemberByBiometricId(userId);
       
       if (member) {
-        console.log(`👤 Member identified using: ${identificationMethod}`);
+        console.log(`👤 Member identified using device user ID: ${userId}`);
         
-        // Log attendance with identification method info
-        await this.logMemberAttendance(member, timestamp, identificationMethod, biometricData);
+        // Log attendance
+        await this.logMemberAttendance(member, timestamp, biometricData);
         
         // Check if member has active plan
         if (await this.hasActivePlan(member)) {
-          console.log(`✅ Access granted: ${member.name} (ID: ${member.id}) via ${identificationMethod}`);
+          console.log(`✅ Access granted: ${member.name} (ID: ${member.id}) via device user ID`);
           
           // You can add additional actions here:
           // - Send welcome message to display
@@ -83,7 +83,7 @@ class BiometricIntegration {
           this.notifyPlanExpired(member, biometricData);
         }
       } else {
-        console.log(`❌ Unknown biometric - User ID: ${userId}, Sensor Member ID: ${memberId || 'Not provided'}`);
+        console.log(`❌ Unknown biometric - User ID: ${userId}`);
         this.notifyUnknownUser(biometricData);
       }
     } catch (error) {
@@ -116,71 +116,15 @@ class BiometricIntegration {
     }
   }
 
-  async findMemberBySensorId(sensorMemberId) {
-    try {
-      // Look up member by sensor member ID
-      const query = 'SELECT * FROM members WHERE biometric_sensor_member_id = ?';
-      const result = await pool.query(query, [sensorMemberId]);
-      return result.rows[0] || null;
-    } catch (error) {
-      console.error('Error finding member by sensor member ID:', error);
-      return null;
-    }
-  }
 
-  async findMemberByAnyBiometricId(userId, sensorMemberId) {
-    try {
-      let member = null;
-      let identificationMethod = null;
 
-      // Priority 1: Try sensor member ID first (if provided and different from userId)
-      if (sensorMemberId && sensorMemberId !== userId) {
-        console.log(`🔍 Trying to find member by sensor member ID: ${sensorMemberId}`);
-        member = await this.findMemberBySensorId(sensorMemberId);
-        if (member) {
-          identificationMethod = 'sensor_member_id';
-          console.log(`✅ Member found by sensor member ID: ${member.name} (ID: ${member.id})`);
-        }
-      }
-
-      // Priority 2: Try device user ID (biometric_id) if sensor ID didn't work
-      if (!member && userId) {
-        console.log(`🔍 Trying to find member by device user ID: ${userId}`);
-        member = await this.findMemberByBiometricId(userId);
-        if (member) {
-          identificationMethod = 'device_user_id';
-          console.log(`✅ Member found by device user ID: ${member.name} (ID: ${member.id})`);
-        }
-      }
-
-      // Priority 3: If sensor member ID is same as user ID, try it anyway
-      if (!member && sensorMemberId && sensorMemberId === userId) {
-        console.log(`🔍 Sensor member ID same as user ID, already tried: ${sensorMemberId}`);
-      }
-
-      if (!member) {
-        console.log(`❌ No member found for user ID: ${userId}, sensor member ID: ${sensorMemberId || 'Not provided'}`);
-      }
-
-      return {
-        member,
-        identificationMethod
-      };
-    } catch (error) {
-      console.error('Error finding member by any biometric ID:', error);
-      return { member: null, identificationMethod: null };
-    }
-  }
-
-  async logMemberAttendance(member, timestamp, identificationMethod = null, biometricData = null) {
+  async logMemberAttendance(member, timestamp, biometricData = null) {
     try {
       const now = timestamp ? new Date(timestamp) : new Date();
       const dateStr = now.toISOString().split('T')[0];
       const timeStr = now.toISOString();
 
-      // Enhanced logging with identification method
-      const idMethodText = identificationMethod ? ` (identified via ${identificationMethod})` : '';
-      const sensorMemberId = biometricData?.memberId || 'N/A';
+      // Enhanced logging
       const deviceUserId = biometricData?.userId || 'N/A';
 
       // Check if member already checked in today
@@ -189,8 +133,8 @@ class BiometricIntegration {
       if (existingCheckIn && !existingCheckIn.check_out_time) {
         // Member is checking out
         await this.checkOutMember(existingCheckIn.id, timeStr);
-        console.log(`✅ ${member.name} checked OUT at ${now.toLocaleTimeString()}${idMethodText}`);
-        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
+        console.log(`✅ ${member.name} checked OUT at ${now.toLocaleTimeString()}`);
+        console.log(`   📊 Biometric ID - Device: ${deviceUserId}`);
         this.notifyCheckOut(member, now);
         
         // Log biometric event for checkout
@@ -198,14 +142,12 @@ class BiometricIntegration {
           await this.logBiometricEvent({
             member_id: member.id,
             biometric_id: biometricData.userId,
-            sensor_member_id: biometricData.memberId,
             event_type: 'checkout',
             device_id: biometricData.deviceId || 'unknown',
             timestamp: timeStr,
             success: true,
             raw_data: JSON.stringify({ 
               ...biometricData, 
-              identificationMethod,
               action: 'checkout'
             })
           });
@@ -219,8 +161,8 @@ class BiometricIntegration {
         };
         
         await this.createAttendanceRecord(attendanceData);
-        console.log(`✅ ${member.name} checked IN at ${now.toLocaleTimeString()}${idMethodText}`);
-        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
+        console.log(`✅ ${member.name} checked IN at ${now.toLocaleTimeString()}`);
+        console.log(`   📊 Biometric ID - Device: ${deviceUserId}`);
         this.notifyCheckIn(member, now);
         
         // Log biometric event for checkin
@@ -228,22 +170,20 @@ class BiometricIntegration {
           await this.logBiometricEvent({
             member_id: member.id,
             biometric_id: biometricData.userId,
-            sensor_member_id: biometricData.memberId,
             event_type: 'checkin',
             device_id: biometricData.deviceId || 'unknown',
             timestamp: timeStr,
             success: true,
             raw_data: JSON.stringify({ 
               ...biometricData, 
-              identificationMethod,
               action: 'checkin'
             })
           });
         }
       } else {
         // Member already completed their session today
-        console.log(`ℹ️ ${member.name} already completed their session today${idMethodText}`);
-        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
+        console.log(`ℹ️ ${member.name} already completed their session today`);
+        console.log(`   📊 Biometric ID - Device: ${deviceUserId}`);
         this.notifyAlreadyCompleted(member);
         
         // Log biometric event for already completed
@@ -251,14 +191,12 @@ class BiometricIntegration {
           await this.logBiometricEvent({
             member_id: member.id,
             biometric_id: biometricData.userId,
-            sensor_member_id: biometricData.memberId,
             event_type: 'already_completed',
             device_id: biometricData.deviceId || 'unknown',
             timestamp: timeStr,
             success: true,
             raw_data: JSON.stringify({ 
               ...biometricData, 
-              identificationMethod,
               action: 'already_completed'
             })
           });
@@ -504,24 +442,18 @@ class BiometricIntegration {
 
   async saveBiometricEnrollment(memberId, biometricId, enrollmentData) {
     try {
-      // Extract sensor member ID from enrollment data 
-      // Priority: memberId (if device sends it) -> userId -> biometricId as fallback
-      const sensorMemberId = enrollmentData.memberId || enrollmentData.userId || biometricId || null;
-      
       console.log(`📋 Storing biometric enrollment for member ${memberId}:`);
       console.log(`   - Device User ID (biometric_id): ${biometricId}`);
-      console.log(`   - Sensor Member ID (from device): ${sensorMemberId}`);
       console.log(`   - Raw enrollment data:`, JSON.stringify(enrollmentData, null, 2));
       
-      // Update member with biometric ID and sensor member ID
-      const updateMemberQuery = 'UPDATE members SET biometric_id = ?, biometric_sensor_member_id = ? WHERE id = ?';
-      await pool.query(updateMemberQuery, [biometricId, sensorMemberId, memberId]);
+      // Update member with biometric ID
+      const updateMemberQuery = 'UPDATE members SET biometric_id = ? WHERE id = ?';
+      await pool.query(updateMemberQuery, [biometricId, memberId]);
 
       // Log enrollment event
       const enrollmentEvent = {
         member_id: memberId,
         biometric_id: biometricId,
-        sensor_member_id: sensorMemberId,
         event_type: 'enrollment',
         device_id: enrollmentData.deviceId || 'unknown',
         timestamp: new Date().toISOString(),
@@ -543,15 +475,14 @@ class BiometricIntegration {
     try {
       const query = `
         INSERT INTO biometric_events (
-          member_id, biometric_id, sensor_member_id, event_type, device_id, 
+          member_id, biometric_id, event_type, device_id, 
           timestamp, success, error_message, raw_data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `;
       
       const result = await pool.query(query, [
         eventData.member_id,
         eventData.biometric_id,
-        eventData.sensor_member_id || null,
         eventData.event_type,
         eventData.device_id,
         eventData.timestamp,
@@ -568,14 +499,13 @@ class BiometricIntegration {
 
   async removeBiometricId(memberId) {
     try {
-      const query = 'UPDATE members SET biometric_id = NULL, biometric_sensor_member_id = NULL WHERE id = ?';
+      const query = 'UPDATE members SET biometric_id = NULL WHERE id = ?';
       await pool.query(query, [memberId]);
 
       // Log removal event
       await this.logBiometricEvent({
         member_id: memberId,
         biometric_id: null,
-        sensor_member_id: null,
         event_type: 'removal',
         device_id: 'admin',
         timestamp: new Date().toISOString(),
@@ -593,7 +523,7 @@ class BiometricIntegration {
 
   async getMemberBiometricStatus(memberId) {
     try {
-      const query = 'SELECT id, name, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?';
+      const query = 'SELECT id, name, biometric_id FROM members WHERE id = ?';
       
       const memberResult = await pool.query(query, [memberId]);
       const member = memberResult.rows[0];
@@ -617,7 +547,6 @@ class BiometricIntegration {
         member,
         hasFingerprint: !!member.biometric_id,
         biometricId: member.biometric_id,
-        sensorMemberId: member.biometric_sensor_member_id,
         enrollmentHistory: history
       };
     } catch (error) {
@@ -626,29 +555,140 @@ class BiometricIntegration {
     }
   }
 
-  // ESP32 specific methods
-  sendESP32Command(deviceId, command, data = {}) {
-    const commandMessage = {
-      deviceId: deviceId,
-      command: command,
-      data: data,
-      timestamp: new Date().toISOString(),
-      source: 'gym_management_system'
-    };
+  // ESP32 specific methods  
+  async sendESP32Command(deviceId, command, data = {}) {
+    try {
+      // Get device IP address from latest heartbeat
+      const deviceIP = await this.getDeviceIPAddress(deviceId);
+      
+      if (!deviceIP) {
+        throw new Error(`Device ${deviceId} IP address not found or device offline`);
+      }
 
-    const jsonMessage = JSON.stringify(commandMessage);
-    console.log(`📱 Sending command to ESP32 ${deviceId}: ${command}`);
-    
-    this.listener.broadcast(jsonMessage);
-    
-    // Log the command
-    this.logESP32Command(deviceId, command, data);
+      const commandMessage = {
+        deviceId: deviceId,
+        command: command,
+        data: data,
+        timestamp: new Date().toISOString(),
+        source: 'gym_management_system'
+      };
+
+      console.log(`📱 Sending HTTP command to ESP32 ${deviceId} at ${deviceIP}: ${command}`);
+      
+      // Send HTTP POST request to ESP32 device
+      const response = await this.sendHTTPCommandToDevice(deviceIP, commandMessage);
+      
+      // Log the command
+      await this.logESP32Command(deviceId, command, data);
+      
+      return response;
+    } catch (error) {
+      console.error(`❌ Failed to send command to ${deviceId}:`, error.message);
+      await this.logESP32Command(deviceId, command, data, error.message);
+      throw error;
+    }
+  }
+
+  async getDeviceIPAddress(deviceId) {
+    try {
+      const query = `
+        SELECT raw_data FROM biometric_events 
+        WHERE device_id = ? AND event_type = 'heartbeat' 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+      `;
+      
+      const result = await pool.query(query, [deviceId]);
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const rawData = result.rows[0].raw_data;
+      if (rawData) {
+        try {
+          const data = JSON.parse(rawData);
+          return data.ip_address;
+        } catch (parseError) {
+          console.error('Error parsing heartbeat data:', parseError);
+          return null;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting device IP address:', error);
+      return null;
+    }
+  }
+
+  async sendHTTPCommandToDevice(deviceIP, commandMessage) {
+    try {
+      const http = require('http');
+      
+      const postData = JSON.stringify(commandMessage);
+      
+      const options = {
+        hostname: deviceIP,
+        port: 80,
+        path: '/command',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData),
+          'User-Agent': 'GymManagementSystem/1.0'
+        },
+        timeout: 5000  // 5 second timeout
+      };
+
+      return new Promise((resolve, reject) => {
+        const req = http.request(options, (res) => {
+          let responseData = '';
+          
+          res.on('data', (chunk) => {
+            responseData += chunk;
+          });
+          
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              try {
+                const jsonResponse = JSON.parse(responseData);
+                console.log(`✅ ESP32 command successful: ${res.statusCode}`);
+                resolve(jsonResponse);
+              } catch (parseError) {
+                console.log(`✅ ESP32 command successful: ${res.statusCode} (non-JSON response)`);
+                resolve({ success: true, response: responseData });
+              }
+            } else {
+              console.error(`❌ ESP32 command failed: HTTP ${res.statusCode}`);
+              reject(new Error(`HTTP ${res.statusCode}: ${responseData}`));
+            }
+          });
+        });
+
+        req.on('error', (error) => {
+          console.error(`❌ HTTP request error:`, error.message);
+          reject(error);
+        });
+
+        req.on('timeout', () => {
+          req.destroy();
+          reject(new Error('Request timeout'));
+        });
+
+        req.write(postData);
+        req.end();
+      });
+    } catch (error) {
+      console.error('Error sending HTTP command:', error);
+      throw error;
+    }
   }
 
   async unlockDoorRemotely(deviceId, reason = 'admin_unlock') {
     console.log(`🔓 Remote unlock requested for device: ${deviceId}`);
     
-    this.sendESP32Command(deviceId, 'unlock_door', {
+    await this.sendESP32Command(deviceId, 'unlock_door', {
       reason: reason,
       duration: 5000 // 5 seconds
     });
@@ -657,7 +697,6 @@ class BiometricIntegration {
     await this.logBiometricEvent({
       member_id: null,
       biometric_id: null,
-      sensor_member_id: null,
       event_type: 'remote_unlock',
       device_id: deviceId,
       timestamp: new Date().toISOString(),
@@ -669,7 +708,7 @@ class BiometricIntegration {
   async startRemoteEnrollment(deviceId, memberId) {
     console.log(`👆 Remote enrollment started for member ${memberId} on device ${deviceId}`);
     
-    this.sendESP32Command(deviceId, 'start_enrollment', {
+    await this.sendESP32Command(deviceId, 'start_enrollment', {
       memberId: memberId,
       enrollmentId: memberId // Use member ID as enrollment ID
     });
@@ -677,20 +716,20 @@ class BiometricIntegration {
     return { success: true, message: 'Remote enrollment started' };
   }
 
-  async logESP32Command(deviceId, command, data) {
+  async logESP32Command(deviceId, command, data, error = null) {
     try {
       await this.logBiometricEvent({
         member_id: null,
         biometric_id: null,
-        sensor_member_id: null,
         event_type: 'esp32_command',
         device_id: deviceId,
         timestamp: new Date().toISOString(),
-        success: true,
+        success: !error,
+        error_message: error || null,
         raw_data: JSON.stringify({ command, data })
       });
-    } catch (error) {
-      console.error('Error logging ESP32 command:', error);
+    } catch (logError) {
+      console.error('Error logging ESP32 command:', logError);
     }
   }
 

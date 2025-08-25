@@ -55,7 +55,7 @@ const startEnrollment = async (req, res) => {
     }
 
     // Get member details
-    const memberResult = await pool.query('SELECT id, name, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?', [memberId]);
+    const memberResult = await pool.query('SELECT id, name, biometric_id FROM members WHERE id = ?', [memberId]);
     const member = memberResult.rows[0];
 
     if (!member) {
@@ -402,7 +402,7 @@ const testConnection = async (req, res) => {
 const manualEnrollment = async (req, res) => {
   try {
     const { memberId } = req.params;
-    const { deviceUserId, sensorMemberId } = req.body;
+    const { deviceUserId } = req.body;
     
     if (!deviceUserId) {
       return res.status(400).json({ 
@@ -411,16 +411,8 @@ const manualEnrollment = async (req, res) => {
       });
     }
 
-    // Validate sensor member ID if provided
-    if (sensorMemberId && typeof sensorMemberId !== 'string') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Sensor Member ID must be a string' 
-      });
-    }
-
     // Get member details
-    const memberResult = await pool.query('SELECT id, name, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?', [memberId]);
+    const memberResult = await pool.query('SELECT id, name, biometric_id FROM members WHERE id = ?', [memberId]);
     const member = memberResult.rows[0];
 
     if (!member) {
@@ -448,20 +440,19 @@ const manualEnrollment = async (req, res) => {
       });
     }
 
-    // Assign device user ID and sensor member ID to member
-    await pool.query('UPDATE members SET biometric_id = ?, biometric_sensor_member_id = ? WHERE id = ?', [deviceUserId, sensorMemberId || null, memberId]);
+    // Assign device user ID to member
+    await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', [deviceUserId, memberId]);
 
     // Log enrollment event
     if (biometricIntegration) {
       const enrollmentEvent = {
         member_id: memberId,
         biometric_id: deviceUserId,
-        sensor_member_id: sensorMemberId || null,
         event_type: 'manual_enrollment',
         device_id: 'manual',
         timestamp: new Date().toISOString(),
         success: true,
-        raw_data: JSON.stringify({ method: 'manual', deviceUserId, sensorMemberId })
+        raw_data: JSON.stringify({ method: 'manual', deviceUserId })
       };
 
       await biometricIntegration.logBiometricEvent(enrollmentEvent);
@@ -473,8 +464,7 @@ const manualEnrollment = async (req, res) => {
       data: {
         memberId: memberId,
         memberName: member.name,
-        deviceUserId: deviceUserId,
-        sensorMemberId: sensorMemberId || null
+        deviceUserId: deviceUserId
       }
     });
   } catch (error) {
@@ -494,7 +484,7 @@ const getMemberBiometricDetails = async (req, res) => {
     
     // Get member details with all biometric fields
     const memberResult = await pool.query(
-      'SELECT id, name, email, phone, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?', 
+      'SELECT id, name, email, phone, biometric_id FROM members WHERE id = ?', 
       [memberId]
     );
     const member = memberResult.rows[0];
@@ -509,7 +499,7 @@ const getMemberBiometricDetails = async (req, res) => {
     // Get biometric event history
     const eventsResult = await pool.query(`
       SELECT 
-        id, member_id, biometric_id, sensor_member_id, event_type, 
+        id, member_id, biometric_id, event_type, 
         device_id, timestamp, success, error_message, raw_data
       FROM biometric_events 
       WHERE member_id = ? 
@@ -524,15 +514,12 @@ const getMemberBiometricDetails = async (req, res) => {
         email: member.email,
         phone: member.phone,
         biometric_id: member.biometric_id,
-        biometric_sensor_member_id: member.biometric_sensor_member_id,
         has_biometric_data: !!member.biometric_id
       },
       events: eventsResult.rows || [],
       summary: {
         total_events: eventsResult.rows?.length || 0,
         device_user_id: member.biometric_id,
-        sensor_member_id: member.biometric_sensor_member_id,
-        ids_match: member.biometric_id === member.biometric_sensor_member_id,
         last_event: eventsResult.rows?.[0] || null
       }
     };

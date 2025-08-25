@@ -21,10 +21,8 @@
 #include <Update.h>
 #include <time.h>
 
-// Include configuration file if it exists (optional for custom defaults)
-#ifdef CONFIG_H
+// Include configuration file (comment out if config.h doesn't exist)
 #include "config.h"
-#endif
 
 // ==================== CONFIGURATION ====================
 // Default WiFi Configuration (fallback values - will be overridden by stored preferences)
@@ -88,23 +86,81 @@ String deviceStatus = "ready";
 
 // ==================== CONFIGURATION FUNCTIONS ====================
 void loadConfiguration() {
-  Serial.println("Loading configuration from preferences...");
+  Serial.println("Loading configuration with priority: config.h > preferences > defaults...");
   
-  // Load WiFi configuration
-  wifi_ssid = preferences.getString("wifi_ssid", DEFAULT_WIFI_SSID);
-  wifi_password = preferences.getString("wifi_password", DEFAULT_WIFI_PASSWORD);
+  // Debug: Show what defaults are available
+  Serial.printf("DEFAULT_WIFI_SSID: '%s'\n", DEFAULT_WIFI_SSID);
+  Serial.printf("DEFAULT_WIFI_PASSWORD: '%s' (length: %d)\n", DEFAULT_WIFI_PASSWORD, strlen(DEFAULT_WIFI_PASSWORD));
+  Serial.printf("DEFAULT_GYM_SERVER_IP: '%s'\n", DEFAULT_GYM_SERVER_IP);
+  Serial.printf("DEFAULT_GYM_SERVER_PORT: %s\n", DEFAULT_GYM_SERVER_PORT);
+  Serial.printf("DEFAULT_DEVICE_ID: '%s'\n", DEFAULT_DEVICE_ID);
   
-  // Load server configuration  
-  gym_server_ip = preferences.getString("server_ip", DEFAULT_GYM_SERVER_IP);
-  gym_server_port = preferences.getInt("server_port", DEFAULT_GYM_SERVER_PORT);
-  device_id = preferences.getString("device_id", DEFAULT_DEVICE_ID);
+  // PRIORITY 1: Load from config.h if it exists and defines values
+  #ifdef CONFIG_H
+    Serial.println("Using config.h values as primary configuration source");
+    wifi_ssid = DEFAULT_WIFI_SSID;
+    wifi_password = DEFAULT_WIFI_PASSWORD;
+    gym_server_ip = DEFAULT_GYM_SERVER_IP;
+    gym_server_port = String(DEFAULT_GYM_SERVER_PORT).toInt();  // Convert string to int
+    device_id = DEFAULT_DEVICE_ID;
+  #else
+    // PRIORITY 2: Load from preferences if config.h not available
+    Serial.println("config.h not found, loading from preferences...");
+    wifi_ssid = preferences.getString("wifi_ssid", DEFAULT_WIFI_SSID);
+    wifi_password = preferences.getString("wifi_password", DEFAULT_WIFI_PASSWORD);
+    gym_server_ip = preferences.getString("server_ip", DEFAULT_GYM_SERVER_IP);
+    gym_server_port = preferences.getInt("server_port", String(DEFAULT_GYM_SERVER_PORT).toInt());
+    device_id = preferences.getString("device_id", DEFAULT_DEVICE_ID);
+  #endif
   
-  Serial.println("Configuration loaded:");
-  Serial.printf("  WiFi SSID: %s\n", wifi_ssid.c_str());
-  Serial.printf("  WiFi Password: %s (length: %d)\n", maskPassword(wifi_password.c_str()).c_str(), wifi_password.length());
-  Serial.printf("  Server IP: %s\n", gym_server_ip.c_str());
+  // Allow preferences to override config.h ONLY if explicitly saved through web interface
+  // Check if user has customized configuration via web interface
+  if (preferences.getBool("user_configured", false)) {
+    Serial.println("User customization detected, checking for preference overrides...");
+    
+    String pref_wifi_ssid = preferences.getString("wifi_ssid", "");
+    String pref_wifi_password = preferences.getString("wifi_password", "");
+    String pref_server_ip = preferences.getString("server_ip", "");
+    int pref_server_port = preferences.getInt("server_port", 0);
+    String pref_device_id = preferences.getString("device_id", "");
+    
+    // Only override config.h values if preferences contain non-empty values
+    if (pref_wifi_ssid.length() > 0 && pref_wifi_ssid != DEFAULT_WIFI_SSID) {
+      wifi_ssid = pref_wifi_ssid;
+      Serial.println("  Overriding WiFi SSID from preferences");
+    }
+    if (pref_wifi_password.length() > 0 && pref_wifi_password != DEFAULT_WIFI_PASSWORD) {
+      wifi_password = pref_wifi_password;
+      Serial.println("  Overriding WiFi password from preferences");
+    }
+    if (pref_server_ip.length() > 0 && pref_server_ip != DEFAULT_GYM_SERVER_IP) {
+      gym_server_ip = pref_server_ip;
+      Serial.println("  Overriding server IP from preferences");
+    }
+    if (pref_server_port > 0 && pref_server_port != String(DEFAULT_GYM_SERVER_PORT).toInt()) {
+      gym_server_port = pref_server_port;
+      Serial.println("  Overriding server port from preferences");
+    }
+    if (pref_device_id.length() > 0 && pref_device_id != DEFAULT_DEVICE_ID) {
+      device_id = pref_device_id;
+      Serial.println("  Overriding device ID from preferences");
+    }
+  }
+  
+  Serial.println("========================================");
+  Serial.println("FINAL CONFIGURATION LOADED:");
+  #ifdef CONFIG_H
+    Serial.println("✅ Source: config.h (with possible user overrides)");
+  #else
+    Serial.println("⚠️  Source: preferences + built-in defaults");
+  #endif
+  Serial.printf("  WiFi SSID: '%s'\n", wifi_ssid.c_str());
+  Serial.printf("  WiFi Password: '%s' (length: %d)\n", maskPassword(wifi_password.c_str()).c_str(), wifi_password.length());
+  Serial.printf("  Server IP: '%s'\n", gym_server_ip.c_str());
   Serial.printf("  Server Port: %d\n", gym_server_port);
-  Serial.printf("  Device ID: %s\n", device_id.c_str());
+  Serial.printf("  Device ID: '%s'\n", device_id.c_str());
+  Serial.println("========================================");
+  Serial.println("Proceeding to WiFi connection...");
 }
 
 void saveConfiguration() {
@@ -119,23 +175,31 @@ void saveConfiguration() {
   preferences.putInt("server_port", gym_server_port);
   preferences.putString("device_id", device_id);
   
+  // Mark as user-configured to allow overriding config.h values
+  preferences.putBool("user_configured", true);
+  
   Serial.println("Configuration saved successfully!");
+  Serial.println("Note: Saved preferences will override config.h values on next restart");
 }
 
 void resetConfiguration() {
   Serial.println("Resetting configuration to defaults...");
   
+  // Clear all preferences to restore config.h priority
+  preferences.clear();
+  
   // Reset to default values
   wifi_ssid = DEFAULT_WIFI_SSID;
   wifi_password = DEFAULT_WIFI_PASSWORD;
   gym_server_ip = DEFAULT_GYM_SERVER_IP;
-  gym_server_port = DEFAULT_GYM_SERVER_PORT;
+  gym_server_port = String(DEFAULT_GYM_SERVER_PORT).toInt();  // Convert string to int
   device_id = DEFAULT_DEVICE_ID;
   
-  // Save defaults
-  saveConfiguration();
-  
-  Serial.println("Configuration reset complete!");
+  #ifdef CONFIG_H
+    Serial.println("Configuration reset complete! config.h values will be used on next restart.");
+  #else
+    Serial.println("Configuration reset complete! Built-in defaults will be used.");
+  #endif
 }
 
 // ==================== SETUP FUNCTION ====================
@@ -150,13 +214,22 @@ void setup() {
   Serial.println("========================================");
   Serial.println("ESP32 Fingerprint Door Lock Starting...");
   Serial.println("Baud Rate: 115200");
+  #ifdef CONFIG_H
+    Serial.println("config.h: DETECTED and LOADED");
+  #else
+    Serial.println("config.h: NOT FOUND");
+  #endif
   Serial.println("========================================");
+  
+  // Initialize preferences and load configuration FIRST
+  preferences.begin("doorlock", false);
+  loadConfiguration();
   
   // Initialize hardware
   initializePins();
   initializeFingerprint();
   
-  // Connect to WiFi
+  // Connect to WiFi (now with loaded configuration)
   connectToWiFi();
   
   // Initialize time
@@ -164,10 +237,6 @@ void setup() {
   
   // Initialize web server
   initializeWebServer();
-  
-  // Initialize preferences and load configuration
-  preferences.begin("doorlock", false);
-  loadConfiguration();
   
   // System ready
   systemReady = true;
@@ -663,7 +732,7 @@ void sendHeartbeat() {
     return;
   }
   
-  StaticJsonDocument<200> doc;
+  StaticJsonDocument<250> doc;
   doc["deviceId"] = device_id;
   doc["deviceType"] = "esp32_door_lock";
   doc["status"] = deviceStatus;
@@ -672,6 +741,7 @@ void sendHeartbeat() {
   doc["wifi_rssi"] = WiFi.RSSI();
   doc["free_heap"] = ESP.getFreeHeap();
   doc["enrolled_prints"] = finger.templateCount;
+  doc["ip_address"] = WiFi.localIP().toString();
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -811,7 +881,6 @@ String getWiFiStatusText(wl_status_t status) {
     case WL_CONNECTED:       return "CONNECTED";
     case WL_CONNECT_FAILED:  return "CONNECT_FAILED";
     case WL_CONNECTION_LOST: return "CONNECTION_LOST";
-    case WL_WRONG_PASSWORD:  return "WRONG_PASSWORD";
     case WL_DISCONNECTED:    return "DISCONNECTED";
     default:                 return "UNKNOWN(" + String(status) + ")";
   }
@@ -837,6 +906,9 @@ void initializeWebServer() {
   // Control API
   webServer.on("/unlock", HTTP_POST, handleUnlock);
   webServer.on("/enroll", HTTP_POST, handleWebEnroll);
+  
+  // Remote command handling from gym management server
+  webServer.on("/command", HTTP_POST, handleRemoteCommand);
   
   // Configuration
   webServer.on("/config", HTTP_GET, handleConfig);
@@ -896,6 +968,60 @@ void handleUnlock() {
 void handleWebEnroll() {
   startEnrollmentMode();
   webServer.send(200, "text/plain", "Enrollment mode started");
+}
+
+void handleRemoteCommand() {
+  if (!webServer.hasArg("plain")) {
+    webServer.send(400, "application/json", "{\"error\":\"No JSON body provided\"}");
+    return;
+  }
+  
+  String body = webServer.arg("plain");
+  StaticJsonDocument<500> doc;
+  
+  if (deserializeJson(doc, body)) {
+    webServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+  
+  // Extract command details
+  String command = doc["command"].as<String>();
+  String deviceId = doc["deviceId"].as<String>();
+  
+  // Verify this command is for our device
+  if (deviceId != device_id && !deviceId.isEmpty()) {
+    webServer.send(400, "application/json", "{\"error\":\"Command not for this device\"}");
+    return;
+  }
+  
+  Serial.printf("📱 Received remote command: %s\n", command.c_str());
+  
+  // Handle different commands
+  if (command == "start_enrollment") {
+    // Extract member ID if provided
+    if (doc["data"]["memberId"]) {
+      int memberId = doc["data"]["memberId"].as<int>();
+      Serial.printf("Starting enrollment for member ID: %d\n", memberId);
+      // Store member ID for enrollment tracking
+      enrollmentID = memberId;
+    }
+    
+    startEnrollmentMode();
+    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment mode started\"}");
+    
+  } else if (command == "unlock_door") {
+    emergencyUnlock();
+    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Door unlocked\"}");
+    
+  } else if (command == "access_granted") {
+    // This could be used for additional access logging
+    unlockDoor();
+    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Access granted\"}");
+    
+  } else {
+    Serial.printf("⚠️  Unknown command: %s\n", command.c_str());
+    webServer.send(400, "application/json", "{\"error\":\"Unknown command\"}");
+  }
 }
 
 void handleConfig() {

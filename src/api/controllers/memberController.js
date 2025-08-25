@@ -136,7 +136,7 @@ exports.updateMember = async (req, res) => {
 // Upsert biometric data for a member
 exports.upsertBiometric = async (req, res) => {
     const { id } = req.params; // member id
-    const { device_user_id, sensor_member_id, template } = req.body; // template may be base64 string
+    const { device_user_id, template } = req.body; // template may be base64 string
 
     if (!device_user_id && !template) {
         return res.status(400).json({ message: 'device_user_id or template is required' });
@@ -161,19 +161,18 @@ exports.upsertBiometric = async (req, res) => {
 
         // Update member with biometric data
         await pool.query(
-            'UPDATE members SET biometric_id = ?, biometric_sensor_member_id = ? WHERE id = ?',
-            [device_user_id || null, sensor_member_id || null, id]
+            'UPDATE members SET biometric_id = ? WHERE id = ?',
+            [device_user_id || null, id]
         );
 
         // Get updated member data
-        const updatedMember = await pool.query('SELECT id, name, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?', [id]);
+        const updatedMember = await pool.query('SELECT id, name, biometric_id FROM members WHERE id = ?', [id]);
         
         res.json({ 
             message: 'Biometric data saved', 
             member: updatedMember.rows[0],
             biometric: {
                 device_user_id: device_user_id || null,
-                sensor_member_id: sensor_member_id || null,
                 template: template || null
             }
         });
