@@ -86,6 +86,13 @@ int fingerprintID = -1;
 String deviceStatus = "ready";
 struct tm timeinfo;  // Global variable for time functions
 
+// ==================== FUNCTION DECLARATIONS ====================
+void sendEnrollmentProgress(String progressStep);
+void sendEnrollmentData(int memberID, String status);
+void sendBiometricData(int memberID, String status);
+void sendHeartbeat();
+void sendToServer(String jsonData);
+
 // ==================== TIME FUNCTIONS ====================
 void waitForNTPTime() {
   Serial.println("Waiting for NTP time synchronization...");
@@ -622,10 +629,14 @@ int enrollFingerprint() {
   unsigned long startTime = millis();
   const unsigned long ENROLLMENT_TIMEOUT = 30000; // 30 seconds timeout
   
+  // Send enrollment progress update
+  sendEnrollmentProgress("scanning_first_finger");
+  
   while (p != FINGERPRINT_OK) {
     // Check for timeout
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - no finger detected");
+      sendEnrollmentProgress("timeout_first_finger");
       return -1;
     }
     
@@ -633,18 +644,22 @@ int enrollFingerprint() {
     switch (p) {
       case FINGERPRINT_OK:
         Serial.println("Image taken");
+        sendEnrollmentProgress("first_finger_captured");
         break;
       case FINGERPRINT_NOFINGER:
         delay(50); // Small delay to prevent overwhelming the sensor
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
         Serial.println("Communication error");
+        sendEnrollmentProgress("communication_error");
         return -1;
       case FINGERPRINT_IMAGEFAIL:
         Serial.println("Imaging error");
+        sendEnrollmentProgress("imaging_error");
         return -1;
       default:
         Serial.println("Unknown error");
+        sendEnrollmentProgress("unknown_error");
         return -1;
     }
   }
@@ -653,10 +668,12 @@ int enrollFingerprint() {
   p = finger.image2Tz(1);
   if (p != FINGERPRINT_OK) {
     Serial.println("Template creation failed");
+    sendEnrollmentProgress("template_creation_failed");
     return -1;
   }
   
   Serial.println("Remove finger...");
+  sendEnrollmentProgress("remove_finger");
   delay(2000);
   
   p = 0;
@@ -665,6 +682,7 @@ int enrollFingerprint() {
     // Check for timeout on finger removal
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - finger not removed");
+      sendEnrollmentProgress("timeout_finger_removal");
       return -1;
     }
     
@@ -673,12 +691,14 @@ int enrollFingerprint() {
   }
   
   Serial.println("Place same finger again...");
+  sendEnrollmentProgress("scanning_second_finger");
   startTime = millis(); // Reset timeout for second finger placement
   
   while (p != FINGERPRINT_OK) {
     // Check for timeout on second finger placement
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - second finger placement failed");
+      sendEnrollmentProgress("timeout_second_finger");
       return -1;
     }
     
@@ -686,18 +706,22 @@ int enrollFingerprint() {
     switch (p) {
       case FINGERPRINT_OK:
         Serial.println("Image taken");
+        sendEnrollmentProgress("second_finger_captured");
         break;
       case FINGERPRINT_NOFINGER:
         delay(50); // Small delay to prevent overwhelming the sensor
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
         Serial.println("Communication error");
+        sendEnrollmentProgress("communication_error");
         return -1;
       case FINGERPRINT_IMAGEFAIL:
         Serial.println("Imaging error");
+        sendEnrollmentProgress("imaging_error");
         return -1;
       default:
         Serial.println("Unknown error");
+        sendEnrollmentProgress("unknown_error");
         return -1;
     }
   }
@@ -706,25 +730,32 @@ int enrollFingerprint() {
   p = finger.image2Tz(2);
   if (p != FINGERPRINT_OK) {
     Serial.println("Second template creation failed");
+    sendEnrollmentProgress("second_template_failed");
     return -1;
   }
   
   // Create model
+  sendEnrollmentProgress("creating_model");
   p = finger.createModel();
   if (p == FINGERPRINT_OK) {
     Serial.println("Prints matched!");
+    sendEnrollmentProgress("prints_matched");
   } else {
     Serial.println("Prints did not match");
+    sendEnrollmentProgress("prints_mismatch");
     return -1;
   }
   
   // Store model
+  sendEnrollmentProgress("storing_model");
   p = finger.storeModel(enrollmentID);
   if (p == FINGERPRINT_OK) {
     Serial.println("Stored!");
+    sendEnrollmentProgress("model_stored");
     return 1;  // Success
   } else {
     Serial.println("Storage failed");
+    sendEnrollmentProgress("storage_failed");
     return -1;
   }
 }
@@ -784,6 +815,29 @@ void sendEnrollmentData(int memberID, String status) {
   String jsonString;
   serializeJson(doc, jsonString);
   
+  sendToServer(jsonString);
+}
+
+void sendEnrollmentProgress(String progressStep) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected - enrollment progress not sent");
+    return;
+  }
+  
+  StaticJsonDocument<300> doc;
+  doc["userId"] = String(enrollmentID);
+  doc["memberId"] = String(enrollmentID);
+  doc["timestamp"] = getISO8601Time();
+  doc["status"] = "enrollment_progress";
+  doc["deviceId"] = device_id;
+  doc["event"] = "Enroll";
+  doc["deviceType"] = "esp32_door_lock";
+  doc["enrollmentStep"] = progressStep;
+  
+  String jsonString;
+  serializeJson(doc, jsonString);
+  
+  Serial.printf("📤 Sending enrollment progress: %s\n", progressStep.c_str());
   sendToServer(jsonString);
 }
 

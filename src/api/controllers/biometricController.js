@@ -1014,12 +1014,58 @@ const esp32Webhook = async (req, res) => {
       if (status === 'enrollment_success') {
         eventType = 'enrollment';
         success = true;
+        
+        // IMPORTANT: Update enrollment status in biometricIntegration service
+        // This ensures the frontend knows enrollment is complete
+        try {
+          await biometricIntegration.handleEnrollmentData({
+            userId: userId || memberId,
+            status: 'enrollment_success',
+            enrollmentStep: 'complete',
+            deviceId: deviceId,
+            timestamp: timestamp
+          });
+          console.log(`✅ Enrollment status updated for user ${userId || memberId}`);
+        } catch (enrollmentError) {
+          console.error('❌ Error updating enrollment status:', enrollmentError);
+        }
+        
       } else if (status === 'enrollment_cancelled') {
         eventType = 'enrollment_cancelled';
         success = false;
+        
+        // Update enrollment status for cancellation
+        try {
+          await biometricIntegration.handleEnrollmentData({
+            userId: userId || memberId,
+            status: 'enrollment_cancelled',
+            enrollmentStep: 'cancelled',
+            deviceId: deviceId,
+            timestamp: timestamp
+          });
+          console.log(`⏹️ Enrollment cancellation status updated for user ${userId || memberId}`);
+        } catch (enrollmentError) {
+          console.error('❌ Error updating enrollment cancellation status:', enrollmentError);
+        }
+        
       } else {
         eventType = 'enrollment_failed';
         success = false;
+        
+        // Update enrollment status for failure
+        try {
+          await biometricIntegration.handleEnrollmentData({
+            userId: userId || memberId,
+            status: 'enrollment_failed',
+            enrollmentStep: 'failed',
+            deviceId: deviceId,
+            timestamp: timestamp,
+            error: 'ESP32 enrollment failed'
+          });
+          console.log(`❌ Enrollment failure status updated for user ${userId || memberId}`);
+        } catch (enrollmentError) {
+          console.error('❌ Error updating enrollment failure status:', enrollmentError);
+        }
       }
       
       memberIdToUse = userId || memberId;

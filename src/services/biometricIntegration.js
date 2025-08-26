@@ -449,9 +449,22 @@ class BiometricIntegration {
         }
         
       } else if (status === 'enrollment_progress' || enrollmentStep) {
-        // Enrollment in progress
+        // Enrollment in progress - update progress and keep mode active
         console.log(`🔄 Enrollment progress for ${this.enrollmentMode.memberName}: ${enrollmentStep || 'in progress'}`);
+        
+        // Update enrollment mode with current progress
+        this.enrollmentMode.currentStep = enrollmentStep;
+        this.enrollmentMode.lastProgressUpdate = new Date();
+        
         this.listener.broadcast(`ENROLL:PROGRESS:${enrollmentStep || 'scanning'}`);
+        return false;
+        
+      } else if (status === 'enrollment_cancelled') {
+        // Enrollment cancelled
+        console.log(`⏹️ Enrollment cancelled for ${this.enrollmentMode.memberName}`);
+        
+        this.listener.broadcast(`ENROLL:CANCELLED:${this.enrollmentMode.memberName}`);
+        this.stopEnrollmentMode('cancelled');
         return false;
       }
       
