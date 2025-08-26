@@ -128,6 +128,89 @@ const stopEnrollment = async (req, res) => {
   }
 };
 
+// Cancel enrollment (send cancel command to ESP32 devices)
+const cancelEnrollment = async (req, res) => {
+  try {
+    const { memberId, reason = 'user_cancelled' } = req.body;
+    
+    if (!biometricIntegration) {
+      return res.status(503).json({ 
+        success: false, 
+        message: 'Biometric service not available' 
+      });
+    }
+
+    // Get member details for logging
+    const memberResult = await pool.query('SELECT id, name FROM members WHERE id = ?', [memberId]);
+    const member = memberResult.rows[0];
+    const memberName = member ? member.name : `Member ${memberId}`;
+
+    // Send cancel command to all online ESP32 devices
+    const devicesQuery = `
+      SELECT DISTINCT device_id 
+      FROM biometric_events 
+      WHERE device_id IS NOT NULL 
+        AND timestamp > datetime('now', '-5 minutes')
+      GROUP BY device_id
+    `;
+    
+    const devicesResult = await pool.query(devicesQuery);
+    const devices = devicesResult.rows || [];
+    
+    let cancelsSent = 0;
+    const results = [];
+
+    for (const device of devices) {
+      try {
+        await biometricIntegration.sendESP32Command(device.device_id, 'cancel_enrollment', {
+          memberId: memberId,
+          reason: reason
+        });
+        cancelsSent++;
+        results.push({ deviceId: device.device_id, status: 'sent' });
+      } catch (error) {
+        console.error(`Failed to send cancel to ${device.device_id}:`, error.message);
+        results.push({ deviceId: device.device_id, status: 'failed', error: error.message });
+      }
+    }
+
+    // Log cancellation event
+    await biometricIntegration.logBiometricEvent({
+      member_id: memberId,
+      biometric_id: null,
+      event_type: 'enrollment_cancelled',
+      device_id: 'system',
+      timestamp: new Date().toISOString(),
+      success: true,
+      raw_data: JSON.stringify({ 
+        reason,
+        memberName,
+        devicesCancelled: cancelsSent,
+        results
+      })
+    });
+
+    res.json({ 
+      success: true, 
+      message: `Enrollment cancelled for ${memberName}. Cancel commands sent to ${cancelsSent} device(s).`,
+      data: {
+        memberId,
+        memberName,
+        cancelsSent,
+        totalDevices: devices.length,
+        results
+      }
+    });
+  } catch (error) {
+    console.error('Error cancelling enrollment:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to cancel enrollment',
+      error: error.message 
+    });
+  }
+};
+
 // Remove biometric data for a member
 const removeBiometricData = async (req, res) => {
   try {
@@ -303,6 +386,35 @@ const getMembersWithoutBiometric = async (req, res) => {
       success: false, 
       message: 'Failed to get members without biometric data',
       error: error.message 
+    });
+  }
+};
+
+// Get members with biometric data
+const getMembersWithBiometric = async (req, res) => {
+  try {
+    const query = `
+      SELECT id, name, email, phone, join_date, biometric_id
+      FROM members 
+      WHERE biometric_id IS NOT NULL AND biometric_id != '' AND is_active = 1
+      ORDER BY name ASC
+    `;
+    
+    const result = await pool.query(query);
+    const members = result.rows || [];
+    
+    console.log(`Found ${members.length} members with biometric data`);
+    
+    res.json({
+      success: true,
+      data: members
+    });
+  } catch (error) {
+    console.error('Error getting members with biometric:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get members with biometric data',
+      error: error.message
     });
   }
 };
@@ -730,6 +842,39 @@ const esp32Webhook = async (req, res) => {
 
     if (event === 'heartbeat') {
       eventType = 'heartbeat';
+      // For heartbeat events, respond immediately and process asynchronously
+      res.json({ 
+        success: true, 
+        message: 'Heartbeat received',
+        device_id: deviceId,
+        timestamp: timestamp
+      });
+      
+      // Process heartbeat asynchronously to avoid blocking response
+      setImmediate(async () => {
+        try {
+          const biometricEvent = {
+            member_id: null,
+            biometric_id: null,
+            event_type: eventType,
+            device_id: deviceId || 'unknown',
+            timestamp: timestamp || new Date().toISOString(),
+            success: true,
+            raw_data: JSON.stringify({
+              ...eventData,
+              ip_address: ip_address || req.ip,
+              user_agent: req.get('User-Agent')
+            })
+          };
+          
+          await biometricIntegration.logBiometricEvent(biometricEvent);
+          console.log(`✅ ESP32 heartbeat logged from device ${deviceId}`);
+        } catch (error) {
+          console.error(`❌ Error logging heartbeat from ${deviceId}:`, error);
+        }
+      });
+      
+      return; // Exit early for heartbeat events
     } else if (event === 'TimeLog') {
       if (status === 'authorized') {
         eventType = 'checkin'; // Could be checkin or checkout
@@ -749,10 +894,29 @@ const esp32Webhook = async (req, res) => {
         success = false;
       }
     } else if (event === 'Enroll') {
-      eventType = status === 'enrollment_success' ? 'enrollment' : 'enrollment_failed';
+      if (status === 'enrollment_success') {
+        eventType = 'enrollment';
+        success = true;
+      } else if (status === 'enrollment_cancelled') {
+        eventType = 'enrollment_cancelled';
+        success = false;
+      } else {
+        eventType = 'enrollment_failed';
+        success = false;
+      }
+      
       memberIdToUse = userId || memberId;
       biometricId = userId;
-      success = status === 'enrollment_success';
+      
+      // Update member's biometric_id when enrollment succeeds
+      if (success && memberIdToUse && biometricId) {
+        try {
+          await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', [biometricId, memberIdToUse]);
+          console.log(`✅ Updated member ${memberIdToUse} with biometric_id ${biometricId}`);
+        } catch (updateError) {
+          console.error('❌ Failed to update member biometric_id:', updateError);
+        }
+      }
     }
 
     // Log the biometric event
@@ -798,12 +962,14 @@ module.exports = {
   getMemberBiometricDetails,
   startEnrollment,
   stopEnrollment,
+  cancelEnrollment,
   removeBiometricData,
   manualEnrollment,
   getEnrollmentStatus,
   getBiometricEvents,
   getSystemStatus,
   getMembersWithoutBiometric,
+  getMembersWithBiometric,
   testConnection,
   // ESP32 specific endpoints
   unlockDoorRemotely,

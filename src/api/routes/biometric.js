@@ -5,12 +5,14 @@ const {
   getMemberBiometricDetails,
   startEnrollment,
   stopEnrollment,
+  cancelEnrollment,
   removeBiometricData,
   manualEnrollment,
   getEnrollmentStatus,
   getBiometricEvents,
   getSystemStatus,
   getMembersWithoutBiometric,
+  getMembersWithBiometric,
   testConnection,
   // ESP32 specific endpoints
   unlockDoorRemotely,
@@ -27,6 +29,7 @@ router.post('/test-connection', testConnection);
 
 // Member biometric management
 router.get('/members/without-biometric', getMembersWithoutBiometric);
+router.get('/members/with-biometric', getMembersWithBiometric);
 router.get('/members/:memberId/status', getMemberBiometricStatus);
 router.get('/members/:memberId/details', getMemberBiometricDetails);
 router.post('/members/:memberId/enroll', startEnrollment);
@@ -35,6 +38,7 @@ router.delete('/members/:memberId/biometric', removeBiometricData);
 
 // Enrollment management
 router.post('/enrollment/stop', stopEnrollment);
+router.post('/enrollment/cancel', cancelEnrollment);
 
 // Events and logs
 router.get('/events', getBiometricEvents);

@@ -44,7 +44,8 @@ cd client && npm install && cd ..
 cp env.sample .env
 # Edit .env and set:
 # ENABLE_BIOMETRIC=true
-# BIOMETRIC_PORT=8080  # Port where gym server listens for ESP32 data
+# PORT=3001              # Main server port - ESP32 MUST connect to this port
+# BIOMETRIC_PORT=8080    # Internal biometric service port (legacy, not used by ESP32)
 # BIOMETRIC_HOST=0.0.0.0
 
 # Setup database
@@ -87,7 +88,7 @@ Before uploading the firmware, install these libraries in Arduino IDE:
    # DEFAULT_WIFI_SSID = "YOUR_WIFI_NAME"
    # DEFAULT_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"  
    # DEFAULT_GYM_SERVER_IP = "YOUR_SERVER_IP"
-   # DEFAULT_GYM_SERVER_PORT = 8080
+   # DEFAULT_GYM_SERVER_PORT = 3001  # Must match main server PORT in .env
    ```
 
 4. Connect ESP32 to computer via USB
@@ -233,7 +234,7 @@ graph TD
 
 ### Device Settings
 1. **WiFi**: Connect ESP32 to same network as server
-2. **Server Communication**: ESP32 sends data to server on BIOMETRIC_PORT (default: 8080)
+2. **Server Communication**: ESP32 sends data to main server on PORT (default: 3001)
 3. **Device ID**: Set unique device identifier (default: "DOOR_001")
 4. **ESP32 Web Interface**: Available on port 80 (http://ESP32_IP/)
 5. **Web Configuration**: Use Settings → ESP32 Devices → Configuration to set connection parameters
@@ -287,6 +288,71 @@ graph TD
 - Real-time status monitoring
 - Configuration management (`/config` endpoint)
 
+## ⚠️ Critical: Port Configuration
+
+**IMPORTANT: Correct Port Configuration**
+
+The ESP32 must connect to the **main server port** (PORT in .env), NOT the BIOMETRIC_PORT:
+
+- **✅ Correct**: `DEFAULT_GYM_SERVER_PORT = "3001"` (matches main server PORT)
+- **❌ Wrong**: `DEFAULT_GYM_SERVER_PORT = "8080"` (causes HTTP timeout errors)
+
+**Why this matters**:
+- The main server runs on PORT (default: 3001) and hosts the ESP32 webhook endpoint
+- BIOMETRIC_PORT (8080) is for internal biometric services, not ESP32 communication
+- Using the wrong port causes "read Timeout" errors in ESP32 serial monitor
+
+**Quick Check**:
+```bash
+# Your .env file should have:
+PORT=3001              # Main server port (ESP32 connects here)
+BIOMETRIC_PORT=8080    # Internal service port (NOT for ESP32)
+
+# ESP32 config.h should have:
+#define DEFAULT_GYM_SERVER_PORT "3001"  // Must match PORT
+```
+
+**Data Communication Endpoint**:
+```
+POST http://{gym_server_ip}:{gym_server_port}/api/biometric/esp32-webhook
+```
+
+**Data Types Sent by ESP32**:
+- **Heartbeats**: Sent every 60 seconds to keep device status updated
+- **Fingerprint Recognition**: When authorized/unauthorized access attempts occur  
+- **Enrollment Events**: When fingerprint enrollment succeeds or fails
+- **System Events**: Emergency unlocks, button presses, etc.
+
+**Example Heartbeat**:
+```json
+{
+  "deviceId": "DOOR_001",
+  "deviceType": "esp32_door_lock", 
+  "status": "ready",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "event": "heartbeat",
+  "wifi_rssi": -45,
+  "free_heap": 234560,
+  "enrolled_prints": 5,
+  "ip_address": "192.168.1.100"
+}
+```
+
+**Example Access Event**:
+```json
+{
+  "userId": "3",
+  "memberId": "3", 
+  "timestamp": "2024-01-15T10:30:15Z",
+  "status": "authorized",
+  "deviceId": "DOOR_001",
+  "event": "TimeLog",
+  "verifMode": "FP",
+  "deviceType": "esp32_door_lock",
+  "location": "main_entrance"
+}
+```
+
 ## 🔧 Configuration Management
 
 The ESP32 door lock system now supports **dynamic, environment-driven configuration** instead of hardcoded credentials. This provides enhanced security, easier deployment, and remote management capabilities.
@@ -321,6 +387,36 @@ The ESP32 provides a built-in web interface for easy configuration:
 - `GET /api/config` - Retrieve current configuration
 - `POST /api/config` - Update configuration via JSON
 
+**Get Current Config**: `GET http://ESP32_IP/api/config`
+
+Returns current configuration as JSON:
+```json
+{
+  "wifi_ssid": "YourNetwork",
+  "wifi_password_masked": "Yo****rd",
+  "device_id": "DOOR_001",
+  "gym_server_ip": "192.168.1.101",
+  "gym_server_port": 3001,
+  "wifi_status": "CONNECTED",
+  "ip_address": "192.168.1.100",
+  "wifi_rssi": -45
+}
+```
+
+**Update Config**: `POST http://ESP32_IP/api/config`
+
+Send JSON with new configuration:
+```json
+{
+  "wifi_ssid": "NewNetwork",
+  "wifi_password": "NewPassword",
+  "device_id": "DOOR_002",
+  "gym_server_ip": "192.168.1.200",
+  "gym_server_port": 3001,
+  "auto_restart": true
+}
+```
+
 **Example API Usage**:
 ```bash
 # Get current configuration
@@ -333,7 +429,7 @@ curl -X POST http://192.168.1.100/api/config \
     "wifi_ssid": "NewNetwork",
     "wifi_password": "NewPassword",
     "gym_server_ip": "192.168.1.200",
-    "gym_server_port": 8080,
+    "gym_server_port": 3001,
     "auto_restart": true
   }'
 ```
@@ -344,6 +440,28 @@ curl -X POST http://192.168.1.100/api/config \
 - Select device to configure
 - Update network and server settings
 - Changes applied remotely via API
+
+**Example JavaScript Integration**:
+```javascript
+// Get ESP32 configuration
+const response = await fetch('http://192.168.1.100/api/config');
+const config = await response.json();
+
+// Update configuration
+const updateResponse = await fetch('http://192.168.1.100/api/config', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    wifi_ssid: 'NewNetwork',
+    wifi_password: 'NewPassword',
+    gym_server_ip: '192.168.1.200',
+    gym_server_port: 3001,
+    auto_restart: true
+  })
+});
+```
 
 #### 4. Configuration Header File (Recommended for Deployment)
 **Priority Configuration**: Create `config.h` for deployment-specific defaults:
@@ -368,12 +486,14 @@ nano esp32_door_lock/config.h
 - **ESP32 Preferences**: All settings stored in encrypted EEPROM
 - **Automatic Loading**: Configuration loaded on every boot
 - **Backup Safe**: Settings survive firmware updates and power cycles
+- **Fallback Values**: If no saved configuration exists, defaults are used
 
 #### **Security Features**
 - **Password Masking**: Credentials masked in logs (`MyPassword123` → `My*******3`)
 - **No Hardcoding**: No credentials stored in source code
 - **Secure Transmission**: HTTPS support for production deployments
 - **Access Control**: Web interface can be secured with authentication
+- **Secure Storage**: Credentials are stored in encrypted preferences
 
 #### **Configuration Priority**
 1. **config.h Values** (highest priority - developer/deployment defaults)
@@ -390,7 +510,7 @@ When no configuration is saved, the ESP32 uses these safe defaults:
 WiFi SSID: "ESP32_Setup"
 WiFi Password: "configure_me"
 Server IP: "192.168.1.101"
-Server Port: 8080
+Server Port: 3001               # Main server port (DEFAULT)
 Device ID: "DOOR_001"
 ```
 
@@ -417,6 +537,13 @@ Device ID: "DOOR_001"
 - ✅ **Version Control**: config.h can be managed with your codebase
 - ✅ **No Recompilation**: Change settings without re-flashing firmware
 - ✅ **Enhanced Security**: Encrypted storage and masked logging
+
+**⚠️ Port Migration Checklist**:
+- [ ] Update `config.h` with `DEFAULT_GYM_SERVER_PORT = "3001"`
+- [ ] Verify `.env` has `PORT=3001` (not `BIOMETRIC_PORT`)
+- [ ] Test endpoint: `curl -X POST http://SERVER_IP:3001/api/biometric/esp32-webhook`
+- [ ] Upload updated firmware to ESP32
+- [ ] Monitor serial output for successful connections (no timeout errors)
 
 ## 🛠️ Essential Commands
 
@@ -462,13 +589,38 @@ npm run biometric:check      # Check service status
 - **Troubleshooting Tips**: ESP32 automatically displays network troubleshooting suggestions on connection failure
 
 #### **Server Configuration Issues**
-- **Port Verification**: Ensure ESP32 server port matches your `.env` file (`BIOMETRIC_PORT=8080`)
+
+**⚠️ CRITICAL: Port Configuration**
+- **ESP32 Port**: MUST match the main server `PORT` in `.env` file (default: 3001)
+- **❌ Common Mistake**: Using `BIOMETRIC_PORT` (8080) instead of main `PORT` (3001)
+- **✅ Correct Setting**: ESP32 `DEFAULT_GYM_SERVER_PORT = 3001` (matches main server)
+- **⚠️ Wrong Setting**: ESP32 `DEFAULT_GYM_SERVER_PORT = 8080` (causes timeout errors)
+
+**Port Configuration Verification**:
+```bash
+# Check your .env file - ESP32 should use the PORT value, not BIOMETRIC_PORT
+cat .env | grep PORT
+# Should show: PORT=3001 (or your custom port)
+
+# Test the correct endpoint manually
+curl -X POST http://YOUR_SERVER_IP:3001/api/biometric/esp32-webhook \
+  -H "Content-Type: application/json" \
+  -d '{"deviceId":"TEST","event":"test"}'
+```
+
+**Port Configuration Troubleshooting**:
+- **HTTP Timeout Errors**: Usually caused by wrong port configuration
+- **Check ESP32 Serial Monitor**: Look for "HTTP POST failed" or "read Timeout" messages
+- **Verify Ports Match**: ESP32 port must match main server PORT (not BIOMETRIC_PORT)
+- **Test Endpoint**: Use curl to test `http://SERVER_IP:3001/api/biometric/esp32-webhook`
+
+**Other Configuration Issues**:
 - **IP Address**: Verify gym server IP is correct and accessible from ESP32 network
 - **API Configuration**: Use `POST /api/config` to update server settings remotely
 - **Remote Configuration**: Use gym management system **Settings → ESP32 Devices** to configure devices
 
 #### **Network Access Issues**
-- **Firewall**: Check firewall settings for ports 80 (ESP32 web interface) and 8080 (biometric data)
+- **Firewall**: Check firewall settings for ports 80 (ESP32 web interface) and 3001 (main server)
 - **Network Restrictions**: Ensure ESP32 can reach gym server (same network or proper routing)
 - **WiFi Requirements**: ESP32 only supports 2.4GHz networks (not 5GHz)
 - **MAC Filtering**: Check if router has MAC address filtering enabled
@@ -537,7 +689,7 @@ SELECT * FROM devices;
 ### Configuration Files
 - **ESP32 Firmware**: `esp32_door_lock/esp32_door_lock.ino`
 - **Configuration Template**: `esp32_door_lock/config.h.example`
-- **Documentation**: `esp32_door_lock/README.md` - Detailed configuration guide
+- **Main Documentation**: `ESP32_SETUP_GUIDE.md` - Complete setup and configuration guide
 - **Environment Variables**: `.env` file for server configuration
 
 ### Database Schema
@@ -556,6 +708,7 @@ SELECT * FROM devices;
 - **Remote API**: JSON-based configuration updates
 - **Persistent Storage**: ESP32 preferences (EEPROM) for settings
 - **Security**: Password masking and encrypted storage
+- **Priority System**: config.h > saved preferences > built-in defaults
 
 ## 🎯 Production Deployment
 
@@ -563,7 +716,7 @@ SELECT * FROM devices;
 
 #### **Network Security**
 - Use **WPA3 WiFi encryption** for wireless networks
-- Configure **firewall rules** for ports 80 (ESP32 web interface) and 8080 (biometric data)
+- Configure **firewall rules** for ports 80 (ESP32 web interface) and 3001 (main server)
 - Implement **network segmentation** for IoT devices
 - Use **VPN access** for remote management
 

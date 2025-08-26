@@ -32,6 +32,9 @@
 // Heartbeat interval (milliseconds) 
 #define HEARTBEAT_INTERVAL 60000
 
+// HTTP request timeout for server communications (milliseconds)
+#define HTTP_TIMEOUT 15000
+
 // Door unlock duration (milliseconds)
 #define DOOR_UNLOCK_TIME 3000
 

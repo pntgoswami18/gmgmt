@@ -66,6 +66,7 @@ String device_id = "";
 #define DOOR_UNLOCK_TIME      3000    // 3 seconds
 #define WIFI_TIMEOUT          30000   // 30 seconds
 #define HEARTBEAT_INTERVAL    60000   // 1 minute
+#define HTTP_TIMEOUT          15000   // 15 seconds for server communications
 #define BUTTON_DEBOUNCE       200     // 200ms
 
 // ==================== GLOBAL OBJECTS ====================
@@ -586,13 +587,23 @@ int enrollFingerprint() {
   int p = -1;
   
   Serial.println("Place finger on sensor...");
+  unsigned long startTime = millis();
+  const unsigned long ENROLLMENT_TIMEOUT = 30000; // 30 seconds timeout
+  
   while (p != FINGERPRINT_OK) {
+    // Check for timeout
+    if (millis() - startTime > ENROLLMENT_TIMEOUT) {
+      Serial.println("Enrollment timeout - no finger detected");
+      return -1;
+    }
+    
     p = finger.getImage();
     switch (p) {
       case FINGERPRINT_OK:
         Serial.println("Image taken");
         break;
       case FINGERPRINT_NOFINGER:
+        delay(50); // Small delay to prevent overwhelming the sensor
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
         Serial.println("Communication error");
@@ -617,18 +628,35 @@ int enrollFingerprint() {
   delay(2000);
   
   p = 0;
+  startTime = millis(); // Reset timeout for finger removal
   while (p != FINGERPRINT_NOFINGER) {
+    // Check for timeout on finger removal
+    if (millis() - startTime > ENROLLMENT_TIMEOUT) {
+      Serial.println("Enrollment timeout - finger not removed");
+      return -1;
+    }
+    
     p = finger.getImage();
+    delay(50); // Small delay to prevent overwhelming the sensor
   }
   
   Serial.println("Place same finger again...");
+  startTime = millis(); // Reset timeout for second finger placement
+  
   while (p != FINGERPRINT_OK) {
+    // Check for timeout on second finger placement
+    if (millis() - startTime > ENROLLMENT_TIMEOUT) {
+      Serial.println("Enrollment timeout - second finger placement failed");
+      return -1;
+    }
+    
     p = finger.getImage();
     switch (p) {
       case FINGERPRINT_OK:
         Serial.println("Image taken");
         break;
       case FINGERPRINT_NOFINGER:
+        delay(50); // Small delay to prevent overwhelming the sensor
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
         Serial.println("Communication error");
@@ -756,6 +784,9 @@ void sendToServer(String jsonData) {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+  
+  // Set timeout to handle slower server responses
+  http.setTimeout(HTTP_TIMEOUT);
   
   int httpResponseCode = http.POST(jsonData);
   
@@ -1020,6 +1051,27 @@ void handleRemoteCommand() {
     // This could be used for additional access logging
     unlockDoor();
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Access granted\"}");
+    
+  } else if (command == "cancel_enrollment") {
+    // Cancel ongoing enrollment
+    if (enrollmentMode) {
+      Serial.println("📛 Enrollment cancelled by remote command");
+      enrollmentMode = false;
+      setStatusLED("ready");
+      
+      // Extract member ID if provided for logging
+      int memberId = -1;
+      if (doc["data"]["memberId"]) {
+        memberId = doc["data"]["memberId"].as<int>();
+      }
+      
+      // Send cancellation notification to server
+      sendEnrollmentData(memberId, "enrollment_cancelled");
+      
+      webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment cancelled\"}");
+    } else {
+      webServer.send(200, "application/json", "{\"success\":true,\"message\":\"No enrollment to cancel\"}");
+    }
     
   } else {
     Serial.printf("⚠️  Unknown command: %s\n", command.c_str());
