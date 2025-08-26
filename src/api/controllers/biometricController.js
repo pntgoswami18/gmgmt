@@ -1015,17 +1015,22 @@ const esp32Webhook = async (req, res) => {
         eventType = 'enrollment';
         success = true;
         
+        // Since we now pass memberId as userId to ESP32, userId IS the member ID
+        memberIdToUse = userId; // userId now directly represents the member ID
+        biometricId = userId;   // Store the same ID as biometric_id for consistency
+        
         // IMPORTANT: Update enrollment status in biometricIntegration service
         // This ensures the frontend knows enrollment is complete
         try {
           await biometricIntegration.handleEnrollmentData({
-            userId: userId || memberId,
+            userId: userId,
+            memberId: userId, // Pass the member ID (same as userId)
             status: 'enrollment_success',
             enrollmentStep: 'complete',
             deviceId: deviceId,
             timestamp: timestamp
           });
-          console.log(`✅ Enrollment status updated for user ${userId || memberId}`);
+          console.log(`✅ Enrollment status updated for user ${userId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment status:', enrollmentError);
         }
@@ -1034,16 +1039,21 @@ const esp32Webhook = async (req, res) => {
         eventType = 'enrollment_cancelled';
         success = false;
         
+        // Since we now pass memberId as userId to ESP32, userId IS the member ID
+        memberIdToUse = userId;
+        biometricId = userId;
+        
         // Update enrollment status for cancellation
         try {
           await biometricIntegration.handleEnrollmentData({
-            userId: userId || memberId,
+            userId: userId,
+            memberId: userId, // Pass the member ID (same as userId)
             status: 'enrollment_cancelled',
             enrollmentStep: 'cancelled',
             deviceId: deviceId,
             timestamp: timestamp
           });
-          console.log(`⏹️ Enrollment cancellation status updated for user ${userId || memberId}`);
+          console.log(`⏹️ Enrollment cancellation status updated for user ${userId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment cancellation status:', enrollmentError);
         }
@@ -1052,24 +1062,26 @@ const esp32Webhook = async (req, res) => {
         eventType = 'enrollment_failed';
         success = false;
         
+        // Since we now pass memberId as userId to ESP32, userId IS the member ID
+        memberIdToUse = userId;
+        biometricId = userId;
+        
         // Update enrollment status for failure
         try {
           await biometricIntegration.handleEnrollmentData({
-            userId: userId || memberId,
+            userId: userId,
+            memberId: userId, // Pass the member ID (same as userId)
             status: 'enrollment_failed',
             enrollmentStep: 'failed',
             deviceId: deviceId,
             timestamp: timestamp,
             error: 'ESP32 enrollment failed'
           });
-          console.log(`❌ Enrollment failure status updated for user ${userId || memberId}`);
+          console.log(`❌ Enrollment failure status updated for user ${userId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment failure status:', enrollmentError);
         }
       }
-      
-      memberIdToUse = userId || memberId;
-      biometricId = userId;
       
       // Update member's biometric_id when enrollment succeeds
       if (success && memberIdToUse && biometricId) {

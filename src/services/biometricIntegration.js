@@ -424,12 +424,15 @@ class BiometricIntegration {
     try {
       this.enrollmentMode.attempts++;
       
-      const { userId, status, enrollmentStep } = biometricData;
+      const { userId, memberId, status, enrollmentStep } = biometricData;
+      
+      // Use the memberId from biometricData if available, otherwise use enrollment mode memberId
+      const targetMemberId = memberId || this.enrollmentMode.memberId;
       
       if (status === 'enrollment_success' || status === 'enrolled') {
         // Enrollment successful
-        await this.saveBiometricEnrollment(this.enrollmentMode.memberId, userId, biometricData);
-        console.log(`✅ Enrollment successful for ${this.enrollmentMode.memberName}`);
+        await this.saveBiometricEnrollment(targetMemberId, userId, biometricData);
+        console.log(`✅ Enrollment successful for member ${targetMemberId}`);
         
         this.listener.broadcast(`ENROLL:SUCCESS:${this.enrollmentMode.memberName}`);
         this.stopEnrollmentMode('success');
@@ -437,7 +440,7 @@ class BiometricIntegration {
         
       } else if (status === 'enrollment_failed' || status === 'error') {
         // Enrollment failed
-        console.log(`❌ Enrollment failed for ${this.enrollmentMode.memberName}: ${biometricData.error || 'Unknown error'}`);
+        console.log(`❌ Enrollment failed for member ${targetMemberId}: ${biometricData.error || 'Unknown error'}`);
         
         if (this.enrollmentMode.attempts >= this.enrollmentMode.maxAttempts) {
           this.listener.broadcast(`ENROLL:FAILED:MAX_ATTEMPTS`);
@@ -450,7 +453,7 @@ class BiometricIntegration {
         
       } else if (status === 'enrollment_progress' || enrollmentStep) {
         // Enrollment in progress - update progress and keep mode active
-        console.log(`🔄 Enrollment progress for ${this.enrollmentMode.memberName}: ${enrollmentStep || 'in progress'}`);
+        console.log(`🔄 Enrollment progress for member ${targetMemberId}: ${enrollmentStep || 'in progress'}`);
         
         // Update enrollment mode with current progress
         this.enrollmentMode.currentStep = enrollmentStep;
@@ -461,7 +464,7 @@ class BiometricIntegration {
         
       } else if (status === 'enrollment_cancelled') {
         // Enrollment cancelled
-        console.log(`⏹️ Enrollment cancelled for ${this.enrollmentMode.memberName}`);
+        console.log(`⏹️ Enrollment cancelled for member ${targetMemberId}`);
         
         this.listener.broadcast(`ENROLL:CANCELLED:${this.enrollmentMode.memberName}`);
         this.stopEnrollmentMode('cancelled');
@@ -749,9 +752,12 @@ class BiometricIntegration {
   async startRemoteEnrollment(deviceId, memberId) {
     console.log(`👆 Remote enrollment started for member ${memberId} on device ${deviceId}`);
     
+    // Pass the member ID as the userId to the ESP32 device
+    // This creates a direct 1:1 mapping between ESP32 userId and member ID
     await this.sendESP32Command(deviceId, 'start_enrollment', {
       memberId: memberId,
-      enrollmentId: memberId // Use member ID as enrollment ID
+      userId: memberId, // Use member ID as the ESP32 userId
+      enrollmentId: memberId
     });
 
     return { success: true, message: 'Remote enrollment started' };
