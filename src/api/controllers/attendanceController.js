@@ -126,13 +126,16 @@ exports.getAttendanceByMember = async (req, res) => {
         const { start, end } = req.query;
         let query = 'SELECT * FROM attendance WHERE member_id = $1';
         const params = [memberId];
+        
         if (start) {
+            // Start date: include from 00:00:00 (beginning of the day)
             params.push(start);
-            query += ` AND DATE(check_in_time) >= DATE($${params.length})`;
+            query += ` AND check_in_time >= datetime($${params.length}, '00:00:00')`;
         }
         if (end) {
+            // End date: include until 23:59:59 (end of the day)
             params.push(end);
-            query += ` AND DATE(check_in_time) <= DATE($${params.length})`;
+            query += ` AND check_in_time <= datetime($${params.length}, '23:59:59')`;
         }
         query += ' ORDER BY check_in_time DESC';
 
@@ -153,13 +156,16 @@ exports.getAllAttendance = async (req, res) => {
             JOIN members m ON m.id = a.member_id
             WHERE 1=1`;
         const params = [];
+        
         if (start) {
+            // Start date: include from 00:00:00 (beginning of the day)
             params.push(start);
-            query += ` AND DATE(a.check_in_time) >= DATE($${params.length})`;
+            query += ` AND a.check_in_time >= datetime($${params.length}, '00:00:00')`;
         }
         if (end) {
+            // End date: include until 23:59:59 (end of the day)
             params.push(end);
-            query += ` AND DATE(a.check_in_time) <= DATE($${params.length})`;
+            query += ` AND a.check_in_time <= datetime($${params.length}, '23:59:59')`;
         }
         query += ' ORDER BY a.check_in_time DESC';
 

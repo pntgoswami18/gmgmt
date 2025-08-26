@@ -35,7 +35,7 @@ const char* DEFAULT_WIFI_PASSWORD = "configure_me";
 
 // Default Gym Management System Configuration  
 #ifndef DEFAULT_GYM_SERVER_IP
-const char* DEFAULT_GYM_SERVER_IP = "192.168.1.101";
+const char* DEFAULT_GYM_SERVER_IP = "10.66.219.230";
 #endif
 #ifndef DEFAULT_GYM_SERVER_PORT
 const int DEFAULT_GYM_SERVER_PORT = 8080;
@@ -84,6 +84,34 @@ unsigned long lastHeartbeat = 0;
 unsigned long lastButtonCheck = 0;
 int fingerprintID = -1;
 String deviceStatus = "ready";
+struct tm timeinfo;  // Global variable for time functions
+
+// ==================== TIME FUNCTIONS ====================
+void waitForNTPTime() {
+  Serial.println("Waiting for NTP time synchronization...");
+  
+  // Wait up to 10 seconds for NTP time to be available
+  unsigned long startTime = millis();
+  const unsigned long NTP_TIMEOUT = 10000; // 10 seconds
+  
+  while (!getLocalTime(&timeinfo) && millis() - startTime < NTP_TIMEOUT) {
+    Serial.print(".");
+    delay(100);
+  }
+  
+  if (getLocalTime(&timeinfo)) {
+    Serial.println();
+    Serial.println("NTP time synchronized successfully!");
+    
+    char timeString[30];
+    strftime(timeString, sizeof(timeString), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    Serial.printf("Current time: %s\n", timeString);
+  } else {
+    Serial.println();
+    Serial.println("⚠️ NTP time synchronization failed - continuing with fallback time");
+    Serial.println("Device will use approximate time based on uptime");
+  }
+}
 
 // ==================== CONFIGURATION FUNCTIONS ====================
 void loadConfiguration() {
@@ -234,7 +262,11 @@ void setup() {
   connectToWiFi();
   
   // Initialize time
-  configTime(0, 0, "pool.ntp.org");
+  // Configure NTP with local timezone from config.h
+  configTime(TIMEZONE_OFFSET, DST_OFFSET, "pool.ntp.org");
+  
+  // Wait for NTP time synchronization
+  waitForNTPTime();
   
   // Initialize web server
   initializeWebServer();
@@ -760,11 +792,20 @@ void sendHeartbeat() {
     return;
   }
   
+  // Get timestamp and validate it
+  String timestamp = getISO8601Time();
+  
+  // Check if timestamp is valid (should not be just millis)
+  if (timestamp.length() < 10 || timestamp.indexOf('T') == -1) {
+    Serial.println("⚠️ Invalid timestamp for heartbeat, skipping...");
+    return;
+  }
+  
   StaticJsonDocument<250> doc;
   doc["deviceId"] = device_id;
   doc["deviceType"] = "esp32_door_lock";
   doc["status"] = deviceStatus;
-  doc["timestamp"] = getISO8601Time();
+  doc["timestamp"] = timestamp;
   doc["event"] = "heartbeat";
   doc["wifi_rssi"] = WiFi.RSSI();
   doc["free_heap"] = ESP.getFreeHeap();
@@ -774,6 +815,7 @@ void sendHeartbeat() {
   String jsonString;
   serializeJson(doc, jsonString);
   
+  Serial.printf("💓 Sending heartbeat with timestamp: %s\n", timestamp.c_str());
   sendToServer(jsonString);
 }
 
@@ -874,15 +916,37 @@ void playTone(int frequency, int duration) {
 }
 
 String getISO8601Time() {
-  struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    // If NTP time not available, use millis-based timestamp
-    return String(millis());
+    // If NTP time not available, try to get time again with a small delay
+    delay(100);
+    if (!getLocalTime(&timeinfo)) {
+      // Still no NTP time, use a more reasonable fallback
+      // Calculate approximate time based on millis() and a base timestamp
+      unsigned long currentMillis = millis();
+      unsigned long secondsSinceStart = currentMillis / 1000;
+      
+      // Use a reasonable base timestamp (e.g., device start time)
+      // This is better than returning raw millis which creates invalid dates
+      time_t baseTime = 1735689600; // 2025-01-01 00:00:00 UTC as fallback
+      time_t currentTime = baseTime + secondsSinceStart;
+      
+      struct tm fallbackTime;
+      gmtime_r(&currentTime, &fallbackTime);
+      
+      char timeString[30];
+      strftime(timeString, sizeof(timeString), "%Y-%m-%dT%H:%M:%S", &fallbackTime);
+      
+      // Log the fallback for debugging
+      Serial.printf("⚠️ NTP time not available, using fallback: %s\n", timeString);
+      return String(timeString);
+    }
   }
   
   char timeString[30];
+  // Format as local time without 'Z' suffix since we now configure proper timezone
+  // The server will handle the timestamp as local time from the ESP32
   strftime(timeString, sizeof(timeString), "%Y-%m-%dT%H:%M:%S", &timeinfo);
-  return String(timeString) + "Z";
+  return String(timeString);
 }
 
 String maskPassword(const char* password) {

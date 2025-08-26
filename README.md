@@ -42,6 +42,7 @@ The application is built with a comprehensive feature set that includes:
     -   React.js with React Router for multi-page navigation
     -   Axios for API communication
     -   Responsive design with professional styling
+    -   📖 **See [client/README.md](client/README.md) for detailed frontend documentation**
 
 ---
 
@@ -60,72 +61,7 @@ First, install the necessary npm packages for both the backend server and the fr
 
 ```bash
 # Install backend dependencies from the root directory
-# Gym Management Software
-
-This project provides an end‑to‑end gym management system with an admin dashboard and a Node.js API. Use it to manage members, classes, schedules, attendance, billing and basic analytics.
-
-## High‑level Features
-
-- Member management (create, update, list)
-- Class and schedule management
-- Attendance tracking with configurable working hours
-- Billing: membership plans, invoices, payments (manual)
-- Analytics dashboard (summary cards, basic charts)
-- Branding controls and accent colors (solid or gradient)
-
-## Technology Stack
-
-- Backend: Node.js, Express, SQLite, Axios, Nodemailer
-- Frontend: React, React Router, Material UI, Recharts
-
-## Installation & Setup
-
-### Prerequisites
-- Node.js and npm
-
-### 1) Install dependencies
-
-```bash
-# From the project root (server)
 npm install
-
-# Frontend
-cd client
-npm install
-cd ..
-```
-
-### 2) Configure environment variables
-
-Create a `.env` file in the project root:
-
-```env
-# Database will be automatically created as SQLite file
-# No additional database configuration required
-
-# Optional integrations
-# Payment gateway disabled; no secret key required
-EMAIL_USER=your_email
-EMAIL_PASS=your_app_password
-```
-
-### 3) Start the backend
-
-```bash
-npm start
-```
-
-The API runs at `http://localhost:3001` and auto‑creates the SQLite database and tables on first start.
-
-### 4) Start the frontend
-
-```bash
-cd client
-npm start
-```
-
-The dashboard opens at `http://localhost:3000` and proxies API calls to the backend.
-
 
 # Navigate to the client directory and install frontend dependencies
 cd client
@@ -151,6 +87,11 @@ JWT_SECRET=your_super_secret_jwt_key
 # Email Configuration (for automated notifications)
 EMAIL_USER=your_email@gmail.com
 EMAIL_PASS=your_app_password
+
+# ESP32 Biometric Integration (optional)
+ENABLE_BIOMETRIC=true
+BIOMETRIC_PORT=8080
+BIOMETRIC_HOST=0.0.0.0
 ```
 
 **Note for Email Setup:** For Gmail, you'll need to use an "App Password" instead of your regular password. Enable 2-factor authentication and generate an app password in your Google Account settings.
@@ -245,120 +186,6 @@ The backend provides the following REST API endpoints:
 
 ---
 
-## Biometric Testing Commands
-
-The application includes cross-platform testing scripts to verify biometric device communication:
-
-### Available Test Scripts
-
-```bash
-# Check if biometric service is listening (cross-platform)
-npm run biometric:check
-
-# Send comprehensive test messages to verify communication (cross-platform)
-npm run biometric:test
-
-# Start the biometric listener service
-npm run biometric:start
-
-# Set up biometric database tables
-npm run biometric:setup
-
-# Get help for test options
-npm run biometric:help
-
-# Start main app with biometric integration enabled
-npm run start:with-biometric
-```
-
-### Environment Configuration
-
-Configure biometric settings in your `.env` file:
-
-```env
-ENABLE_BIOMETRIC=true
-BIOMETRIC_PORT=8080
-BIOMETRIC_HOST=0.0.0.0
-```
-
-**Note:** The test scripts automatically load environment variables from your `.env` file and work on both Windows and Unix-based systems.
-
-### Web-based ESP32 Configuration
-
-In addition to environment variables, ESP32 connection settings can now be configured through the web interface:
-
-1. Navigate to **Settings → General** in the admin dashboard
-2. Scroll to **ESP32 Biometric Reader Configuration** section
-3. Configure the following settings:
-   - **ESP32 Device Host Address** (default: 192.168.1.100)
-   - **ESP32 Device Port** (default: 8080)
-   - **Local Listen Host** (default: 0.0.0.0)
-   - **Local Listen Port** (default: 8080)
-4. Click **Save All Settings** to apply changes
-
-These settings allow you to easily adjust ESP32 connectivity without editing configuration files.
-
-📖 **For complete biometric setup and configuration guide, see [ESP32_SETUP_GUIDE.md](ESP32_SETUP_GUIDE.md)**
-
----
-
-## Database Schema
-
-The application automatically creates the following database tables:
-
-- **members:** Store member information and membership details (email optional, phone required and unique when provided)
-- **classes:** Fitness class definitions with instructors and duration
-- **class_schedules:** Scheduled instances of classes with time and capacity
-- **bookings:** Member bookings for scheduled classes
-- **attendance:** Member check-in records
-- **member_biometrics:** Mapping between app members, device user IDs, and optional fingerprint templates
-- **membership_plans:** Available membership plans with pricing
-- **invoices:** Billing records for members
-- **payments:** Payment transaction records
-
-## Email Automation
-
-The system automatically sends emails for:
-
-1. **Welcome Email:** Sent when a new member is registered
-2. **Booking Confirmation:** Sent when a member books a class
-3. **Payment Confirmation:** Sent when a payment is successfully processed
-
-All emails use professional HTML templates with gym branding.
-
-## Analytics & Reporting
-
-The dashboard provides comprehensive analytics including:
-
-- **Summary Statistics:** Total members, revenue, new members this month, active schedules, unpaid members this month
-- **Member Growth:** 12-month trend of new member registrations
-- **Revenue Analytics:** Monthly revenue trends over the past year
-- **Popular Classes:** Rankings of classes by total bookings
-- **Attendance Trends:** Daily check-in statistics for the last 30 days
-
-## Current Behavior Notes
-
-- Attendance check-ins are only allowed during Morning (05:00–11:00) or Evening (16:00–22:00) sessions, and a member can check in only once per calendar date.
-- Attendance view supports date range filtering (default: current week).
-- In the Financials “Record Manual Payment” modal, selecting a member fetches their unpaid invoices and lets you auto-fill invoice and amount by selection.
-- Dashboard cards are clickable and navigate to filtered views (e.g., unpaid members or pending payments).
-- Dashboard card visibility can be configured in Settings.
-
-### Branding & Theme
-- Settings → Accent Colors lets you configure:
-  - Primary/Secondary mode: Solid or Gradient
-  - Gradient editor (Linear/Radial, angle, color stops)
-- Exposed CSS variables for custom styling: `--accent-primary-color`, `--accent-secondary-color`, `--accent-primary-bg`, `--accent-secondary-bg`.
-- Secondary accent is applied to: contained/outlined buttons, h4/h5 headings (gradient text), section header borders, and invoice header label.
-
-### Invoices
-- Open from Financials → Recent Payment History by clicking a row.
-- Print: prints only the invoice area.
-- Download: generates a PDF via html2canvas + jsPDF (no print dialog).
-- Send via WhatsApp: opens WhatsApp Web with a prefilled message to the member’s phone number.
-
----
-
 ## ESP32 Biometric Door Lock Integration
 
 This project supports ESP32-based fingerprint door lock systems for attendance check-ins and access control. The ESP32 devices connect via WiFi and communicate using JSON over TCP/IP.
@@ -404,9 +231,156 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 - **Remote Control**: Unlock doors and enroll fingerprints remotely
 - **Status Monitoring**: Device health, connectivity, and performance tracking
 
-📖 **For complete ESP32 setup and configuration guide, see [ESP32_SETUP_GUIDE.md](ESP32_SETUP_GUIDE.md)**
+### ESP32 Setup and Configuration
 
-## Windows standalone build (Service + Installer, SQLite)
+#### Prerequisites
+- **Hardware**: ESP32 + AS608 Fingerprint Sensor + Door Lock
+- **Software**: Node.js 16+, npm
+- **Network**: WiFi network for ESP32 connectivity
+
+#### Quick Setup
+1. **Install Required Arduino Libraries**:
+   - `ArduinoJson` by Benoit Blanchon (version 6.x)
+   - `Adafruit Fingerprint Sensor Library` by Adafruit
+
+2. **Upload ESP32 Firmware**:
+   - Open `esp32_door_lock/esp32_door_lock.ino` in Arduino IDE
+   - Select board: **Tools → Board → ESP32 Arduino → ESP32 Dev Module**
+   - Upload firmware
+
+3. **Configure Device**:
+   - Access `http://ESP32_IP/config` in browser
+   - Enter WiFi credentials and server settings
+   - Device will restart automatically
+
+4. **Verify Connection**:
+   - Check Serial Monitor at 115200 baud
+   - Look for "SYSTEM READY - Waiting for fingerprints"
+
+#### Hardware Connections
+- **AS608 Sensor**: RX→Pin16, TX→Pin17, VCC→5V, GND→GND
+- **Door Lock**: Relay→Pin18, 12V power supply
+- **Status LEDs**: Green→Pin19, Red→Pin21, Blue→Pin22
+- **Buzzer**: Pin23
+- **Buttons**: Enroll→Pin4, Override→Pin5
+
+#### Configuration Management
+The ESP32 supports dynamic, environment-driven configuration:
+
+1. **Web Interface**: `http://ESP32_IP/config` - User-friendly configuration form
+2. **API Endpoints**: REST API for programmatic configuration
+3. **Remote Management**: Configure from gym management system
+4. **Development Defaults**: Optional `config.h` file for custom defaults
+
+#### Critical Port Configuration
+**IMPORTANT**: The ESP32 must connect to the **main server port** (PORT in .env), NOT the BIOMETRIC_PORT:
+
+- **✅ Correct**: ESP32 port = 3001 (matches main server PORT)
+- **❌ Wrong**: ESP32 port = 8080 (causes HTTP timeout errors)
+
+#### Testing Commands
+```bash
+# Setup and testing
+npm run esp32:setup          # Setup database tables
+npm run esp32:test           # Run integration tests
+npm run esp32:help           # Show all available commands
+
+# Server management
+npm run start:with-biometric # Start with ESP32 support
+npm run biometric:start      # Start biometric service only
+npm run biometric:check      # Check service status
+```
+
+### Web Interface Features
+
+#### Consolidated Biometric Management (`/biometric`)
+- Unified fingerprint enrollment with guided process
+- Device selection and real-time enrollment monitoring
+- Manual member-device linking
+- View biometric events and enrollment status
+
+#### ESP32 Device Management (`/settings/esp32-devices`)
+- View all connected ESP32 devices
+- Remote door unlock
+- Device status monitoring
+- Start remote enrollment
+
+#### Real-time Monitor (`/settings/esp32-monitor`)
+- Live event stream
+- Device health monitoring
+- Connection status
+
+#### Analytics (`/settings/esp32-analytics`)
+- Usage statistics
+- Access logs
+- Performance metrics
+
+#### ESP32 Configuration (`/settings`)
+- Configure ESP32 device host and port settings
+- Set local listener host and port  
+- Network configuration with helpful defaults
+- Remote configuration of ESP32 devices via API
+
+---
+
+## Database Schema
+
+The application automatically creates the following database tables:
+
+- **members:** Store member information and membership details (email optional, phone required and unique when provided)
+- **classes:** Fitness class definitions with instructors and duration
+- **class_schedules:** Scheduled instances of classes with time and capacity
+- **bookings:** Member bookings for scheduled classes
+- **attendance:** Member check-in records
+- **member_biometrics:** Mapping between app members, device user IDs, and optional fingerprint templates
+- **membership_plans:** Available membership plans with pricing
+- **invoices:** Billing records for members
+- **payments:** Payment transaction records
+
+## Email Automation
+
+The system automatically sends emails for:
+
+1. **Welcome Email:** Sent when a new member is registered
+2. **Booking Confirmation:** Sent when a member books a class
+3. **Payment Confirmation:** Sent when a payment is successfully processed
+
+All emails use professional HTML templates with gym branding.
+
+## Analytics & Reporting
+
+The dashboard provides comprehensive analytics including:
+
+- **Summary Statistics:** Total members, revenue, new members this month, active schedules, unpaid members this month
+- **Member Growth:** 12-month trend of new member registrations
+- **Revenue Analytics:** Monthly revenue trends over the past year
+- **Popular Classes:** Rankings of classes by total bookings
+- **Attendance Trends:** Daily check-in statistics for the last 30 days
+
+## Current Behavior Notes
+
+- Attendance check-ins are only allowed during Morning (05:00–11:00) or Evening (16:00–22:00) sessions, and a member can check in only once per calendar date.
+- Attendance view supports date range filtering (default: current week) with full-day coverage (00:00:00 to 23:59:59).
+- In the Financials "Record Manual Payment" modal, selecting a member fetches their unpaid invoices and lets you auto-fill invoice and amount by selection.
+- Dashboard cards are clickable and navigate to filtered views (e.g., unpaid members or pending payments).
+- Dashboard card visibility can be configured in Settings.
+
+### Branding & Theme
+- Settings → Accent Colors lets you configure:
+  - Primary/Secondary mode: Solid or Gradient
+  - Gradient editor (Linear/Radial, angle, color stops)
+- Exposed CSS variables for custom styling: `--accent-primary-color`, `--accent-secondary-color`, `--accent-primary-bg`, `--accent-secondary-bg`.
+- Secondary accent is applied to: contained/outlined buttons, h4/h5 headings (gradient text), section header borders, and invoice header label.
+
+### Invoices
+- Open from Financials → Recent Payment History by clicking a row.
+- Print: prints only the invoice area.
+- Download: generates a PDF via html2canvas + jsPDF (no print dialog).
+- Send via WhatsApp: opens WhatsApp Web with a prefilled message to the member's phone number.
+
+---
+
+## Windows Standalone Build (Service + Installer, SQLite)
 
 This section documents how to ship GMgmt as a self-contained Windows application that runs as a Windows Service and uses SQLite (single-file database). It covers both 32-bit (x86) and 64-bit (x64) Windows.
 
@@ -576,6 +550,102 @@ Verify foreign keys and adjust IDs if required. SQLite autoincrements without se
 2. Browse to `http://localhost:3001` to use the app.
 3. Manage the `GMgmt` Windows Service via Services.msc (start/stop) when needed.
 
+---
+
+## Troubleshooting and Common Issues
+
+### ESP32 Integration Issues
+
+#### Port Configuration Problems
+**Critical Issue**: ESP32 must connect to the main server port (PORT in .env), NOT the BIOMETRIC_PORT:
+
+- **✅ Correct**: ESP32 port = 3001 (matches main server PORT)
+- **❌ Wrong**: ESP32 port = 8080 (causes HTTP timeout errors)
+
+**Verification**:
+```bash
+# Check your .env file - ESP32 should use the PORT value, not BIOMETRIC_PORT
+cat .env | grep PORT
+# Should show: PORT=3001 (or your custom port)
+
+# Test the correct endpoint manually
+curl -X POST http://YOUR_SERVER_IP:3001/api/biometric/esp32-webhook \
+  -H "Content-Type: application/json" \
+  -d '{"deviceId":"TEST","event":"test"}'
+```
+
+#### WiFi Connection Issues
+- **Web Configuration**: Access `http://ESP32_IP/config` to update WiFi credentials
+- **Serial Monitor**: Check for detailed WiFi connection logs at 115200 baud
+- **Connection Status**: Look for detailed error messages like `NO_SSID_AVAILABLE`, `WRONG_PASSWORD`, `CONNECT_FAILED`
+
+#### Device Not Connecting
+- **Firewall**: Check firewall settings for ports 80 (ESP32 web interface) and 3001 (main server)
+- **Network Restrictions**: Ensure ESP32 can reach gym server (same network or proper routing)
+- **WiFi Requirements**: ESP32 only supports 2.4GHz networks (not 5GHz)
+- **MAC Filtering**: Check if router has MAC address filtering enabled
+
+### Timestamp and Timezone Issues
+
+#### Timezone Discrepancy Between Biometric Events and Attendance
+**Problem**: Biometric events and attendance records showing different timestamps.
+
+**Root Cause**: Inconsistent timestamp handling between ESP32 device and server.
+
+**Solution**: 
+1. **ESP32 Configuration**: Update `esp32_door_lock/config.h` with your gym's timezone:
+   ```cpp
+   #define TIMEZONE_OFFSET 19800   // UTC+5:30 (India)
+   #define TIMEZONE_OFFSET -18000  // UTC-5 (Eastern US)
+   #define TIMEZONE_OFFSET 0       // UTC+0 (UK)
+   ```
+
+2. **Server-Side Fix**: Already implemented in `src/services/biometricIntegration.js`
+
+3. **Verification**: Both biometric events and attendance records should show identical timestamps
+
+#### Heartbeat Timestamp Issues
+**Problem**: Invalid timestamps like "01/01/65090, 00:00:00" in heartbeat events.
+
+**Root Cause**: ESP32 sending heartbeats before NTP time synchronization.
+
+**Solution**: 
+1. **NTP Time Synchronization Wait**: ESP32 now waits up to 30 seconds for NTP time
+2. **Improved Fallback**: Uses reasonable timestamps instead of raw `millis()`
+3. **Heartbeat Validation**: Skips heartbeats with invalid timestamps
+
+#### Attendance Date Filtering Issues
+**Problem**: Date range filtering not providing full-day coverage.
+
+**Solution**: 
+- Start date automatically includes 00:00:00 hours
+- End date automatically includes 23:59:59 hours
+- No attendance records are missed due to time precision issues
+
+### Library Installation Issues
+- **ArduinoJson.h not found**: Install `ArduinoJson` library via Arduino IDE Library Manager
+- **Adafruit_Fingerprint.h not found**: Install `Adafruit Fingerprint Sensor Library` via Library Manager
+- **ESP32 board not found**: Add ESP32 board URL in Preferences and install via Board Manager
+- **Compilation errors**: Ensure you're using ArduinoJson version 6.x (not 7.x which has breaking changes)
+
+### Serial Monitor Issues
+- **Garbled characters at startup** (``): These are normal ESP32 boot messages sent at 74880 baud rate
+- **Solution**: Set your Serial Monitor to **115200 baud rate** and ignore the initial garbled text
+- **Expected output**: Garbled boot messages followed by clear text after separator lines (`========================================`)
+
+### Database Issues
+```bash
+# Reset ESP32 database tables
+npm run esp32:setup
+
+# Manual database check
+sqlite3 data/data/gmgmt.sqlite
+.tables
+SELECT * FROM devices;
+```
+
+---
+
 ## Future Enhancements
 
 The current application is feature-complete for gym management. Future development could include:
@@ -587,6 +657,36 @@ The current application is feature-complete for gym management. Future developme
 -   **Wearable device integration** for real-time fitness tracking.
 -   **Social features** for member community building.
 
+---
+
 ## Support
 
 For technical support or feature requests, please refer to the API documentation above or contact the development team.
+
+### Additional Resources
+
+#### API Endpoints
+- **Device Management**: `/api/biometric/devices/*` for device management
+- **ESP32 Configuration**: 
+  - `GET /api/config` - Retrieve device configuration
+  - `POST /api/config` - Update device configuration
+- **Device Control**:
+  - `POST /unlock` - Emergency unlock
+  - `POST /enroll` - Start fingerprint enrollment
+- **Status Monitoring**: `/status` - Device status and health information
+
+#### Configuration Files
+- **ESP32 Firmware**: `esp32_door_lock/esp32_door_lock.ino`
+- **Configuration Template**: `esp32_door_lock/config.h.example`
+- **Environment Variables**: `.env` file for server configuration
+
+#### Frontend Components
+- **ESP32 Device Manager**: `/client/src/components/ESP32DeviceManager.js`
+- **Monitor Interface**: `/client/src/components/ESP32Monitor.js`
+- **Analytics Dashboard**: `/client/src/components/ESP32Analytics.js`
+- **Settings Integration**: `/client/src/components/Settings.js`
+
+#### Testing Scripts
+- **`tools/calculate_timezone_offset.js`**: Timezone offset calculator
+- **`tools/test_timestamp_fix.js`**: Timestamp fix verification
+- **`tools/test_esp32_integration.js`**: ESP32 integration testing

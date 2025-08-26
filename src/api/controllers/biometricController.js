@@ -344,7 +344,69 @@ const getSystemStatus = async (req, res) => {
     if (biometricIntegration) {
       status.enrollmentActive = biometricIntegration.enrollmentMode && 
                                biometricIntegration.enrollmentMode.active;
-      status.connectedDevices = biometricIntegration.listener.clients.size;
+      
+      // Count ESP32 devices that have sent heartbeats in the last 5 minutes
+      // This is more accurate than TCP socket connections since ESP32 uses HTTP webhooks
+      try {
+        // First, let's check if the biometric_events table exists and has data
+        const tableCheckQuery = `
+          SELECT name FROM sqlite_master 
+          WHERE type='table' AND name='biometric_events'
+        `;
+        
+        const tableCheck = await pool.query(tableCheckQuery);
+        if (tableCheck.rows.length === 0) {
+          console.warn('⚠️ biometric_events table does not exist');
+          status.connectedDevices = 0;
+          status.lastActivity = null;
+          status.debug = { error: 'biometric_events table not found' };
+        } else {
+          // Check total events in the table
+          const totalEventsQuery = `SELECT COUNT(*) as total FROM biometric_events`;
+          const totalEventsResult = await pool.query(totalEventsQuery);
+          const totalEvents = totalEventsResult.rows[0]?.total || 0;
+          
+          // Check recent heartbeats
+          const query = `
+            SELECT COUNT(DISTINCT device_id) as device_count
+            FROM biometric_events 
+            WHERE event_type = 'heartbeat' 
+              AND device_id IS NOT NULL 
+              AND timestamp > datetime('now', '-5 minutes')
+          `;
+          
+          const result = await pool.query(query);
+          status.connectedDevices = parseInt(result.rows[0]?.device_count || 0);
+          
+          // Get last activity timestamp
+          const lastActivityQuery = `
+            SELECT MAX(timestamp) as last_activity
+            FROM biometric_events 
+            WHERE device_id IS NOT NULL
+          `;
+          
+          const lastActivityResult = await pool.query(lastActivityQuery);
+          status.lastActivity = lastActivityResult.rows[0]?.last_activity || null;
+          
+          // Add debug info
+          status.debug = {
+            tableExists: true,
+            totalEvents,
+            recentHeartbeats: status.connectedDevices,
+            lastActivity: status.lastActivity
+          };
+        }
+        
+      } catch (dbError) {
+        console.warn('Could not query device count from database, falling back to TCP connections:', dbError.message);
+        // Fallback to TCP socket count for backward compatibility
+        status.connectedDevices = biometricIntegration.listener.clients.size;
+        status.debug = { 
+          error: dbError.message, 
+          fallback: 'TCP connections',
+          tcpConnections: biometricIntegration.listener.clients.size
+        };
+      }
     }
 
     res.json({ 
@@ -488,18 +550,66 @@ const testConnection = async (req, res) => {
       });
     }
 
-    // If no specific host/port, test existing connected devices
-    const testMessage = 'TEST:CONNECTION:' + new Date().toISOString();
-    biometricIntegration.listener.broadcast(testMessage);
-
-    res.json({ 
-      success: true, 
-      message: 'Test message sent to connected devices',
-      data: {
-        connectedDevices: biometricIntegration.listener.clients.size,
-        testMessage
+    // If no specific host/port, test existing ESP32 devices by checking recent heartbeats
+    try {
+      // Get count of ESP32 devices that have sent heartbeats in the last 5 minutes
+      const query = `
+        SELECT COUNT(DISTINCT device_id) as device_count
+        FROM biometric_events 
+        WHERE event_type = 'heartbeat' 
+          AND device_id IS NOT NULL 
+          AND timestamp > datetime('now', '-5 minutes')
+      `;
+      
+      const result = await pool.query(query);
+      const connectedDevices = parseInt(result.rows[0]?.device_count || 0);
+      
+      // Get last heartbeat time for each device
+      let deviceDetails = [];
+      if (connectedDevices > 0) {
+        const detailsQuery = `
+          SELECT device_id, MAX(timestamp) as last_heartbeat, 
+                 COUNT(*) as heartbeat_count
+          FROM biometric_events 
+          WHERE event_type = 'heartbeat' 
+            AND device_id IS NOT NULL 
+            AND timestamp > datetime('now', '-5 minutes')
+          GROUP BY device_id
+          ORDER BY last_heartbeat DESC
+        `;
+        
+        const detailsResult = await pool.query(detailsQuery);
+        deviceDetails = detailsResult.rows || [];
       }
-    });
+
+      res.json({ 
+        success: true, 
+        message: `Found ${connectedDevices} ESP32 device(s) with recent heartbeats`,
+        data: {
+          connectedDevices,
+          deviceDetails,
+          testTime: new Date().toISOString(),
+          note: 'ESP32 devices communicate via HTTP webhooks, not TCP sockets'
+        }
+      });
+      
+    } catch (dbError) {
+      console.warn('Could not query device status from database, falling back to TCP connections:', dbError.message);
+      
+      // Fallback to TCP socket test for backward compatibility
+      const testMessage = 'TEST:CONNECTION:' + new Date().toISOString();
+      biometricIntegration.listener.broadcast(testMessage);
+
+      res.json({ 
+        success: true, 
+        message: 'Test message sent to TCP-connected devices (fallback mode)',
+        data: {
+          connectedDevices: biometricIntegration.listener.clients.size,
+          testMessage,
+          note: 'Using TCP socket fallback - ESP32 devices typically use HTTP webhooks'
+        }
+      });
+    }
   } catch (error) {
     console.error('Error testing connection:', error);
     res.status(500).json({ 
@@ -809,6 +919,13 @@ const esp32Webhook = async (req, res) => {
 
     // Log the received data for debugging
     console.log('📱 ESP32 webhook data received:', JSON.stringify(eventData, null, 2));
+    console.log('🔍 Request details:', {
+      method: req.method,
+      url: req.url,
+      headers: req.headers,
+      ip: req.ip,
+      userAgent: req.get('User-Agent')
+    });
 
     // Extract common fields
     const {

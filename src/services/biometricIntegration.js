@@ -120,9 +120,33 @@ class BiometricIntegration {
 
   async logMemberAttendance(member, timestamp, biometricData = null) {
     try {
-      const now = timestamp ? new Date(timestamp) : new Date();
-      const dateStr = now.toISOString().split('T')[0];
-      const timeStr = now.toISOString();
+      // Use the ESP32 timestamp if provided, otherwise use current server time
+      let now, dateStr, timeStr;
+      
+      if (timestamp) {
+        // Parse the ESP32 timestamp (which is in local time format like "2025-08-26T22:52:23")
+        // ESP32 sends local time, so we need to interpret it as local time
+        now = new Date(timestamp);
+        
+        // If the timestamp is valid, use it directly
+        if (!isNaN(now.getTime())) {
+          // The timestamp is already in local time from ESP32, so we can use it directly
+          // Extract date and time components without timezone conversion
+          const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+          dateStr = localDate.toISOString().split('T')[0];
+          timeStr = timestamp; // Use the original ESP32 timestamp to avoid timezone conversion
+        } else {
+          // Fallback to current server time if parsing fails
+          now = new Date();
+          dateStr = now.toISOString().split('T')[0];
+          timeStr = now.toISOString();
+          console.warn(`⚠️ Failed to parse ESP32 timestamp "${timestamp}", using server time instead`);
+        }
+      } else {
+        now = new Date();
+        dateStr = now.toISOString().split('T')[0];
+        timeStr = now.toISOString();
+      }
 
       // Enhanced logging
       const deviceUserId = biometricData?.userId || 'N/A';
