@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const { initializeDatabase } = require('./config/sqlite');
+const WebSocket = require('ws');
+const http = require('http');
 const app = express();
 
 const attendanceRoutes = require('./api/routes/attendance');
@@ -50,13 +52,54 @@ app.get('*', (req, res) => {
 // Initialize database and start server
 const PORT = process.env.PORT || 3001;
 
+// Create HTTP server for WebSocket support
+const server = http.createServer(app);
+
+// Create WebSocket server
+const wss = new WebSocket.Server({ 
+    server,
+    path: '/ws' // Add a specific path for WebSocket connections
+});
+
+// WebSocket connection handling
+wss.on('connection', (ws, req) => {
+    console.log('🔌 WebSocket client connected from:', req.socket.remoteAddress);
+    
+    // Add client to biometric integration if available
+    if (app.biometricIntegration) {
+        app.biometricIntegration.addWebSocketClient(ws);
+    }
+    
+    ws.on('close', () => {
+        console.log('🔌 WebSocket client disconnected');
+        if (app.biometricIntegration) {
+            app.biometricIntegration.removeWebSocketClient(ws);
+        }
+    });
+    
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error);
+        if (app.biometricIntegration) {
+            app.biometricIntegration.removeWebSocketClient(ws);
+        }
+    });
+    
+    // Send welcome message
+    ws.send(JSON.stringify({
+        type: 'connection_established',
+        message: 'WebSocket connection established successfully',
+        timestamp: new Date().toISOString()
+    }));
+});
+
 const startServer = async () => {
     try {
         await initializeDatabase();
         console.log('Database initialized successfully');
         
-        app.listen(PORT, '0.0.0.0', () => {
+        server.listen(PORT, '0.0.0.0', () => {
             console.log(`Server running on port ${PORT} and accessible from all interfaces`);
+            console.log(`🔌 WebSocket server ready for real-time enrollment updates`);
         });
 
         // Start biometric integration if enabled

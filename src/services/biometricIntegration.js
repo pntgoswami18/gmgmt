@@ -6,6 +6,7 @@ const os = require('os');
 class BiometricIntegration {
   constructor(port = 8080) {
     this.listener = new BiometricListener(port);
+    this.webSocketClients = new Set(); // Store WebSocket clients
     this.setupEventHandlers();
   }
 
@@ -386,6 +387,16 @@ class BiometricIntegration {
     // Send enrollment command to device
     const enrollCommand = `ENROLL:${memberId}:${memberName}`;
     this.listener.broadcast(enrollCommand);
+
+    // Notify WebSocket clients that enrollment has started
+    this.sendToWebSocketClients({
+      type: 'enrollment_started',
+      status: 'active',
+      memberId: memberId,
+      memberName: memberName,
+      maxAttempts: 3,
+      message: 'Enrollment started - please scan your fingerprint'
+    });
     
     // Set timeout for enrollment mode
     this.enrollmentTimeout = setTimeout(() => {
@@ -407,6 +418,16 @@ class BiometricIntegration {
 
       // Send stop enrollment command to device
       this.listener.broadcast('ENROLL:STOP');
+
+      // Notify WebSocket clients that enrollment has stopped
+      this.sendToWebSocketClients({
+        type: 'enrollment_stopped',
+        status: 'inactive',
+        memberId: this.enrollmentMode.memberId,
+        memberName: this.enrollmentMode.memberName,
+        reason: reason,
+        message: `Enrollment stopped: ${reason}`
+      });
       
       const result = { ...this.enrollmentMode, endReason: reason };
       this.enrollmentMode = null;
@@ -435,6 +456,13 @@ class BiometricIntegration {
         console.log(`✅ Enrollment successful for member ${targetMemberId}`);
         
         this.listener.broadcast(`ENROLL:SUCCESS:${this.enrollmentMode.memberName}`);
+        this.sendToWebSocketClients({
+          type: 'enrollment_complete',
+          status: 'success',
+          memberId: this.enrollmentMode.memberId,
+          memberName: this.enrollmentMode.memberName,
+          message: 'Enrollment completed successfully'
+        });
         this.stopEnrollmentMode('success');
         return true;
         
@@ -444,10 +472,28 @@ class BiometricIntegration {
         
         if (this.enrollmentMode.attempts >= this.enrollmentMode.maxAttempts) {
           this.listener.broadcast(`ENROLL:FAILED:MAX_ATTEMPTS`);
+          this.sendToWebSocketClients({
+            type: 'enrollment_complete',
+            status: 'failed',
+            memberId: targetMemberId,
+            memberName: this.enrollmentMode.memberName,
+            message: 'Enrollment failed - maximum attempts reached',
+            attempts: this.enrollmentMode.attempts,
+            maxAttempts: this.enrollmentMode.maxAttempts
+          });
           this.stopEnrollmentMode('max_attempts');
           return false;
         } else {
           this.listener.broadcast(`ENROLL:RETRY:${this.enrollmentMode.maxAttempts - this.enrollmentMode.attempts}`);
+          this.sendToWebSocketClients({
+            type: 'enrollment_progress',
+            status: 'retry',
+            memberId: targetMemberId,
+            memberName: this.enrollmentMode.memberName,
+            attempts: this.enrollmentMode.attempts,
+            maxAttempts: this.enrollmentMode.maxAttempts,
+            message: `Retry ${this.enrollmentMode.maxAttempts - this.enrollmentMode.attempts} attempts remaining`
+          });
           return false;
         }
         
@@ -460,6 +506,15 @@ class BiometricIntegration {
         this.enrollmentMode.lastProgressUpdate = new Date();
         
         this.listener.broadcast(`ENROLL:PROGRESS:${enrollmentStep || 'scanning'}`);
+        this.sendToWebSocketClients({
+          type: 'enrollment_progress',
+          status: 'progress',
+          memberId: targetMemberId,
+          memberName: this.enrollmentMode.memberName,
+          currentStep: enrollmentStep || 'scanning',
+          attempts: this.enrollmentMode.attempts,
+          maxAttempts: this.enrollmentMode.maxAttempts
+        });
         return false;
         
       } else if (status === 'enrollment_cancelled') {
@@ -467,6 +522,13 @@ class BiometricIntegration {
         console.log(`⏹️ Enrollment cancelled for member ${targetMemberId}`);
         
         this.listener.broadcast(`ENROLL:CANCELLED:${this.enrollmentMode.memberName}`);
+        this.sendToWebSocketClients({
+          type: 'enrollment_complete',
+          status: 'cancelled',
+          memberId: targetMemberId,
+          memberName: this.enrollmentMode.memberName,
+          message: 'Enrollment was cancelled'
+        });
         this.stopEnrollmentMode('cancelled');
         return false;
       }
@@ -475,6 +537,13 @@ class BiometricIntegration {
     } catch (error) {
       console.error('Error handling enrollment data:', error);
       this.listener.broadcast('ENROLL:ERROR');
+      this.sendToWebSocketClients({
+        type: 'enrollment_complete',
+        status: 'error',
+        memberId: this.enrollmentMode?.memberId,
+        memberName: this.enrollmentMode?.memberName,
+        message: 'Enrollment failed due to system error'
+      });
       this.stopEnrollmentMode('error');
       return false;
     }
@@ -821,6 +890,47 @@ class BiometricIntegration {
       console.error('Error getting device status:', error);
       return { status: 'error', lastSeen: null };
     }
+  }
+
+  // Add WebSocket client management methods
+  addWebSocketClient(ws) {
+    this.webSocketClients.add(ws);
+    console.log(`🔌 WebSocket client connected. Total clients: ${this.webSocketClients.size}`);
+    
+    // Send current enrollment status if any
+    if (this.enrollmentMode && this.enrollmentMode.active) {
+      this.sendToWebSocketClients({
+        type: 'enrollment_status',
+        status: 'active',
+        memberId: this.enrollmentMode.memberId,
+        memberName: this.enrollmentMode.memberName,
+        attempts: this.enrollmentMode.attempts,
+        maxAttempts: this.enrollmentMode.maxAttempts,
+        currentStep: this.enrollmentMode.currentStep
+      });
+    }
+  }
+
+  removeWebSocketClient(ws) {
+    this.webSocketClients.delete(ws);
+    console.log(`🔌 WebSocket client disconnected. Total clients: ${this.webSocketClients.size}`);
+  }
+
+  sendToWebSocketClients(data) {
+    const message = JSON.stringify(data);
+    this.webSocketClients.forEach(client => {
+      if (client.readyState === 1) { // WebSocket.OPEN
+        try {
+          client.send(message);
+        } catch (error) {
+          console.error('Error sending to WebSocket client:', error);
+          this.removeWebSocketClient(client);
+        }
+      } else {
+        // Remove disconnected clients
+        this.removeWebSocketClient(client);
+      }
+    });
   }
 }
 

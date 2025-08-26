@@ -37,7 +37,8 @@
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "nodemailer": "^6.9.14",
-    "recharts": "^3.1.2"
+    "recharts": "^3.1.2",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
