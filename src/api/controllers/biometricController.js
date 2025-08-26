@@ -1032,7 +1032,7 @@ const esp32Webhook = async (req, res) => {
       // Handle enrollment progress messages
       if (status === 'enrollment_progress') {
         eventType = 'enrollment_progress';
-        success = true;
+        success = false; // Progress events should not mark as successful completion
         
         // Extract enrollment step from the message
         const enrollmentStep = eventData.enrollmentStep;
@@ -1040,7 +1040,7 @@ const esp32Webhook = async (req, res) => {
         
         // Since we now pass memberId as userId to ESP32, userId IS the member ID
         memberIdToUse = userId;
-        biometricId = userId;
+        biometricId = null; // No biometric_id until enrollment is actually complete
         
         try {
           // Get member name for better user experience
@@ -1147,7 +1147,7 @@ const esp32Webhook = async (req, res) => {
         
         // Since we now pass memberId as userId to ESP32, userId IS the member ID
         memberIdToUse = userId;
-        biometricId = userId;
+        biometricId = null; // No biometric_id for cancelled enrollment
         
         // Update enrollment status for cancellation
         try {
@@ -1202,7 +1202,7 @@ const esp32Webhook = async (req, res) => {
         
         // Since we now pass memberId as userId to ESP32, userId IS the member ID
         memberIdToUse = userId;
-        biometricId = userId;
+        biometricId = null; // No biometric_id for failed enrollment
         
         // Update enrollment status for failure
         try {
@@ -1253,8 +1253,8 @@ const esp32Webhook = async (req, res) => {
         }
       }
       
-      // Update member's biometric_id when enrollment succeeds
-      if (success && memberIdToUse && biometricId) {
+      // Update member's biometric_id ONLY when enrollment actually succeeds
+      if (success && memberIdToUse && biometricId && eventType === 'enrollment') {
         try {
           await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', [biometricId, memberIdToUse]);
           console.log(`✅ Updated member ${memberIdToUse} with biometric_id ${biometricId}`);
