@@ -926,18 +926,6 @@ const esp32Webhook = async (req, res) => {
       ip: req.ip,
       userAgent: req.get('User-Agent')
     });
-    
-    // Log the extracted fields for debugging
-    console.log('🔍 Extracted fields:', {
-      deviceId,
-      deviceType,
-      event,
-      status,
-      timestamp,
-      userId,
-      memberId,
-      enrollmentStep: eventData.enrollmentStep
-    });
 
     // Extract common fields
     const {
@@ -953,6 +941,18 @@ const esp32Webhook = async (req, res) => {
       free_heap,
       enrolled_prints
     } = eventData;
+    
+    // Log the extracted fields for debugging
+    console.log('🔍 Extracted fields:', {
+      deviceId,
+      deviceType,
+      event,
+      status,
+      timestamp,
+      userId,
+      memberId,
+      enrollmentStep: eventData.enrollmentStep
+    });
 
     if (!biometricIntegration) {
       console.warn('⚠️ Biometric integration not available, storing raw event');
