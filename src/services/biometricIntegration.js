@@ -918,6 +918,8 @@ class BiometricIntegration {
 
   sendToWebSocketClients(data) {
     const message = JSON.stringify(data);
+    console.log(`📡 Sending WebSocket message to ${this.webSocketClients.size} clients:`, data);
+    
     this.webSocketClients.forEach(client => {
       if (client.readyState === 1) { // WebSocket.OPEN
         try {
@@ -931,6 +933,22 @@ class BiometricIntegration {
         this.removeWebSocketClient(client);
       }
     });
+  }
+
+  // Debug method to check current enrollment status
+  getEnrollmentStatus() {
+    if (this.enrollmentMode && this.enrollmentMode.active) {
+      return {
+        active: true,
+        memberId: this.enrollmentMode.memberId,
+        memberName: this.enrollmentMode.memberName,
+        attempts: this.enrollmentMode.attempts,
+        maxAttempts: this.enrollmentMode.maxAttempts,
+        currentStep: this.enrollmentMode.currentStep,
+        startTime: this.enrollmentMode.startTime
+      };
+    }
+    return { active: false };
   }
 }
 

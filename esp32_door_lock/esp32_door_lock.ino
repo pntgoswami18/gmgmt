@@ -82,6 +82,7 @@ bool enrollmentMode = false;
 int enrollmentID = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastButtonCheck = 0;
+unsigned long lastNTPResync = 0;  // Track last NTP resync attempt
 int fingerprintID = -1;
 String deviceStatus = "ready";
 struct tm timeinfo;  // Global variable for time functions
@@ -92,31 +93,114 @@ void sendEnrollmentData(int memberID, String status);
 void sendBiometricData(int memberID, String status);
 void sendHeartbeat();
 void sendToServer(String jsonData);
+void resyncNTPTime(); // Add NTP resync function declaration
 
 // ==================== TIME FUNCTIONS ====================
 void waitForNTPTime() {
   Serial.println("Waiting for NTP time synchronization...");
   
-  // Wait up to 10 seconds for NTP time to be available
+  // Configure multiple NTP servers for redundancy
+  configTime(TIMEZONE_OFFSET, DST_OFFSET, 
+             "pool.ntp.org",           // Primary NTP server
+             "time.nist.gov",          // Secondary NTP server (US)
+             "time.google.com",        // Tertiary NTP server (Google)
+             "time.windows.com");      // Quaternary NTP server (Microsoft)
+  
+  // Wait up to 30 seconds for NTP time to be available (increased from 10s)
   unsigned long startTime = millis();
-  const unsigned long NTP_TIMEOUT = 10000; // 10 seconds
+  const unsigned long NTP_TIMEOUT = 30000; // 30 seconds
+  
+  Serial.println("Attempting NTP synchronization with multiple servers...");
   
   while (!getLocalTime(&timeinfo) && millis() - startTime < NTP_TIMEOUT) {
     Serial.print(".");
-    delay(100);
+    delay(500); // Increased delay to reduce network congestion
+    
+    // Show progress every 10 seconds
+    if ((millis() - startTime) % 10000 < 500) {
+      Serial.printf(" [%ds]", (millis() - startTime) / 1000);
+    }
   }
   
   if (getLocalTime(&timeinfo)) {
     Serial.println();
-    Serial.println("NTP time synchronized successfully!");
+    Serial.println("✅ NTP time synchronized successfully!");
     
     char timeString[30];
     strftime(timeString, sizeof(timeString), "%Y-%m-%d %H:%M:%S", &timeinfo);
     Serial.printf("Current time: %s\n", timeString);
+    
+    // Validate that time is reasonable (not year 1970 or 2038)
+    if (timeinfo.tm_year > 120 && timeinfo.tm_year < 138) { // 2020-2038
+      Serial.println("✅ Time validation passed - reasonable year detected");
+    } else {
+      Serial.printf("⚠️ Suspicious year detected: %d\n", timeinfo.tm_year + 1900);
+    }
   } else {
     Serial.println();
-    Serial.println("⚠️ NTP time synchronization failed - continuing with fallback time");
+    Serial.println("❌ NTP time synchronization failed after 30 seconds");
+    Serial.println("Possible causes:");
+    Serial.println("  - Network firewall blocking NTP traffic (port 123)");
+    Serial.println("  - DNS resolution issues");
+    Serial.println("  - Network congestion or slow connection");
+    Serial.println("  - Router blocking external NTP requests");
+    Serial.println("  - ISP throttling or blocking NTP");
+    Serial.println();
     Serial.println("Device will use approximate time based on uptime");
+    Serial.println("This may affect timestamp accuracy in logs and server communications");
+    
+    // Try to get network diagnostic info
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.printf("Network info - IP: %s, DNS: %s, Gateway: %s\n", 
+                    WiFi.localIP().toString().c_str(),
+                    WiFi.dnsIP().toString().c_str(),
+                    WiFi.gatewayIP().toString().c_str());
+    }
+  }
+}
+
+// Function to manually resynchronize NTP time
+void resyncNTPTime() {
+  Serial.println("🔄 Manual NTP resynchronization requested...");
+  
+  // Clear any existing time configuration
+  configTime(0, 0, NULL);
+  delay(1000);
+  
+  // Reconfigure with multiple NTP servers
+  configTime(TIMEZONE_OFFSET, DST_OFFSET, 
+             "pool.ntp.org",           // Primary NTP server
+             "time.nist.gov",          // Secondary NTP server (US)
+             "time.google.com",        // Tertiary NTP server (Google)
+             "time.windows.com");      // Quaternary NTP server (Microsoft)
+  
+  // Wait for synchronization with shorter timeout for manual sync
+  unsigned long startTime = millis();
+  const unsigned long MANUAL_NTP_TIMEOUT = 15000; // 15 seconds for manual sync
+  
+  Serial.println("Attempting manual NTP synchronization...");
+  
+  while (!getLocalTime(&timeinfo) && millis() - startTime < MANUAL_NTP_TIMEOUT) {
+    Serial.print(".");
+    delay(500);
+    
+    // Show progress every 5 seconds
+    if ((millis() - startTime) % 5000 < 500) {
+      Serial.printf(" [%ds]", (millis() - startTime) / 1000);
+    }
+  }
+  
+  if (getLocalTime(&timeinfo)) {
+    Serial.println();
+    Serial.println("✅ Manual NTP resynchronization successful!");
+    
+    char timeString[30];
+    strftime(timeString, sizeof(timeString), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    Serial.printf("Updated time: %s\n", timeString);
+  } else {
+    Serial.println();
+    Serial.println("❌ Manual NTP resynchronization failed");
+    Serial.println("Time remains unchanged");
   }
 }
 
@@ -270,7 +354,10 @@ void setup() {
   
   // Initialize time
   // Configure NTP with local timezone from config.h
-  configTime(TIMEZONE_OFFSET, DST_OFFSET, "pool.ntp.org");
+  Serial.println("Configuring NTP time synchronization...");
+  Serial.printf("Timezone offset: %d seconds (%s)\n", TIMEZONE_OFFSET, 
+                TIMEZONE_OFFSET >= 0 ? "UTC+" : "UTC-");
+  Serial.printf("DST offset: %d seconds\n", DST_OFFSET);
   
   // Wait for NTP time synchronization
   waitForNTPTime();
@@ -312,6 +399,17 @@ void loop() {
   if (millis() - lastHeartbeat > HEARTBEAT_INTERVAL) {
     sendHeartbeat();
     lastHeartbeat = millis();
+  }
+  
+  // Periodic NTP resynchronization (every 30 minutes if time is invalid)
+  if (millis() - lastNTPResync > 1800000) { // 30 minutes
+    if (!getLocalTime(&timeinfo) || timeinfo.tm_year < 120 || timeinfo.tm_year > 138) {
+      Serial.println("🔄 Periodic NTP resynchronization triggered due to invalid time");
+      resyncNTPTime();
+      lastNTPResync = millis();
+    } else {
+      lastNTPResync = millis(); // Update timestamp even if time is valid
+    }
   }
   
   // Check buttons (with debouncing)
@@ -577,7 +675,11 @@ void emergencyUnlock() {
 // ==================== ENROLLMENT FUNCTIONS ====================
 void startEnrollmentMode() {
   enrollmentMode = true;
-  enrollmentID = getNextAvailableID();
+  
+  // Only set enrollmentID if it hasn't been set by remote command
+  if (enrollmentID == 0) {
+    enrollmentID = getNextAvailableID();
+  }
   
   Serial.printf("Enrollment mode started for ID: %d\n", enrollmentID);
   Serial.println("Please place finger on sensor...");
@@ -605,6 +707,9 @@ void handleEnrollment() {
     // Send enrollment data to server
     sendEnrollmentData(enrollmentID, "enrollment_success");
     
+    // Reset enrollmentID for next enrollment
+    enrollmentID = 0;
+    
   } else if (result == -1) {
     // Enrollment failed
     Serial.println("Fingerprint enrollment failed");
@@ -617,7 +722,10 @@ void handleEnrollment() {
     delay(2000);
     setStatusLED("ready");
     
-    sendEnrollmentData(enrollmentID, "enrollment_failed");
+    sendEnrollmentProgress("enrollment_failed");
+    
+    // Reset enrollmentID for next enrollment
+    enrollmentID = 0;
   }
   // result == 0 means still in progress
 }
@@ -793,6 +901,7 @@ void sendBiometricData(int memberID, String status) {
   String jsonString;
   serializeJson(doc, jsonString);
   
+  Serial.printf("📤 Sending enrollment data: status=%s, memberId=%d\n", status.c_str(), memberID);
   sendToServer(jsonString);
 }
 
@@ -996,6 +1105,24 @@ String getISO8601Time() {
     }
   }
   
+  // Validate that time is reasonable before using it
+  if (timeinfo.tm_year < 120 || timeinfo.tm_year > 138) { // Before 2020 or after 2038
+    Serial.printf("⚠️ Invalid year detected: %d, using fallback time\n", timeinfo.tm_year + 1900);
+    
+    // Use fallback time calculation
+    unsigned long currentMillis = millis();
+    unsigned long secondsSinceStart = currentMillis / 1000;
+    time_t baseTime = 1735689600; // 2025-01-01 00:00:00 UTC as fallback
+    time_t currentTime = baseTime + secondsSinceStart;
+    
+    struct tm fallbackTime;
+    gmtime_r(&currentTime, &fallbackTime);
+    
+    char timeString[30];
+    strftime(timeString, sizeof(timeString), "%Y-%m-%dT%H:%M:%S", &fallbackTime);
+    return String(timeString);
+  }
+  
   char timeString[30];
   // Format as local time without 'Z' suffix since we now configure proper timezone
   // The server will handle the timestamp as local time from the ESP32
@@ -1058,6 +1185,7 @@ void initializeWebServer() {
   // Control API
   webServer.on("/unlock", HTTP_POST, handleUnlock);
   webServer.on("/enroll", HTTP_POST, handleWebEnroll);
+  webServer.on("/resync-time", HTTP_POST, handleResyncTime);
   
   // Remote command handling from gym management server
   webServer.on("/command", HTTP_POST, handleRemoteCommand);
@@ -1085,6 +1213,7 @@ void handleRoot() {
   html += "<hr>";
   html += "<button onclick=\"fetch('/unlock', {method:'POST'})\">Emergency Unlock</button><br><br>";
   html += "<button onclick=\"fetch('/enroll', {method:'POST'})\">Start Enrollment</button><br><br>";
+  html += "<button onclick=\"fetch('/resync-time', {method:'POST'})\">Resync Time</button><br><br>";
   html += "<a href='/status'>JSON Status</a> | <a href='/config'>Configuration</a>";
   html += "</body></html>";
   
@@ -1122,6 +1251,16 @@ void handleWebEnroll() {
   webServer.send(200, "text/plain", "Enrollment mode started");
 }
 
+void handleResyncTime() {
+  Serial.println("📱 Manual time resync requested via web interface");
+  
+  // Start resync in background (non-blocking)
+  resyncNTPTime();
+  
+  // Return immediate response
+  webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Time resynchronization started\"}");
+}
+
 void handleRemoteCommand() {
   if (!webServer.hasArg("plain")) {
     webServer.send(400, "application/json", "{\"error\":\"No JSON body provided\"}");
@@ -1153,12 +1292,16 @@ void handleRemoteCommand() {
     // Extract member ID if provided
     if (doc["data"]["memberId"]) {
       int memberId = doc["data"]["memberId"].as<int>();
-      Serial.printf("Starting enrollment for member ID: %d\n", memberId);
+      Serial.printf("🎯 Starting enrollment for member ID: %d\n", memberId);
       // Store member ID for enrollment tracking
       enrollmentID = memberId;
+      Serial.printf("📝 Stored enrollmentID: %d\n", enrollmentID);
+    } else {
+      Serial.println("⚠️ No member ID provided, will use next available ID");
     }
     
     startEnrollmentMode();
+    Serial.printf("🚀 Enrollment mode started with ID: %d\n", enrollmentID);
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment mode started\"}");
     
   } else if (command == "unlock_door") {
@@ -1185,6 +1328,9 @@ void handleRemoteCommand() {
       
       // Send cancellation notification to server
       sendEnrollmentData(memberId, "enrollment_cancelled");
+      
+      // Reset enrollmentID for next enrollment
+      enrollmentID = 0;
       
       webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment cancelled\"}");
     } else {

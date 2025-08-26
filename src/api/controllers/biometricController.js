@@ -926,6 +926,18 @@ const esp32Webhook = async (req, res) => {
       ip: req.ip,
       userAgent: req.get('User-Agent')
     });
+    
+    // Log the extracted fields for debugging
+    console.log('🔍 Extracted fields:', {
+      deviceId,
+      deviceType,
+      event,
+      status,
+      timestamp,
+      userId,
+      memberId,
+      enrollmentStep: eventData.enrollmentStep
+    });
 
     // Extract common fields
     const {
@@ -944,12 +956,16 @@ const esp32Webhook = async (req, res) => {
 
     if (!biometricIntegration) {
       console.warn('⚠️ Biometric integration not available, storing raw event');
+      console.warn('⚠️ This means WebSocket updates and enrollment status updates will not work');
+      console.warn('⚠️ Check if biometricIntegration service is properly initialized');
       return res.json({ 
         success: true, 
         message: 'Event received but biometric integration not active',
         stored: false
       });
     }
+    
+    console.log(`✅ Biometric integration available, proceeding with event processing`);
 
     // Determine event type and handle accordingly
     let eventType = 'unknown';
@@ -1011,7 +1027,65 @@ const esp32Webhook = async (req, res) => {
         success = false;
       }
     } else if (event === 'Enroll') {
-      if (status === 'enrollment_success') {
+      console.log(`🎯 Processing enrollment event: status=${status}, userId=${userId}, deviceId=${deviceId}`);
+      
+      // Handle enrollment progress messages
+      if (status === 'enrollment_progress') {
+        eventType = 'enrollment_progress';
+        success = true;
+        
+        // Extract enrollment step from the message
+        const enrollmentStep = eventData.enrollmentStep;
+        console.log(`🔄 Processing enrollment progress: ${enrollmentStep} for user ${userId}`);
+        
+        // Since we now pass memberId as userId to ESP32, userId IS the member ID
+        memberIdToUse = userId;
+        biometricId = userId;
+        
+        try {
+          // Get member name for better user experience
+          let memberName = `Member ${userId}`;
+          try {
+            const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [userId]);
+            if (memberResult.rows && memberResult.rows.length > 0) {
+              memberName = memberResult.rows[0].name;
+            }
+          } catch (nameError) {
+            console.warn('Could not fetch member name:', nameError.message);
+          }
+          
+          console.log(`📤 Sending WebSocket progress update for member ${userId}: ${enrollmentStep}`);
+          
+          // Send WebSocket update to frontend for progress
+          biometricIntegration.sendToWebSocketClients({
+            type: 'enrollment_progress',
+            status: 'progress',
+            memberId: userId,
+            memberName: memberName,
+            currentStep: enrollmentStep,
+            message: `Enrollment progress: ${enrollmentStep}`,
+            deviceId: deviceId,
+            timestamp: timestamp
+          });
+          
+          console.log(`📤 Calling handleEnrollmentData for progress updates`);
+          
+          // Also call handleEnrollmentData for progress updates
+          await biometricIntegration.handleEnrollmentData({
+            userId: userId,
+            memberId: userId,
+            status: 'enrollment_progress',
+            enrollmentStep: enrollmentStep,
+            deviceId: deviceId,
+            timestamp: timestamp
+          });
+          
+          console.log(`✅ Enrollment progress updated for user ${userId}: ${enrollmentStep}`);
+        } catch (progressError) {
+          console.error('❌ Error updating enrollment progress:', progressError);
+        }
+        
+      } else if (status === 'enrollment_success') {
         eventType = 'enrollment';
         success = true;
         
@@ -1022,6 +1096,29 @@ const esp32Webhook = async (req, res) => {
         // IMPORTANT: Update enrollment status in biometricIntegration service
         // This ensures the frontend knows enrollment is complete
         try {
+          // Get member name for better user experience
+          let memberName = `Member ${userId}`;
+          try {
+            const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [userId]);
+            if (memberResult.rows && memberResult.rows.length > 0) {
+              memberName = memberResult.rows[0].name;
+            }
+          } catch (nameError) {
+            console.warn('Could not fetch member name:', nameError.message);
+          }
+          
+          // Send WebSocket update to frontend immediately
+          biometricIntegration.sendToWebSocketClients({
+            type: 'enrollment_complete',
+            status: 'success',
+            memberId: userId,
+            memberName: memberName,
+            message: 'Enrollment completed successfully via ESP32',
+            deviceId: deviceId,
+            timestamp: timestamp
+          });
+          
+          // Also call handleEnrollmentData for consistency
           await biometricIntegration.handleEnrollmentData({
             userId: userId,
             memberId: userId, // Pass the member ID (same as userId)
@@ -1030,6 +1127,15 @@ const esp32Webhook = async (req, res) => {
             deviceId: deviceId,
             timestamp: timestamp
           });
+          
+          // IMPORTANT: Stop enrollment mode if it's active for this member
+          if (biometricIntegration.enrollmentMode && 
+              biometricIntegration.enrollmentMode.active && 
+              biometricIntegration.enrollmentMode.memberId == userId) {
+            biometricIntegration.stopEnrollmentMode('success');
+            console.log(`🛑 Enrollment mode stopped for member ${userId}`);
+          }
+          
           console.log(`✅ Enrollment status updated for user ${userId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment status:', enrollmentError);
@@ -1045,6 +1151,29 @@ const esp32Webhook = async (req, res) => {
         
         // Update enrollment status for cancellation
         try {
+          // Get member name for better user experience
+          let memberName = `Member ${userId}`;
+          try {
+            const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [userId]);
+            if (memberResult.rows && memberResult.rows.length > 0) {
+              memberName = memberResult.rows[0].name;
+            }
+          } catch (nameError) {
+            console.warn('Could not fetch member name:', nameError.message);
+          }
+          
+          // Send WebSocket update to frontend immediately
+          biometricIntegration.sendToWebSocketClients({
+            type: 'enrollment_complete',
+            status: 'cancelled',
+            memberId: userId,
+            memberName: memberName,
+            message: 'Enrollment was cancelled via ESP32',
+            deviceId: deviceId,
+            timestamp: timestamp
+          });
+          
+          // Also call handleEnrollmentData for consistency
           await biometricIntegration.handleEnrollmentData({
             userId: userId,
             memberId: userId, // Pass the member ID (same as userId)
@@ -1053,6 +1182,15 @@ const esp32Webhook = async (req, res) => {
             deviceId: deviceId,
             timestamp: timestamp
           });
+          
+          // IMPORTANT: Stop enrollment mode if it's active for this member
+          if (biometricIntegration.enrollmentMode && 
+              biometricIntegration.enrollmentMode.active && 
+              biometricIntegration.enrollmentMode.memberId == userId) {
+            biometricIntegration.stopEnrollmentMode('cancelled');
+            console.log(`🛑 Enrollment mode stopped for member ${userId}`);
+          }
+          
           console.log(`⏹️ Enrollment cancellation status updated for user ${userId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment cancellation status:', enrollmentError);
@@ -1068,6 +1206,29 @@ const esp32Webhook = async (req, res) => {
         
         // Update enrollment status for failure
         try {
+          // Get member name for better user experience
+          let memberName = `Member ${userId}`;
+          try {
+            const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [userId]);
+            if (memberResult.rows && memberResult.rows.length > 0) {
+              memberName = memberResult.rows[0].name;
+            }
+          } catch (nameError) {
+            console.warn('Could not fetch member name:', nameError.message);
+          }
+          
+          // Send WebSocket update to frontend immediately
+          biometricIntegration.sendToWebSocketClients({
+            type: 'enrollment_complete',
+            status: 'failed',
+            memberId: userId,
+            memberName: memberName,
+            message: 'ESP32 enrollment failed',
+            deviceId: deviceId,
+            timestamp: timestamp
+          });
+          
+          // Also call handleEnrollmentData for consistency
           await biometricIntegration.handleEnrollmentData({
             userId: userId,
             memberId: userId, // Pass the member ID (same as userId)
@@ -1077,6 +1238,15 @@ const esp32Webhook = async (req, res) => {
             timestamp: timestamp,
             error: 'ESP32 enrollment failed'
           });
+          
+          // IMPORTANT: Stop enrollment mode if it's active for this member
+          if (biometricIntegration.enrollmentMode && 
+              biometricIntegration.enrollmentMode.active && 
+              biometricIntegration.enrollmentMode.memberId == userId) {
+            biometricIntegration.stopEnrollmentMode('failed');
+            console.log(`🛑 Enrollment mode stopped for member ${userId}`);
+          }
+          
           console.log(`❌ Enrollment failure status updated for user ${userId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment failure status:', enrollmentError);
