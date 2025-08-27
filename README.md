@@ -224,7 +224,7 @@ This project supports ESP32-based fingerprint door lock systems for attendance c
 
 ### Overview
 
-- **Hardware**: ESP32 + AS608 Fingerprint Sensor + Door Lock Control
+- **Hardware**: ESP32 + R307 Fingerprint Sensor + Door Lock Control
 - **Connectivity**: WiFi-based, no additional gateway required
 - **Real-time**: Live event streaming and device monitoring
 - **Remote Control**: Unlock doors and enroll fingerprints remotely
@@ -287,7 +287,7 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 2. Go to **Tools → Manage Libraries...**
 3. Search and install the following libraries:
    - `ArduinoJson` by Benoit Blanchon (version 6.x)
-   - `Adafruit Fingerprint Sensor Library` by Adafruit
+   - `Adafruit Fingerprint Sensor Library` by Adafruit (compatible with R307 sensor)
 
 **Method 2: Using Arduino IDE Board Manager**
 1. Go to **File → Preferences**
@@ -340,7 +340,7 @@ Power Supply:
           │                      │
           ▼                      ▼
     ┌─────────────┐        ┌─────────────┐
-    │   Door Lock │        │   AS608     │
+    │   Door Lock │        │   R307      │
     │   Relay     │        │  Fingerprint│
     │             │        │   Sensor    │
     └─────┬───────┘        └─────┬───────┘
@@ -380,28 +380,150 @@ Detailed Pin Mapping:
 ┌─────────────┬─────────────┬─────────────────────┐
 │   ESP32 Pin │ Component   │     Connection      │
 ├─────────────┼─────────────┼─────────────────────┤
-│   Pin 4     │ Enroll      │ Push Button (GND)  │
-│   Pin 5     │ Override    │ Push Button (GND)  │
-│   Pin 16    │ AS608 RX    │ Sensor TX          │
-│   Pin 17    │ AS608 TX    │ Sensor RX          │
-│   Pin 18    │ Door Lock   │ Relay Module       │
-│   Pin 19    │ Green LED   │ LED + Resistor     │
-│   Pin 21    │ Red LED     │ LED + Resistor     │
-│   Pin 22    │ Blue LED    │ LED + Resistor     │
-│   Pin 23    │ Buzzer      │ Buzzer Module      │
-│   VIN       │ Power       │ 5V Supply          │
-│   GND       │ Ground      │ Common Ground      │
-│   3.3V      │ Logic       │ 3.3V Logic Level  │
+│   Pin 4     │ Enroll      │ Push Button (GND)   │
+│   Pin 5     │ Override    │ Push Button (GND)   │
+│   Pin 16    │ R307 RX     │ Sensor TX           │
+│   Pin 17    │ R307 TX     │ Sensor RX           │
+│   Pin 18    │ Door Lock   │ Relay Module        │
+│   Pin 19    │ Green LED   │ LED + Resistor      │
+│   Pin 21    │ Red LED     │ LED + Resistor      │
+│   Pin 22    │ Blue LED    │ LED + Resistor      │
+│   Pin 23    │ Buzzer      │ Buzzer Module       │
+│   VIN       │ Power       │ 5V Supply           │
+│   GND       │ Ground      │ Common Ground       │
+│   3.3V      │ Logic       │ 3.3V Logic Level    │
 └─────────────┴─────────────┴─────────────────────┘
 
 Wiring Notes:
 • All components share a common ground (GND)
-• AS608 sensor operates at 5V but ESP32 pins are 3.3V tolerant
+• R307 sensor operates at 5V but ESP32 pins are 3.3V tolerant
 • Relay module requires 12V for door lock operation
 • LEDs require current-limiting resistors (220Ω recommended)
 • Buttons connect between GPIO pins and GND
 • Buzzer can be active (3.3V) or passive (requires driver circuit)
+
+##### 3.5 Detailed Connection Schematics
+
+###### R307 Fingerprint Sensor Connection
+
 ```
+R307 Fingerprint Sensor Wiring Diagram
+======================================
+
+┌─────────────────────────────────────────────────┐
+│                    R307 Sensor                  │
+│  ┌─────────────────────────────────────────┐   │
+│  │                                         │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
+│  │  │ VCC │ │ TX  │ │ RX  │ │ GND │      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
+│  └─────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘
+         │         │         │         │
+         │         │         │         │
+         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+    │   5V    │ │ Pin 16 │ │ Pin 17 │ │  GND    │
+    │ Supply  │ │ (RX)   │ │ (TX)   │ │(Common) │
+    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+
+Connection Details:
+• VCC → 5V Power Supply (from ESP32 VIN or external 5V)
+• TX  → ESP32 Pin 16 (RX) - Sensor sends data to ESP32
+• RX  → ESP32 Pin 17 (TX) - ESP32 sends commands to sensor
+• GND → Common Ground (shared with ESP32 GND)
+
+Note: R307 operates at 5V logic level, but ESP32 pins are 3.3V tolerant
+```
+
+###### 5V Relay Module Connection
+
+```
+5V Relay Module Wiring Diagram
+==============================
+
+┌─────────────────────────────────────────────────┐
+│                 5V Relay Module                 │
+│  ┌─────────────────────────────────────────┐   │
+│  │                                         │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
+│  │  │ VCC │ │ GND │ │ IN  │ │ COM │      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
+│  └─────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘
+         │         │         │         │
+         │         │         │         │
+         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+    │   5V    │ │  GND    │ │ Pin 18 │ │ 12V    │
+    │ Supply  │ │(Common) │ │(Signal)│ │Supply  │
+    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+
+Connection Details:
+• VCC → 5V Power Supply (from ESP32 VIN or external 5V)
+• GND → Common Ground (shared with ESP32 GND)
+• IN  → ESP32 Pin 18 (Digital Output Signal)
+• COM → 12V Power Supply (for relay coil operation)
+
+Relay Operation:
+• When Pin 18 is HIGH (3.3V), relay activates (NO contact closes)
+• When Pin 18 is LOW (0V), relay deactivates (NO contact opens)
+• Relay provides electrical isolation between ESP32 and door lock circuit
+```
+
+###### Electromagnetic Door Lock Circuit
+
+```
+Electromagnetic Door Lock Circuit
+================================
+
+┌─────────────────────────────────────────────────┐
+│               12V Power Supply                 │
+│  ┌─────────────────────────────────────────┐   │
+│  │                                         │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
+│  │  │ +12V│ │     │ │     │ │ GND │      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
+│  └─────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘
+         │                           │
+         │                           │
+         ▼                           ▼
+    ┌─────────┐               ┌─────────┐
+    │ Relay   │               │  GND    │
+    │  NO     │               │(Common) │
+    │Contact  │               │         │
+    └────┬────┘               └────┬────┘
+         │                        │
+         │                        │
+         ▼                        ▼
+    ┌─────────┐               ┌─────────┐
+    │Electro- │               │Electro- │
+    │magnetic │               │magnetic │
+    │Door Lock│               │Door Lock│
+    │  +12V   │               │  GND    │
+    └─────────┘               └─────────┘
+
+Connection Details:
+• 12V+ → Relay NO (Normally Open) Contact
+• Relay NO Contact → Electromagnetic Door Lock +12V Terminal
+• 12V- → Common Ground (shared with ESP32 GND)
+• Door Lock GND → Common Ground
+
+Circuit Operation:
+• When relay activates (Pin 18 HIGH), NO contact closes
+• 12V flows through relay to door lock, activating the electromagnet
+• Door lock releases (unlocks) when electromagnet is energized
+• When relay deactivates (Pin 18 LOW), NO contact opens
+• Door lock remains locked (electromagnet de-energized)
+
+Safety Features:
+• Relay provides electrical isolation between low-voltage ESP32 and high-voltage door lock
+• Door lock automatically locks when power is removed (fail-safe operation)
+• No current flows through door lock when relay is inactive
 
 #### 4. Configuration Management
 
@@ -792,7 +914,7 @@ If NTP issues persist after implementing these solutions:
 ### Library Installation Issues
 
 - **ArduinoJson.h not found**: Install `ArduinoJson` library via Arduino IDE Library Manager
-- **Adafruit_Fingerprint.h not found**: Install `Adafruit Fingerprint Sensor Library` via Library Manager
+- **Adafruit_Fingerprint.h not found**: Install `Adafruit Fingerprint Sensor Library` via Library Manager (compatible with R307 sensor)
 - **ESP32 board not found**: Add ESP32 board URL in Preferences and install via Board Manager
 - **Compilation errors**: Ensure you're using ArduinoJson version 6.x (not 7.x which has breaking changes)
 
