@@ -99,12 +99,11 @@ void resyncNTPTime(); // Add NTP resync function declaration
 void waitForNTPTime() {
   Serial.println("Waiting for NTP time synchronization...");
   
-  // Configure multiple NTP servers for redundancy
+  // Configure multiple NTP servers for redundancy (max 3 supported by ESP32)
   configTime(TIMEZONE_OFFSET, DST_OFFSET, 
              "pool.ntp.org",           // Primary NTP server
              "time.nist.gov",          // Secondary NTP server (US)
-             "time.google.com",        // Tertiary NTP server (Google)
-             "time.windows.com");      // Quaternary NTP server (Microsoft)
+             "time.google.com");       // Tertiary NTP server (Google)
   
   // Wait up to 30 seconds for NTP time to be available (increased from 10s)
   unsigned long startTime = millis();
@@ -167,12 +166,11 @@ void resyncNTPTime() {
   configTime(0, 0, NULL);
   delay(1000);
   
-  // Reconfigure with multiple NTP servers
+  // Reconfigure with multiple NTP servers (max 3 supported by ESP32)
   configTime(TIMEZONE_OFFSET, DST_OFFSET, 
              "pool.ntp.org",           // Primary NTP server
              "time.nist.gov",          // Secondary NTP server (US)
-             "time.google.com",        // Tertiary NTP server (Google)
-             "time.windows.com");      // Quaternary NTP server (Microsoft)
+             "time.google.com");       // Tertiary NTP server (Google)
   
   // Wait for synchronization with shorter timeout for manual sync
   unsigned long startTime = millis();
