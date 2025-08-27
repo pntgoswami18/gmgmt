@@ -54,7 +54,7 @@ String device_id = "";
 // Pin Definitions
 #define FINGERPRINT_RX_PIN    16
 #define FINGERPRINT_TX_PIN    17
-#define RELAY_PIN             18
+#define RELAY_PIN             18      // Controls door lock relay (HIGH=locked, LOW=unlocked)
 #define GREEN_LED_PIN         19
 #define RED_LED_PIN           21
 #define BLUE_LED_PIN          22
@@ -440,7 +440,7 @@ void initializePins() {
   pinMode(OVERRIDE_BUTTON_PIN, INPUT_PULLUP);
   
   // Initialize all outputs to OFF
-  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(RELAY_PIN, HIGH);  // Start with door locked (relay closed)
   digitalWrite(GREEN_LED_PIN, LOW);
   digitalWrite(RED_LED_PIN, LOW);
   digitalWrite(BLUE_LED_PIN, LOW);
@@ -628,6 +628,11 @@ int getFingerprintID() {
 }
 
 // ==================== ACCESS CONTROL FUNCTIONS ====================
+bool isDoorLocked() {
+  // Returns true if door is locked (relay is HIGH/closed)
+  return digitalRead(RELAY_PIN) == HIGH;
+}
+
 void unlockDoor() {
   Serial.println("Door unlocked!");
   
@@ -637,14 +642,17 @@ void unlockDoor() {
   delay(100);
   playTone(1200, 200);
   
-  // Unlock door
-  digitalWrite(RELAY_PIN, HIGH);
+  // Unlock door - OPEN relay to allow door to unlock
+  Serial.println("🔓 Opening relay (door unlocked)");
+  digitalWrite(RELAY_PIN, LOW);
   
   // Keep door unlocked for specified time
+  Serial.printf("⏱️  Door will remain unlocked for %d seconds\n", DOOR_UNLOCK_TIME / 1000);
   delay(DOOR_UNLOCK_TIME);
   
-  // Lock door
-  digitalWrite(RELAY_PIN, LOW);
+  // Lock door - CLOSE relay to keep door locked
+  Serial.println("🔒 Closing relay (door locked)");
+  digitalWrite(RELAY_PIN, HIGH);
   setStatusLED("ready");
   
   Serial.println("Door locked");
@@ -968,6 +976,8 @@ void sendHeartbeat() {
   doc["status"] = deviceStatus;
   doc["timestamp"] = timestamp;
   doc["event"] = "heartbeat";
+  doc["door_locked"] = isDoorLocked();
+  doc["relay_state"] = digitalRead(RELAY_PIN);
   doc["wifi_rssi"] = WiFi.RSSI();
   doc["free_heap"] = ESP.getFreeHeap();
   doc["enrolled_prints"] = finger.templateCount;
@@ -1182,6 +1192,7 @@ void initializeWebServer() {
   
   // Control API
   webServer.on("/unlock", HTTP_POST, handleUnlock);
+  webServer.on("/lock", HTTP_POST, handleLock);
   webServer.on("/enroll", HTTP_POST, handleWebEnroll);
   webServer.on("/resync-time", HTTP_POST, handleResyncTime);
   
@@ -1201,18 +1212,23 @@ void initializeWebServer() {
 }
 
 void handleRoot() {
-  String html = "<!DOCTYPE html><html><head><title>ESP32 Door Lock</title></head><body>";
+  String html = "<!DOCTYPE html><html><head><title>ESP32 Door Lock</title>";
+  html += "<style>body{font-family:Arial;margin:20px;} .status{display:inline-block;padding:5px 10px;border-radius:5px;color:white;} .locked{background-color:#d32f2f;} .unlocked{background-color:#388e3c;} button{padding:10px 15px;margin:5px;border:none;border-radius:5px;cursor:pointer;} .unlock{background-color:#388e3c;color:white;} .lock{background-color:#d32f2f;color:white;} .enroll{background-color:#1976d2;color:white;} .time{background-color:#f57c00;color:white;}</style>";
+  html += "</head><body>";
   html += "<h1>ESP32 Door Lock System</h1>";
   html += "<p><strong>Device ID:</strong> " + device_id + "</p>";
   html += "<p><strong>Status:</strong> " + deviceStatus + "</p>";
+  html += "<p><strong>Door State:</strong> <span class='status " + (isDoorLocked() ? "locked'>LOCKED" : "unlocked'>UNLOCKED") + "</span></p>";
   html += "<p><strong>WiFi:</strong> " + wifi_ssid + " (" + String(WiFi.RSSI()) + " dBm)</p>";
   html += "<p><strong>Server:</strong> " + gym_server_ip + ":" + String(gym_server_port) + "</p>";
   html += "<p><strong>Enrolled Fingerprints:</strong> " + String(finger.templateCount) + "</p>";
   html += "<hr>";
-  html += "<button onclick=\"fetch('/unlock', {method:'POST'})\">Emergency Unlock</button><br><br>";
-  html += "<button onclick=\"fetch('/enroll', {method:'POST'})\">Start Enrollment</button><br><br>";
-  html += "<button onclick=\"fetch('/resync-time', {method:'POST'})\">Resync Time</button><br><br>";
+  html += "<button class='unlock' onclick=\"fetch('/unlock', {method:'POST'})\">Emergency Unlock</button>";
+  html += "<button class='lock' onclick=\"fetch('/lock', {method:'POST'})\">Manual Lock</button><br><br>";
+  html += "<button class='enroll' onclick=\"fetch('/enroll', {method:'POST'})\">Start Enrollment</button><br><br>";
+  html += "<button class='time' onclick=\"fetch('/resync-time', {method:'POST'})\">Resync Time</button><br><br>";
   html += "<a href='/status'>JSON Status</a> | <a href='/config'>Configuration</a>";
+  html += "<script>setInterval(function(){location.reload();},5000);</script>";
   html += "</body></html>";
   
   webServer.send(200, "text/html", html);
@@ -1222,6 +1238,7 @@ void handleStatus() {
   StaticJsonDocument<400> doc;
   doc["device_id"] = device_id;
   doc["status"] = deviceStatus;
+  doc["door_locked"] = isDoorLocked();
   doc["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
   doc["wifi_ssid"] = wifi_ssid;
   doc["wifi_rssi"] = WiFi.RSSI();
@@ -1242,6 +1259,17 @@ void handleStatus() {
 void handleUnlock() {
   emergencyUnlock();
   webServer.send(200, "text/plain", "Door unlocked");
+}
+
+void handleLock() {
+  Serial.println("Manual door lock requested via web interface");
+  
+  // Lock door - CLOSE relay to keep door locked
+  digitalWrite(RELAY_PIN, HIGH);
+  setStatusLED("ready");
+  
+  Serial.println("Door manually locked");
+  webServer.send(200, "text/plain", "Door locked");
 }
 
 void handleWebEnroll() {
