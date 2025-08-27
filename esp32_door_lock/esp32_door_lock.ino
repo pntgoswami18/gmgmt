@@ -395,6 +395,12 @@ void loop() {
   
   // Send heartbeat to server
   if (millis() - lastHeartbeat > HEARTBEAT_INTERVAL) {
+    // Log current relay state before sending heartbeat
+    Serial.printf("📊 Current relay state: %s (PIN %d) - Door is %s\n", 
+                  digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", 
+                  RELAY_PIN, 
+                  isDoorLocked() ? "LOCKED" : "UNLOCKED");
+    
     sendHeartbeat();
     lastHeartbeat = millis();
   }
@@ -440,7 +446,9 @@ void initializePins() {
   pinMode(OVERRIDE_BUTTON_PIN, INPUT_PULLUP);
   
   // Initialize all outputs to OFF
+  Serial.printf("🔧 Initializing relay pin %d to HIGH (door locked)\n", RELAY_PIN);
   digitalWrite(RELAY_PIN, HIGH);  // Start with door locked (relay closed)
+  Serial.println("✅ Initial relay signal: HIGH (door should be locked)");
   digitalWrite(GREEN_LED_PIN, LOW);
   digitalWrite(RED_LED_PIN, LOW);
   digitalWrite(BLUE_LED_PIN, LOW);
@@ -644,7 +652,9 @@ void unlockDoor() {
   
   // Unlock door - OPEN relay to allow door to unlock
   Serial.println("🔓 Opening relay (door unlocked)");
+  Serial.printf("📡 Sending LOW signal to relay module (PIN %d)\n", RELAY_PIN);
   digitalWrite(RELAY_PIN, LOW);
+  Serial.println("✅ Relay signal: LOW (door should be unlocked)");
   
   // Keep door unlocked for specified time
   Serial.printf("⏱️  Door will remain unlocked for %d seconds\n", DOOR_UNLOCK_TIME / 1000);
@@ -652,7 +662,9 @@ void unlockDoor() {
   
   // Lock door - CLOSE relay to keep door locked
   Serial.println("🔒 Closing relay (door locked)");
+  Serial.printf("📡 Sending HIGH signal to relay module (PIN %d)\n", RELAY_PIN);
   digitalWrite(RELAY_PIN, HIGH);
+  Serial.println("✅ Relay signal: HIGH (door should be locked)");
   setStatusLED("ready");
   
   Serial.println("Door locked");
@@ -673,6 +685,8 @@ void accessDenied() {
 
 void emergencyUnlock() {
   Serial.println("Emergency unlock activated!");
+  Serial.printf("📡 Current relay state before emergency unlock: %s (PIN %d)\n", 
+                digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
   
   unlockDoor();
   sendBiometricData(-999, "emergency_unlock");
@@ -1266,7 +1280,9 @@ void handleLock() {
   Serial.println("Manual door lock requested via web interface");
   
   // Lock door - CLOSE relay to keep door locked
+  Serial.printf("📡 Sending HIGH signal to relay module (PIN %d)\n", RELAY_PIN);
   digitalWrite(RELAY_PIN, HIGH);
+  Serial.println("✅ Relay signal: HIGH (door should be locked)");
   setStatusLED("ready");
   
   Serial.println("Door manually locked");
@@ -1332,10 +1348,14 @@ void handleRemoteCommand() {
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment mode started\"}");
     
   } else if (command == "unlock_door") {
+    Serial.printf("📡 Current relay state before remote unlock: %s (PIN %d)\n", 
+                  digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
     emergencyUnlock();
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Door unlocked\"}");
     
   } else if (command == "access_granted") {
+    Serial.printf("📡 Current relay state before access granted: %s (PIN %d)\n", 
+                  digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
     // This could be used for additional access logging
     unlockDoor();
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Access granted\"}");
