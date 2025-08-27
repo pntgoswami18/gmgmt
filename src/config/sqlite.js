@@ -45,12 +45,12 @@ function initializeDatabase() {
        name TEXT NOT NULL,
        email TEXT UNIQUE,
        phone TEXT,
-       membership_type TEXT,
+       membership_type TEXT DEFAULT 'standard',
        membership_plan_id INTEGER,
        join_date TEXT DEFAULT (date('now')),
-       address TEXT,
-       birthday TEXT,
-       photo_url TEXT,
+       address TEXT DEFAULT '',
+       birthday TEXT DEFAULT '',
+       photo_url TEXT DEFAULT '',
        is_active INTEGER DEFAULT 1
      );`,
     `CREATE TABLE IF NOT EXISTS settings (
@@ -148,14 +148,28 @@ function initializeDatabase() {
   });
   trx();
 
-  // Ensure legacy databases have is_active column
+  // Ensure legacy databases have required columns with defaults
   try {
     const cols = db.prepare("PRAGMA table_info(members)").all();
-    const hasActive = cols.some(c => String(c.name).toLowerCase() === 'is_active');
-    if (!hasActive) {
+    const colNames = cols.map(c => String(c.name).toLowerCase());
+    
+    // Add is_active column if missing
+    if (!colNames.includes('is_active')) {
       db.prepare("ALTER TABLE members ADD COLUMN is_active INTEGER DEFAULT 1").run();
       db.prepare("UPDATE members SET is_active = 1 WHERE is_active IS NULL").run();
     }
+    
+    // Add membership_type column if missing
+    if (!colNames.includes('membership_type')) {
+      db.prepare("ALTER TABLE members ADD COLUMN membership_type TEXT DEFAULT 'standard'").run();
+      db.prepare("UPDATE members SET membership_type = 'standard' WHERE membership_type IS NULL").run();
+    }
+    
+    // Update existing NULL values to empty strings for text fields
+    db.prepare("UPDATE members SET address = '' WHERE address IS NULL").run();
+    db.prepare("UPDATE members SET birthday = '' WHERE birthday IS NULL").run();
+    db.prepare("UPDATE members SET photo_url = '' WHERE photo_url IS NULL").run();
+    
   } catch (_) {}
 }
 
