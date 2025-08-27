@@ -1218,7 +1218,8 @@ void handleRoot() {
   html += "<h1>ESP32 Door Lock System</h1>";
   html += "<p><strong>Device ID:</strong> " + device_id + "</p>";
   html += "<p><strong>Status:</strong> " + deviceStatus + "</p>";
-  html += "<p><strong>Door State:</strong> <span class='status " + (isDoorLocked() ? "locked'>LOCKED" : "unlocked'>UNLOCKED") + "</span></p>";
+  String doorStatus = isDoorLocked() ? "locked'>LOCKED" : "unlocked'>UNLOCKED";
+  html += "<p><strong>Door State:</strong> <span class='status " + doorStatus + "</span></p>";
   html += "<p><strong>WiFi:</strong> " + wifi_ssid + " (" + String(WiFi.RSSI()) + " dBm)</p>";
   html += "<p><strong>Server:</strong> " + gym_server_ip + ":" + String(gym_server_port) + "</p>";
   html += "<p><strong>Enrolled Fingerprints:</strong> " + String(finger.templateCount) + "</p>";
