@@ -165,6 +165,12 @@ function initializeDatabase() {
       db.prepare("UPDATE members SET membership_type = 'standard' WHERE membership_type IS NULL").run();
     }
     
+    // Add is_admin column if missing
+    if (!colNames.includes('is_admin')) {
+      db.prepare("ALTER TABLE members ADD COLUMN is_admin INTEGER DEFAULT 0").run();
+      db.prepare("UPDATE members SET is_admin = 0 WHERE is_admin IS NULL").run();
+    }
+    
     // Update existing NULL values to empty strings for text fields
     db.prepare("UPDATE members SET address = '' WHERE address IS NULL").run();
     db.prepare("UPDATE members SET birthday = '' WHERE birthday IS NULL").run();

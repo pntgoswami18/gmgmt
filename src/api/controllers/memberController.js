@@ -50,7 +50,7 @@ exports.getMemberById = async (req, res) => {
 
 // Create a new member (email removed)
 exports.createMember = async (req, res) => {
-    const { name, phone, membership_plan_id, address, birthday, photo_url } = req.body;
+    const { name, phone, membership_plan_id, address, birthday, photo_url, is_admin } = req.body;
     try {
         if (!phone) {
             return res.status(400).json({ message: 'Phone is required' });
@@ -62,9 +62,11 @@ exports.createMember = async (req, res) => {
             ? null
             : parseInt(membership_plan_id, 10);
 
+        const adminStatus = is_admin ? 1 : 0;
+
         await pool.query(
-            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active) VALUES ($1, $2, $3, $4, $5, $6, 1)',
-            [name, phone || null, planId, address || null, birthday || null, photo_url || null]
+            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active, is_admin) VALUES ($1, $2, $3, $4, $5, $6, 1, $7)',
+            [name, phone || null, planId, address || null, birthday || null, photo_url || null, adminStatus]
         );
         const newMember = await pool.query('SELECT * FROM members ORDER BY id DESC LIMIT 1');
 
@@ -87,10 +89,10 @@ exports.createMember = async (req, res) => {
 // Update a member (email removed)
 exports.updateMember = async (req, res) => {
     const { id } = req.params;
-    const { name, phone, address, birthday, photo_url } = req.body;
+    const { name, phone, address, birthday, photo_url, is_admin } = req.body;
     try {
         // Load existing to allow partial updates while ensuring mandatory fields present post-update
-        const existingRes = await pool.query('SELECT name, phone, address, birthday, photo_url FROM members WHERE id = $1', [id]);
+        const existingRes = await pool.query('SELECT name, phone, address, birthday, photo_url, is_admin FROM members WHERE id = $1', [id]);
         if (existingRes.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });
         }
@@ -111,10 +113,11 @@ exports.updateMember = async (req, res) => {
         const safeAddress = address === undefined ? existing.address || null : address || null;
         const safeBirthday = birthday === undefined ? existing.birthday || null : birthday || null;
         const safePhotoUrl = photo_url === undefined ? existing.photo_url || null : photo_url || null;
+        const safeAdminStatus = is_admin === undefined ? existing.is_admin : (is_admin ? 1 : 0);
 
         await pool.query(
-            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5 WHERE id = $6',
-            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, id]
+            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5, is_admin = $6 WHERE id = $7',
+            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, safeAdminStatus, id]
         );
         const updatedMember = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
         if (updatedMember.rows.length === 0) {
