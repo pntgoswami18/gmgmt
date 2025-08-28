@@ -24,9 +24,11 @@ exports.getAttendanceStats = async (req, res) => {
             SELECT 
                 date(check_in_time) as date,
                 COUNT(*) as total_checkins
-            FROM attendance
+            FROM attendance a
+            JOIN members m ON a.member_id = m.id
+            WHERE m.is_admin = 0
             GROUP BY date(check_in_time)
-            ORDER BY date ASC
+            ORDER BY date(check_in_time) ASC
         `);
         res.json(attendanceStats.rows);
     } catch (err) {
@@ -96,11 +98,12 @@ exports.getSummaryStats = async (req, res) => {
               AND date(join_date) < date('now','localtime','start of month','+1 month')
         `);
 
-        // Members who have NOT made a payment in the current month
+        // Members who have NOT made a payment in the current month (excluding admin users)
         const unpaidMembersThisMonth = await pool.query(`
             SELECT COUNT(*) as count
             FROM members m
-            WHERE NOT EXISTS (
+            WHERE m.is_admin = 0
+              AND NOT EXISTS (
                 SELECT 1
                 FROM payments p
                 JOIN invoices i ON p.invoice_id = i.id
@@ -139,6 +142,7 @@ exports.getFinancialSummary = async (req, res) => {
             FROM invoices i
             JOIN members m ON i.member_id = m.id
             WHERE i.status = 'unpaid'
+              AND m.is_admin = 0
             ORDER BY i.due_date ASC
         `);
 
@@ -197,6 +201,7 @@ exports.getFinancialSummary = async (req, res) => {
                 END as is_overdue_for_plan
             FROM members m
             LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
+            WHERE m.is_admin = 0
             ORDER BY m.name ASC
         `);
 
