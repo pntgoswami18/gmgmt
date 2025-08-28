@@ -23,6 +23,13 @@ This is a comprehensive Gym Management Software built with a Node.js backend and
 
 The application is built with a comprehensive feature set that includes:
 
+### User Roles & Admin Privileges
+- **Admin Users**: Special privileges for gym staff and owners
+- **Multiple Daily Check-ins**: Admin users can enter the gym multiple times per day
+- **Session Bypass**: Admin users are not restricted to morning/evening shift limitations
+- **Visual Recognition**: Admin users are clearly identified with golden styling and crown icons across all interfaces
+- **Role Management**: Easy creation and management of admin users through the member interface
+
 ### Backend API Features
 *   **Member Management:** Full CRUD (Create, Read, Update, Delete) operations for gym members with automated welcome emails.
 *   **Biometric Attendance:** API endpoints to log member check-ins from ESP32 fingerprint devices with attendance history tracking and configurable working hours.
@@ -37,7 +44,7 @@ The application is built with a comprehensive feature set that includes:
 *   **Member Management Interface:** Add, view, edit, and delete gym members with real-time data updates.
 *   **Consolidated Biometric Management:** Unified ESP32 fingerprint enrollment with device selection, guided enrollment process, manual member-device linking, and real-time enrollment monitoring.
 *   **Class & Schedule Management:** Create and manage fitness classes with integrated schedule management (schedules accessible as a tab under Classes).
-*   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date.
+*   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date for regular members. Admin users can check in multiple times per day without session restrictions.
 *   **Financial Management Interface:** Create membership plans and manage billing. Record manual payments against invoices, including auto-creating an invoice if none exists.
 *   **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics. Dashboard cards are clickable and deep-link to filtered sections (e.g., unpaid members, pending payments).
 *   **Advanced Settings Management:** Centralized settings with tabbed interface including General settings and comprehensive ESP32 device management (Device Manager, Monitor, Analytics accessible as tabs under Settings).
@@ -46,6 +53,44 @@ The application is built with a comprehensive feature set that includes:
 *   **Branding & Accent Colors:** Configure Primary and Secondary accents as Solid or Gradient in Settings. A gradient editor lets you adjust mode (Linear/Radial), angle, and color stops. Accents are used across buttons, headings, and section headers.
 *   **Dashboard Card Visibility:** Toggle which summary cards are shown on the Dashboard in Settings.
 *   **Invoices:** Click recent payments to open a printable invoice. Print generates a print-out of only the invoice; Download PDF creates a file (no print dialog). Share via WhatsApp opens WhatsApp Web with a prefilled message.
+
+## Admin Roles & User Privileges
+
+The system implements a comprehensive user role system with admin privileges for gym staff and owners.
+
+### Admin User Features
+- **Multiple Daily Check-ins**: Admin users can enter the gym multiple times per day, bypassing the single daily check-in restriction
+- **Session Bypass**: Admin users are not restricted to morning (05:00–11:00) or evening (16:00–22:00) shift limitations
+- **Visual Recognition**: Admin users are clearly identified across all interfaces with:
+  - Golden background styling and borders
+  - Crown icons (star symbols) next to their names
+  - Special highlighting in member lists, attendance records, and financial tables
+
+### Creating Admin Users
+1. Navigate to the Members section
+2. Click "Add Member" or edit an existing member
+3. Check the "Admin User" checkbox
+4. Save the member information
+
+### Admin User Management
+- **Filtering**: View admins and regular members separately using filter options
+- **Role Updates**: Change admin status for existing members
+- **Visual Indicators**: Admin users are immediately recognizable in all system interfaces
+- **Privilege Enforcement**: Backend automatically applies admin privileges during check-ins
+
+### Database Schema
+The system automatically adds an `is_admin` column to the members table:
+```sql
+CREATE TABLE members (
+    -- ... existing fields ...
+    is_admin INTEGER DEFAULT 0  -- 0 = regular member, 1 = admin user
+);
+```
+
+### API Endpoints
+- **Member Management**: All CRUD operations support admin role creation and updates
+- **Attendance**: Admin users bypass session restrictions and daily limits
+- **Filtering**: API supports filtering by member type (admins, members, all)
 
 ## Technology Stack
 
@@ -1546,6 +1591,10 @@ Each README focuses on its specific domain while maintaining cross-references fo
 
 The current application is feature-complete for gym management. Future development could include:
 
+-   **Advanced Role Management**: Multiple admin levels (super admin, manager, staff) with granular permissions
+-   **Role-based Access Control (RBAC)**: Fine-grained access control for different admin roles
+-   **Admin Dashboard**: Specialized interface for admin users with enhanced analytics and controls
+-   **Audit Logging**: Track admin actions and privilege usage for security compliance
 -   A dedicated **Member Portal/Mobile App** for clients to manage their own profiles and bookings.
 -   **SMS notifications** integration alongside email communications.
 -   **Advanced member retention analytics** with churn prediction.
