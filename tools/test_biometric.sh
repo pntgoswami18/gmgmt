@@ -16,7 +16,7 @@ fi
 
 # Configuration
 HOST=${BIOMETRIC_HOST:-"localhost"}
-PORT=${BIOMETRIC_PORT:-"8080"}
+PORT=${BIOMETRIC_PORT:-"5005"}
 
 # Colors for output
 RED='\033[0;31m'

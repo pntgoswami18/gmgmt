@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple TCP listener for SecureEye biometric devices
+Simple TCP listener for ESP32 biometric devices
 Alternative implementation for testing or different deployment scenarios
 """
 
@@ -31,7 +31,7 @@ class SimpleBiometricListener:
             self.running = True
             
             print(f"🔐 Biometric listener started on {self.host}:{self.port}")
-            print("📡 Waiting for SecureEye device connections...")
+            print("📡 Waiting for ESP32 device connections...")
             
             while self.running:
                 try:
@@ -65,7 +65,9 @@ class SimpleBiometricListener:
                     break
                     
                 message = data.decode('utf-8').strip()
-                print(f"📨 Received from {address}: {message}")
+                print(f"📨 Received from {address} at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}: {message[:100]}{'...' if len(message) > 100 else ''}")
+                if len(message) > 200:
+                    print(f"📝 Full message length: {len(message)} characters")
                 
                 # Process the biometric data
                 self.process_biometric_data(message, client_socket)

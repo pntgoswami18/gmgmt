@@ -175,7 +175,7 @@ try {
     console.log('');
     console.log('Next steps:');
     console.log('1. Create a .env file with: ENABLE_BIOMETRIC=true');
-    console.log('2. Configure your SecureEye device to send data to your server');
+    console.log('2. Configure your ESP32 devices to send data to your server');
     console.log('3. Start the biometric integration: npm run start:with-biometric');
     console.log('4. Go to the Biometric section in your admin dashboard');
     console.log('5. Enroll member fingerprints using the enrollment interface');

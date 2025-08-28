@@ -1,9 +1,12 @@
 const BiometricListener = require('./biometricListener');
 const { pool } = require('../config/sqlite');
+const path = require('path');
+const os = require('os');
 
 class BiometricIntegration {
   constructor(port = 8080) {
     this.listener = new BiometricListener(port);
+    this.webSocketClients = new Set(); // Store WebSocket clients
     this.setupEventHandlers();
   }
 
@@ -55,18 +58,18 @@ class BiometricIntegration {
       console.log(`   - Member ID: ${memberId || 'Not provided'}`);
       console.log(`   - Raw data:`, JSON.stringify(biometricData, null, 2));
       
-      // Find member using both sensor member ID and device user ID
-      const { member, identificationMethod } = await this.findMemberByAnyBiometricId(userId, memberId);
+      // Find member using device user ID
+      const member = await this.findMemberByBiometricId(userId);
       
       if (member) {
-        console.log(`👤 Member identified using: ${identificationMethod}`);
+        console.log(`👤 Member identified using device user ID: ${userId}`);
         
-        // Log attendance with identification method info
-        await this.logMemberAttendance(member, timestamp, identificationMethod, biometricData);
+        // Log attendance
+        await this.logMemberAttendance(member, timestamp, biometricData);
         
         // Check if member has active plan
         if (await this.hasActivePlan(member)) {
-          console.log(`✅ Access granted: ${member.name} (ID: ${member.id}) via ${identificationMethod}`);
+          console.log(`✅ Access granted: ${member.name} (ID: ${member.id}) via device user ID`);
           
           // You can add additional actions here:
           // - Send welcome message to display
@@ -81,7 +84,7 @@ class BiometricIntegration {
           this.notifyPlanExpired(member, biometricData);
         }
       } else {
-        console.log(`❌ Unknown biometric - User ID: ${userId}, Sensor Member ID: ${memberId || 'Not provided'}`);
+        console.log(`❌ Unknown biometric - User ID: ${userId}`);
         this.notifyUnknownUser(biometricData);
       }
     } catch (error) {
@@ -114,71 +117,39 @@ class BiometricIntegration {
     }
   }
 
-  async findMemberBySensorId(sensorMemberId) {
-    try {
-      // Look up member by sensor member ID
-      const query = 'SELECT * FROM members WHERE biometric_sensor_member_id = ?';
-      const result = await pool.query(query, [sensorMemberId]);
-      return result.rows[0] || null;
-    } catch (error) {
-      console.error('Error finding member by sensor member ID:', error);
-      return null;
-    }
-  }
 
-  async findMemberByAnyBiometricId(userId, sensorMemberId) {
-    try {
-      let member = null;
-      let identificationMethod = null;
 
-      // Priority 1: Try sensor member ID first (if provided and different from userId)
-      if (sensorMemberId && sensorMemberId !== userId) {
-        console.log(`🔍 Trying to find member by sensor member ID: ${sensorMemberId}`);
-        member = await this.findMemberBySensorId(sensorMemberId);
-        if (member) {
-          identificationMethod = 'sensor_member_id';
-          console.log(`✅ Member found by sensor member ID: ${member.name} (ID: ${member.id})`);
+  async logMemberAttendance(member, timestamp, biometricData = null) {
+    try {
+      // Use the ESP32 timestamp if provided, otherwise use current server time
+      let now, dateStr, timeStr;
+      
+      if (timestamp) {
+        // Parse the ESP32 timestamp (which is in local time format like "2025-08-26T22:52:23")
+        // ESP32 sends local time, so we need to interpret it as local time
+        now = new Date(timestamp);
+        
+        // If the timestamp is valid, use it directly
+        if (!isNaN(now.getTime())) {
+          // The timestamp is already in local time from ESP32, so we can use it directly
+          // Extract date and time components without timezone conversion
+          const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+          dateStr = localDate.toISOString().split('T')[0];
+          timeStr = timestamp; // Use the original ESP32 timestamp to avoid timezone conversion
+        } else {
+          // Fallback to current server time if parsing fails
+          now = new Date();
+          dateStr = now.toISOString().split('T')[0];
+          timeStr = now.toISOString();
+          console.warn(`⚠️ Failed to parse ESP32 timestamp "${timestamp}", using server time instead`);
         }
+      } else {
+        now = new Date();
+        dateStr = now.toISOString().split('T')[0];
+        timeStr = now.toISOString();
       }
 
-      // Priority 2: Try device user ID (biometric_id) if sensor ID didn't work
-      if (!member && userId) {
-        console.log(`🔍 Trying to find member by device user ID: ${userId}`);
-        member = await this.findMemberByBiometricId(userId);
-        if (member) {
-          identificationMethod = 'device_user_id';
-          console.log(`✅ Member found by device user ID: ${member.name} (ID: ${member.id})`);
-        }
-      }
-
-      // Priority 3: If sensor member ID is same as user ID, try it anyway
-      if (!member && sensorMemberId && sensorMemberId === userId) {
-        console.log(`🔍 Sensor member ID same as user ID, already tried: ${sensorMemberId}`);
-      }
-
-      if (!member) {
-        console.log(`❌ No member found for user ID: ${userId}, sensor member ID: ${sensorMemberId || 'Not provided'}`);
-      }
-
-      return {
-        member,
-        identificationMethod
-      };
-    } catch (error) {
-      console.error('Error finding member by any biometric ID:', error);
-      return { member: null, identificationMethod: null };
-    }
-  }
-
-  async logMemberAttendance(member, timestamp, identificationMethod = null, biometricData = null) {
-    try {
-      const now = timestamp ? new Date(timestamp) : new Date();
-      const dateStr = now.toISOString().split('T')[0];
-      const timeStr = now.toISOString();
-
-      // Enhanced logging with identification method
-      const idMethodText = identificationMethod ? ` (identified via ${identificationMethod})` : '';
-      const sensorMemberId = biometricData?.memberId || 'N/A';
+      // Enhanced logging
       const deviceUserId = biometricData?.userId || 'N/A';
 
       // Check if member already checked in today
@@ -187,8 +158,8 @@ class BiometricIntegration {
       if (existingCheckIn && !existingCheckIn.check_out_time) {
         // Member is checking out
         await this.checkOutMember(existingCheckIn.id, timeStr);
-        console.log(`✅ ${member.name} checked OUT at ${now.toLocaleTimeString()}${idMethodText}`);
-        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
+        console.log(`✅ ${member.name} checked OUT at ${now.toLocaleTimeString()}`);
+        console.log(`   📊 Biometric ID - Device: ${deviceUserId}`);
         this.notifyCheckOut(member, now);
         
         // Log biometric event for checkout
@@ -196,14 +167,12 @@ class BiometricIntegration {
           await this.logBiometricEvent({
             member_id: member.id,
             biometric_id: biometricData.userId,
-            sensor_member_id: biometricData.memberId,
             event_type: 'checkout',
             device_id: biometricData.deviceId || 'unknown',
             timestamp: timeStr,
             success: true,
             raw_data: JSON.stringify({ 
               ...biometricData, 
-              identificationMethod,
               action: 'checkout'
             })
           });
@@ -217,8 +186,8 @@ class BiometricIntegration {
         };
         
         await this.createAttendanceRecord(attendanceData);
-        console.log(`✅ ${member.name} checked IN at ${now.toLocaleTimeString()}${idMethodText}`);
-        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
+        console.log(`✅ ${member.name} checked IN at ${now.toLocaleTimeString()}`);
+        console.log(`   📊 Biometric ID - Device: ${deviceUserId}`);
         this.notifyCheckIn(member, now);
         
         // Log biometric event for checkin
@@ -226,22 +195,20 @@ class BiometricIntegration {
           await this.logBiometricEvent({
             member_id: member.id,
             biometric_id: biometricData.userId,
-            sensor_member_id: biometricData.memberId,
             event_type: 'checkin',
             device_id: biometricData.deviceId || 'unknown',
             timestamp: timeStr,
             success: true,
             raw_data: JSON.stringify({ 
               ...biometricData, 
-              identificationMethod,
               action: 'checkin'
             })
           });
         }
       } else {
         // Member already completed their session today
-        console.log(`ℹ️ ${member.name} already completed their session today${idMethodText}`);
-        console.log(`   📊 Biometric IDs - Device: ${deviceUserId}, Sensor: ${sensorMemberId}`);
+        console.log(`ℹ️ ${member.name} already completed their session today`);
+        console.log(`   📊 Biometric ID - Device: ${deviceUserId}`);
         this.notifyAlreadyCompleted(member);
         
         // Log biometric event for already completed
@@ -249,14 +216,12 @@ class BiometricIntegration {
           await this.logBiometricEvent({
             member_id: member.id,
             biometric_id: biometricData.userId,
-            sensor_member_id: biometricData.memberId,
             event_type: 'already_completed',
             device_id: biometricData.deviceId || 'unknown',
             timestamp: timeStr,
             success: true,
             raw_data: JSON.stringify({ 
               ...biometricData, 
-              identificationMethod,
               action: 'already_completed'
             })
           });
@@ -359,6 +324,14 @@ class BiometricIntegration {
     const message = `WELCOME:${member.name}`;
     this.listener.broadcast(message);
     
+    // ESP32 specific responses
+    if (biometricData.isESP32Device) {
+      this.sendESP32Command(biometricData.deviceId, 'access_granted', {
+        memberName: member.name,
+        memberId: member.id
+      });
+    }
+    
     // You could also emit events for your frontend to show notifications
     console.log(`✅ Access granted: ${member.name}`);
   }
@@ -414,6 +387,16 @@ class BiometricIntegration {
     // Send enrollment command to device
     const enrollCommand = `ENROLL:${memberId}:${memberName}`;
     this.listener.broadcast(enrollCommand);
+
+    // Notify WebSocket clients that enrollment has started
+    this.sendToWebSocketClients({
+      type: 'enrollment_started',
+      status: 'active',
+      memberId: memberId,
+      memberName: memberName,
+      maxAttempts: 3,
+      message: 'Enrollment started - please scan your fingerprint'
+    });
     
     // Set timeout for enrollment mode
     this.enrollmentTimeout = setTimeout(() => {
@@ -435,6 +418,16 @@ class BiometricIntegration {
 
       // Send stop enrollment command to device
       this.listener.broadcast('ENROLL:STOP');
+
+      // Notify WebSocket clients that enrollment has stopped
+      this.sendToWebSocketClients({
+        type: 'enrollment_stopped',
+        status: 'inactive',
+        memberId: this.enrollmentMode.memberId,
+        memberName: this.enrollmentMode.memberName,
+        reason: reason,
+        message: `Enrollment stopped: ${reason}`
+      });
       
       const result = { ...this.enrollmentMode, endReason: reason };
       this.enrollmentMode = null;
@@ -452,34 +445,91 @@ class BiometricIntegration {
     try {
       this.enrollmentMode.attempts++;
       
-      const { userId, status, enrollmentStep } = biometricData;
+      const { userId, memberId, status, enrollmentStep } = biometricData;
+      
+      // Use the memberId from biometricData if available, otherwise use enrollment mode memberId
+      const targetMemberId = memberId || this.enrollmentMode.memberId;
       
       if (status === 'enrollment_success' || status === 'enrolled') {
         // Enrollment successful
-        await this.saveBiometricEnrollment(this.enrollmentMode.memberId, userId, biometricData);
-        console.log(`✅ Enrollment successful for ${this.enrollmentMode.memberName}`);
+        await this.saveBiometricEnrollment(targetMemberId, userId, biometricData);
+        console.log(`✅ Enrollment successful for member ${targetMemberId}`);
         
         this.listener.broadcast(`ENROLL:SUCCESS:${this.enrollmentMode.memberName}`);
+        this.sendToWebSocketClients({
+          type: 'enrollment_complete',
+          status: 'success',
+          memberId: this.enrollmentMode.memberId,
+          memberName: this.enrollmentMode.memberName,
+          message: 'Enrollment completed successfully'
+        });
         this.stopEnrollmentMode('success');
         return true;
         
       } else if (status === 'enrollment_failed' || status === 'error') {
         // Enrollment failed
-        console.log(`❌ Enrollment failed for ${this.enrollmentMode.memberName}: ${biometricData.error || 'Unknown error'}`);
+        console.log(`❌ Enrollment failed for member ${targetMemberId}: ${biometricData.error || 'Unknown error'}`);
         
         if (this.enrollmentMode.attempts >= this.enrollmentMode.maxAttempts) {
           this.listener.broadcast(`ENROLL:FAILED:MAX_ATTEMPTS`);
+          this.sendToWebSocketClients({
+            type: 'enrollment_complete',
+            status: 'failed',
+            memberId: targetMemberId,
+            memberName: this.enrollmentMode.memberName,
+            message: 'Enrollment failed - maximum attempts reached',
+            attempts: this.enrollmentMode.attempts,
+            maxAttempts: this.enrollmentMode.maxAttempts
+          });
           this.stopEnrollmentMode('max_attempts');
           return false;
         } else {
           this.listener.broadcast(`ENROLL:RETRY:${this.enrollmentMode.maxAttempts - this.enrollmentMode.attempts}`);
+          this.sendToWebSocketClients({
+            type: 'enrollment_progress',
+            status: 'retry',
+            memberId: targetMemberId,
+            memberName: this.enrollmentMode.memberName,
+            attempts: this.enrollmentMode.attempts,
+            maxAttempts: this.enrollmentMode.maxAttempts,
+            message: `Retry ${this.enrollmentMode.maxAttempts - this.enrollmentMode.attempts} attempts remaining`
+          });
           return false;
         }
         
       } else if (status === 'enrollment_progress' || enrollmentStep) {
-        // Enrollment in progress
-        console.log(`🔄 Enrollment progress for ${this.enrollmentMode.memberName}: ${enrollmentStep || 'in progress'}`);
+        // Enrollment in progress - update progress and keep mode active
+        console.log(`🔄 Enrollment progress for member ${targetMemberId}: ${enrollmentStep || 'in progress'}`);
+        
+        // Update enrollment mode with current progress
+        this.enrollmentMode.currentStep = enrollmentStep;
+        this.enrollmentMode.lastProgressUpdate = new Date();
+        
         this.listener.broadcast(`ENROLL:PROGRESS:${enrollmentStep || 'scanning'}`);
+        this.sendToWebSocketClients({
+          type: 'enrollment_progress',
+          status: 'progress',
+          memberId: targetMemberId,
+          memberName: this.enrollmentMode.memberName,
+          currentStep: enrollmentStep || 'scanning',
+          attempts: this.enrollmentMode.attempts,
+          maxAttempts: this.enrollmentMode.maxAttempts
+        });
+        return false;
+        
+      } else if (status === 'enrollment_cancelled') {
+        // Enrollment cancelled
+        console.log(`⏹️ Enrollment cancelled for member ${targetMemberId}`);
+        
+        this.listener.broadcast(`ENROLL:CANCELLED:${this.enrollmentMode.memberName}`);
+        this.sendToWebSocketClients({
+          type: 'enrollment_complete',
+          status: 'cancelled',
+          memberId: targetMemberId,
+          memberName: this.enrollmentMode.memberName,
+          message: 'Enrollment was cancelled'
+        });
+        this.stopEnrollmentMode('cancelled');
         return false;
       }
       
@@ -487,6 +537,13 @@ class BiometricIntegration {
     } catch (error) {
       console.error('Error handling enrollment data:', error);
       this.listener.broadcast('ENROLL:ERROR');
+      this.sendToWebSocketClients({
+        type: 'enrollment_complete',
+        status: 'error',
+        memberId: this.enrollmentMode?.memberId,
+        memberName: this.enrollmentMode?.memberName,
+        message: 'Enrollment failed due to system error'
+      });
       this.stopEnrollmentMode('error');
       return false;
     }
@@ -494,24 +551,18 @@ class BiometricIntegration {
 
   async saveBiometricEnrollment(memberId, biometricId, enrollmentData) {
     try {
-      // Extract sensor member ID from enrollment data 
-      // Priority: memberId (if device sends it) -> userId -> biometricId as fallback
-      const sensorMemberId = enrollmentData.memberId || enrollmentData.userId || biometricId || null;
-      
       console.log(`📋 Storing biometric enrollment for member ${memberId}:`);
       console.log(`   - Device User ID (biometric_id): ${biometricId}`);
-      console.log(`   - Sensor Member ID (from device): ${sensorMemberId}`);
       console.log(`   - Raw enrollment data:`, JSON.stringify(enrollmentData, null, 2));
       
-      // Update member with biometric ID and sensor member ID
-      const updateMemberQuery = 'UPDATE members SET biometric_id = ?, biometric_sensor_member_id = ? WHERE id = ?';
-      await pool.query(updateMemberQuery, [biometricId, sensorMemberId, memberId]);
+      // Update member with biometric ID
+      const updateMemberQuery = 'UPDATE members SET biometric_id = ? WHERE id = ?';
+      await pool.query(updateMemberQuery, [biometricId, memberId]);
 
       // Log enrollment event
       const enrollmentEvent = {
         member_id: memberId,
         biometric_id: biometricId,
-        sensor_member_id: sensorMemberId,
         event_type: 'enrollment',
         device_id: enrollmentData.deviceId || 'unknown',
         timestamp: new Date().toISOString(),
@@ -533,15 +584,14 @@ class BiometricIntegration {
     try {
       const query = `
         INSERT INTO biometric_events (
-          member_id, biometric_id, sensor_member_id, event_type, device_id, 
+          member_id, biometric_id, event_type, device_id, 
           timestamp, success, error_message, raw_data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `;
       
       const result = await pool.query(query, [
         eventData.member_id,
         eventData.biometric_id,
-        eventData.sensor_member_id || null,
         eventData.event_type,
         eventData.device_id,
         eventData.timestamp,
@@ -558,14 +608,13 @@ class BiometricIntegration {
 
   async removeBiometricId(memberId) {
     try {
-      const query = 'UPDATE members SET biometric_id = NULL, biometric_sensor_member_id = NULL WHERE id = ?';
+      const query = 'UPDATE members SET biometric_id = NULL WHERE id = ?';
       await pool.query(query, [memberId]);
 
       // Log removal event
       await this.logBiometricEvent({
         member_id: memberId,
         biometric_id: null,
-        sensor_member_id: null,
         event_type: 'removal',
         device_id: 'admin',
         timestamp: new Date().toISOString(),
@@ -583,7 +632,7 @@ class BiometricIntegration {
 
   async getMemberBiometricStatus(memberId) {
     try {
-      const query = 'SELECT id, name, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?';
+      const query = 'SELECT id, name, biometric_id FROM members WHERE id = ?';
       
       const memberResult = await pool.query(query, [memberId]);
       const member = memberResult.rows[0];
@@ -607,13 +656,299 @@ class BiometricIntegration {
         member,
         hasFingerprint: !!member.biometric_id,
         biometricId: member.biometric_id,
-        sensorMemberId: member.biometric_sensor_member_id,
         enrollmentHistory: history
       };
     } catch (error) {
       console.error('Error getting member biometric status:', error);
       return null;
     }
+  }
+
+  // ESP32 specific methods  
+  async sendESP32Command(deviceId, command, data = {}) {
+    try {
+      // Get device IP address from latest heartbeat
+      const deviceIP = await this.getDeviceIPAddress(deviceId);
+      
+      if (!deviceIP) {
+        throw new Error(`Device ${deviceId} IP address not found or device offline`);
+      }
+
+      const commandMessage = {
+        deviceId: deviceId,
+        command: command,
+        data: data,
+        timestamp: new Date().toISOString(),
+        source: 'gym_management_system'
+      };
+
+      console.log(`📱 Sending HTTP command to ESP32 ${deviceId} at ${deviceIP}: ${command}`);
+      
+      // Send HTTP POST request to ESP32 device
+      const response = await this.sendHTTPCommandToDevice(deviceIP, commandMessage);
+      
+      // Log the command
+      await this.logESP32Command(deviceId, command, data);
+      
+      return response;
+    } catch (error) {
+      console.error(`❌ Failed to send command to ${deviceId}:`, error.message);
+      await this.logESP32Command(deviceId, command, data, error.message);
+      throw error;
+    }
+  }
+
+  async getDeviceIPAddress(deviceId) {
+    try {
+      const query = `
+        SELECT raw_data FROM biometric_events 
+        WHERE device_id = ? AND event_type = 'heartbeat' 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+      `;
+      
+      const result = await pool.query(query, [deviceId]);
+      
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const rawData = result.rows[0].raw_data;
+      if (rawData) {
+        try {
+          const data = JSON.parse(rawData);
+          return data.ip_address;
+        } catch (parseError) {
+          console.error('Error parsing heartbeat data:', parseError);
+          return null;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting device IP address:', error);
+      return null;
+    }
+  }
+
+  async sendHTTPCommandToDevice(deviceIP, commandMessage) {
+    try {
+      const http = require('http');
+      
+      const postData = JSON.stringify(commandMessage);
+      
+      const options = {
+        hostname: deviceIP,
+        port: 80,
+        path: '/command',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData),
+          'User-Agent': 'GymManagementSystem/1.0'
+        },
+        timeout: 5000  // Shorter timeout since we don't wait for completion
+      };
+
+      return new Promise((resolve, reject) => {
+        const req = http.request(options, (res) => {
+          let responseData = '';
+          
+          res.on('data', (chunk) => {
+            responseData += chunk;
+          });
+          
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              try {
+                const jsonResponse = JSON.parse(responseData);
+                console.log(`✅ ESP32 command sent successfully: ${res.statusCode}`);
+                resolve(jsonResponse);
+              } catch (parseError) {
+                console.log(`✅ ESP32 command sent successfully: ${res.statusCode} (non-JSON response)`);
+                resolve({ success: true, response: responseData });
+              }
+            } else {
+              console.error(`❌ ESP32 command failed: HTTP ${res.statusCode}`);
+              reject(new Error(`HTTP ${res.statusCode}: ${responseData}`));
+            }
+          });
+        });
+
+        req.on('error', (error) => {
+          console.error(`❌ HTTP request error:`, error.message);
+          // Don't reject immediately - ESP32 might still process the command
+          console.log('⚠️ Continuing despite HTTP error - ESP32 may still process command via webhook');
+          resolve({ success: true, message: 'Command sent despite HTTP error', error: error.message });
+        });
+
+        req.on('timeout', () => {
+          console.log('⚠️ HTTP timeout - ESP32 may still process command via webhook');
+          req.destroy();
+          resolve({ success: true, message: 'Command sent - ESP32 will respond via webhook' });
+        });
+
+        req.write(postData);
+        req.end();
+      });
+    } catch (error) {
+      console.error('Error sending HTTP command:', error);
+      // Don't throw - command might still work
+      return { success: true, message: 'Command attempted', error: error.message };
+    }
+  }
+
+  async unlockDoorRemotely(deviceId, reason = 'admin_unlock') {
+    console.log(`🔓 Remote unlock requested for device: ${deviceId}`);
+    
+    await this.sendESP32Command(deviceId, 'unlock_door', {
+      reason: reason,
+      duration: 5000 // 5 seconds
+    });
+
+    // Log the remote unlock
+    await this.logBiometricEvent({
+      member_id: null,
+      biometric_id: null,
+      event_type: 'remote_unlock',
+      device_id: deviceId,
+      timestamp: new Date().toISOString(),
+      success: true,
+      raw_data: JSON.stringify({ reason, action: 'remote_unlock' })
+    });
+  }
+
+  async startRemoteEnrollment(deviceId, memberId) {
+    console.log(`👆 Remote enrollment started for member ${memberId} on device ${deviceId}`);
+    
+    // Pass the member ID as the userId to the ESP32 device
+    // This creates a direct 1:1 mapping between ESP32 userId and member ID
+    await this.sendESP32Command(deviceId, 'start_enrollment', {
+      memberId: memberId,
+      userId: memberId, // Use member ID as the ESP32 userId
+      enrollmentId: memberId
+    });
+
+    return { success: true, message: 'Remote enrollment started' };
+  }
+
+  async logESP32Command(deviceId, command, data, error = null) {
+    try {
+      await this.logBiometricEvent({
+        member_id: null,
+        biometric_id: null,
+        event_type: 'esp32_command',
+        device_id: deviceId,
+        timestamp: new Date().toISOString(),
+        success: !error,
+        error_message: error || null,
+        raw_data: JSON.stringify({ command, data })
+      });
+    } catch (logError) {
+      console.error('Error logging ESP32 command:', logError);
+    }
+  }
+
+  async getDeviceStatus(deviceId) {
+    try {
+      // Get latest heartbeat from device
+      const query = `
+        SELECT * FROM biometric_events 
+        WHERE device_id = ? AND event_type = 'heartbeat'
+        ORDER BY timestamp DESC 
+        LIMIT 1
+      `;
+      
+      const result = await pool.query(query, [deviceId]);
+      const lastHeartbeat = result.rows[0];
+      
+      if (!lastHeartbeat) {
+        return { status: 'unknown', lastSeen: null };
+      }
+
+      const lastSeen = new Date(lastHeartbeat.timestamp);
+      const now = new Date();
+      const timeDiff = now - lastSeen;
+      
+      // Consider device offline if no heartbeat for 5 minutes
+      const isOnline = timeDiff < 300000; // 5 minutes in milliseconds
+      
+      let parsedData = {};
+      try {
+        parsedData = JSON.parse(lastHeartbeat.raw_data);
+      } catch (e) {
+        // Handle parsing errors gracefully
+      }
+
+      return {
+        status: isOnline ? 'online' : 'offline',
+        lastSeen: lastSeen,
+        timeSinceLastSeen: timeDiff,
+        deviceData: parsedData
+      };
+    } catch (error) {
+      console.error('Error getting device status:', error);
+      return { status: 'error', lastSeen: null };
+    }
+  }
+
+  // Add WebSocket client management methods
+  addWebSocketClient(ws) {
+    this.webSocketClients.add(ws);
+    console.log(`🔌 WebSocket client connected. Total clients: ${this.webSocketClients.size}`);
+    
+    // Send current enrollment status if any
+    if (this.enrollmentMode && this.enrollmentMode.active) {
+      this.sendToWebSocketClients({
+        type: 'enrollment_status',
+        status: 'active',
+        memberId: this.enrollmentMode.memberId,
+        memberName: this.enrollmentMode.memberName,
+        attempts: this.enrollmentMode.attempts,
+        maxAttempts: this.enrollmentMode.maxAttempts,
+        currentStep: this.enrollmentMode.currentStep
+      });
+    }
+  }
+
+  removeWebSocketClient(ws) {
+    this.webSocketClients.delete(ws);
+    console.log(`🔌 WebSocket client disconnected. Total clients: ${this.webSocketClients.size}`);
+  }
+
+  sendToWebSocketClients(data) {
+    const message = JSON.stringify(data);
+    console.log(`📡 Sending WebSocket message to ${this.webSocketClients.size} clients:`, data);
+    
+    this.webSocketClients.forEach(client => {
+      if (client.readyState === 1) { // WebSocket.OPEN
+        try {
+          client.send(message);
+        } catch (error) {
+          console.error('Error sending to WebSocket client:', error);
+          this.removeWebSocketClient(client);
+        }
+      } else {
+        // Remove disconnected clients
+        this.removeWebSocketClient(client);
+      }
+    });
+  }
+
+  // Debug method to check current enrollment status
+  getEnrollmentStatus() {
+    if (this.enrollmentMode && this.enrollmentMode.active) {
+      return {
+        active: true,
+        memberId: this.enrollmentMode.memberId,
+        memberName: this.enrollmentMode.memberName,
+        attempts: this.enrollmentMode.attempts,
+        maxAttempts: this.enrollmentMode.maxAttempts,
+        currentStep: this.enrollmentMode.currentStep,
+        startTime: this.enrollmentMode.startTime
+      };
+    }
+    return { active: false };
   }
 }
 

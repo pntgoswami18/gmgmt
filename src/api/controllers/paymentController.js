@@ -38,6 +38,18 @@ exports.recordManualPayment = async (req, res) => {
             return res.status(400).json({ message: 'Invalid amount' });
         }
 
+        // If member_id is provided, check if member is an admin user - admins are exempt from payments
+        if (member_id) {
+            const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = $1', [member_id]);
+            if (memberCheck.rows.length === 0) {
+                return res.status(404).json({ message: 'Member not found' });
+            }
+            
+            if (memberCheck.rows[0].is_admin === 1) {
+                return res.status(400).json({ message: 'Admin users are exempt from payments and cannot have payments recorded against them' });
+            }
+        }
+
         let ensuredInvoiceId = invoice_id ? parseInt(invoice_id, 10) : null;
 
         if (!ensuredInvoiceId) {

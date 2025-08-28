@@ -2,13 +2,37 @@
 
 This is a comprehensive Gym Management Software built with a Node.js backend and a React frontend. It provides a full suite of tools for gym owners and staff to manage their members, schedules, bookings, and payments efficiently.
 
+## Table of Contents
+
+- [Features](#features)
+- [Technology Stack](#technology-stack)
+- [Installation & Setup](#installation--setup)
+- [Running the Application](#running-the-application)
+- [API Endpoints](#api-endpoints)
+- [ESP32 Biometric Integration](#esp32-biometric-integration)
+- [Database Schema](#database-schema)
+- [Services](#services)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Windows Standalone Build](#windows-standalone-build-service--installer-sqlite)
+- [Documentation Structure](#documentation-structure)
+- [Future Enhancements](#future-enhancements)
+- [Support](#support)
+
 ## Features
 
 The application is built with a comprehensive feature set that includes:
 
+### User Roles & Admin Privileges
+- **Admin Users**: Special privileges for gym staff and owners
+- **Multiple Daily Check-ins**: Admin users can enter the gym multiple times per day
+- **Session Bypass**: Admin users are not restricted to morning/evening shift limitations
+- **Visual Recognition**: Admin users are clearly identified with golden styling and crown icons across all interfaces
+- **Role Management**: Easy creation and management of admin users through the member interface
+
 ### Backend API Features
 *   **Member Management:** Full CRUD (Create, Read, Update, Delete) operations for gym members with automated welcome emails.
-*   **Biometric Attendance:** API endpoints to log member check-ins from biometric devices (Secureye S‑B100CB or similar) with attendance history tracking and configurable working hours.
+*   **Biometric Attendance:** API endpoints to log member check-ins from ESP32 fingerprint devices with attendance history tracking and configurable working hours.
 *   **Class & Schedule Management:** Complete system for creating fitness classes and scheduling them with capacity management.
 *   **Online Booking System:** Members can book and cancel class spots with overbooking prevention and automated confirmation emails.
 *   **Billing & Payments:** Membership plans, invoices, and manual payment recording.
@@ -18,21 +42,61 @@ The application is built with a comprehensive feature set that includes:
 ### Frontend Admin Dashboard Features
 *   **Multi-page Navigation:** Professional dashboard with React Router navigation between different management sections.
 *   **Member Management Interface:** Add, view, edit, and delete gym members with real-time data updates.
-*   **Class Management Interface:** Create and manage fitness classes with instructor and duration details.
-*   **Schedule Management Interface:** Schedule classes with datetime pickers, capacity settings, and visual schedule display.
-*   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date.
+*   **Consolidated Biometric Management:** Unified ESP32 fingerprint enrollment with device selection, guided enrollment process, manual member-device linking, and real-time enrollment monitoring.
+*   **Class & Schedule Management:** Create and manage fitness classes with integrated schedule management (schedules accessible as a tab under Classes).
+*   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date for regular members. Admin users can check in multiple times per day without session restrictions.
 *   **Financial Management Interface:** Create membership plans and manage billing. Record manual payments against invoices, including auto-creating an invoice if none exists.
 *   **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics. Dashboard cards are clickable and deep-link to filtered sections (e.g., unpaid members, pending payments).
+*   **Advanced Settings Management:** Centralized settings with tabbed interface including General settings and comprehensive ESP32 device management (Device Manager, Monitor, Analytics accessible as tabs under Settings).
+*   **ESP32 Configuration:** User-configurable ESP32 connection settings including device host/port and local listener host/port with clear defaults and help text.
 *   **Material UI Navigation:** Enhanced left navigation with icons and active-route highlighting.
 *   **Branding & Accent Colors:** Configure Primary and Secondary accents as Solid or Gradient in Settings. A gradient editor lets you adjust mode (Linear/Radial), angle, and color stops. Accents are used across buttons, headings, and section headers.
 *   **Dashboard Card Visibility:** Toggle which summary cards are shown on the Dashboard in Settings.
 *   **Invoices:** Click recent payments to open a printable invoice. Print generates a print-out of only the invoice; Download PDF creates a file (no print dialog). Share via WhatsApp opens WhatsApp Web with a prefilled message.
 
+## Admin Roles & User Privileges
+
+The system implements a comprehensive user role system with admin privileges for gym staff and owners.
+
+### Admin User Features
+- **Multiple Daily Check-ins**: Admin users can enter the gym multiple times per day, bypassing the single daily check-in restriction
+- **Session Bypass**: Admin users are not restricted to morning (05:00–11:00) or evening (16:00–22:00) shift limitations
+- **Visual Recognition**: Admin users are clearly identified across all interfaces with:
+  - Golden background styling and borders
+  - Crown icons (star symbols) next to their names
+  - Special highlighting in member lists, attendance records, and financial tables
+
+### Creating Admin Users
+1. Navigate to the Members section
+2. Click "Add Member" or edit an existing member
+3. Check the "Admin User" checkbox
+4. Save the member information
+
+### Admin User Management
+- **Filtering**: View admins and regular members separately using filter options
+- **Role Updates**: Change admin status for existing members
+- **Visual Indicators**: Admin users are immediately recognizable in all system interfaces
+- **Privilege Enforcement**: Backend automatically applies admin privileges during check-ins
+
+### Database Schema
+The system automatically adds an `is_admin` column to the members table:
+```sql
+CREATE TABLE members (
+    -- ... existing fields ...
+    is_admin INTEGER DEFAULT 0  -- 0 = regular member, 1 = admin user
+);
+```
+
+### API Endpoints
+- **Member Management**: All CRUD operations support admin role creation and updates
+- **Attendance**: Admin users bypass session restrictions and daily limits
+- **Filtering**: API supports filtering by member type (admins, members, all)
+
 ## Technology Stack
 
 -   **Backend:**
     -   Node.js with Express.js framework
-    -   SQLite (recommended for standalone Windows build) or PostgreSQL (legacy/dev)
+    -   SQLite database for local data storage
     -   (Optional) Payment gateway integration — currently disabled
     -   Nodemailer for automated email communications
     -   JWT for authentication (ready for future implementation)
@@ -40,6 +104,7 @@ The application is built with a comprehensive feature set that includes:
     -   React.js with React Router for multi-page navigation
     -   Axios for API communication
     -   Responsive design with professional styling
+    -   📖 **See [client/README.md](client/README.md) for detailed frontend documentation**
 
 ---
 
@@ -50,7 +115,7 @@ Follow these steps to get the application running on your local machine.
 ### Prerequisites
 
 -   [Node.js](https://nodejs.org/) (which includes npm)
--   [PostgreSQL](https://www.postgresql.org/download/) (only if running the legacy Postgres setup)
+-   SQLite (automatically included with Node.js dependencies)
 
 ### 1. Install Dependencies
 
@@ -58,82 +123,7 @@ First, install the necessary npm packages for both the backend server and the fr
 
 ```bash
 # Install backend dependencies from the root directory
-# Gym Management Software
-
-This project provides an end‑to‑end gym management system with an admin dashboard and a Node.js API. Use it to manage members, classes, schedules, attendance, billing and basic analytics.
-
-## High‑level Features
-
-- Member management (create, update, list)
-- Class and schedule management
-- Attendance tracking with configurable working hours
-- Billing: membership plans, invoices, payments (manual)
-- Analytics dashboard (summary cards, basic charts)
-- Branding controls and accent colors (solid or gradient)
-
-## Technology Stack
-
-- Backend: Node.js, Express, PostgreSQL, Axios, Nodemailer
-- Frontend: React, React Router, Material UI, Recharts
-
-## Installation & Setup
-
-### Prerequisites
-- Node.js and npm
-- PostgreSQL server
-
-### 1) Install dependencies
-
-```bash
-# From the project root (server)
 npm install
-
-# Frontend
-cd client
-npm install
-cd ..
-```
-
-### 2) Create the database
-
-```sql
-CREATE DATABASE gym_management;
-```
-
-### 3) Configure environment variables
-
-Create a `.env` file in the project root:
-
-```env
-DB_USER=your_postgres_user
-DB_HOST=localhost
-DB_DATABASE=gym_management
-DB_PASSWORD=your_database_password
-DB_PORT=5432
-
-# Optional integrations
-# Payment gateway disabled; no secret key required
-EMAIL_USER=your_email
-EMAIL_PASS=your_app_password
-```
-
-### 4) Start the backend
-
-```bash
-npm start
-```
-
-The API runs at `http://localhost:3001` and auto‑creates tables on first start.
-
-### 5) Start the frontend
-
-```bash
-cd client
-npm start
-```
-
-The dashboard opens at `http://localhost:3000` and proxies API calls to the backend.
-
 
 # Navigate to the client directory and install frontend dependencies
 cd client
@@ -141,28 +131,15 @@ npm install
 cd ..
 ```
 
-### 2. Set Up PostgreSQL Database
+### 2. Configure Environment Variables
 
-You need to have a PostgreSQL server running. Then, create a new database for the application.
-
-```sql
--- Using psql or a GUI tool like pgAdmin
-CREATE DATABASE gym_management;
-```
-
-### 3. Configure Environment Variables
-
-Create a `.env` file in the root of the project (`gmgmt/`). This file will store your database credentials and other secret keys.
+Create a `.env` file in the root of the project (`gmgmt/`). This file will store your configuration and secret keys.
 
 Copy the following into the `.env` file and replace the placeholder values with your actual credentials.
 
 ```env
-# PostgreSQL Database Configuration
-DB_USER=your_postgres_user
-DB_HOST=localhost
-DB_DATABASE=gym_management
-DB_PASSWORD=your_database_password
-DB_PORT=5432
+# SQLite Database (automatically created)
+# No database configuration required
 
 # JSON Web Token Secret (for future authentication features)
 JWT_SECRET=your_super_secret_jwt_key
@@ -172,6 +149,11 @@ JWT_SECRET=your_super_secret_jwt_key
 # Email Configuration (for automated notifications)
 EMAIL_USER=your_email@gmail.com
 EMAIL_PASS=your_app_password
+
+# ESP32 Biometric Integration (optional)
+ENABLE_BIOMETRIC=true
+BIOMETRIC_PORT=8080
+BIOMETRIC_HOST=0.0.0.0
 ```
 
 **Note for Email Setup:** For Gmail, you'll need to use an "App Password" instead of your regular password. Enable 2-factor authentication and generate an app password in your Google Account settings.
@@ -183,7 +165,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 **Note:** Card payment gateway is disabled in this build. Use manual payments.
 
-The application will automatically create the required tables when it first connects to the database.
+The application will automatically create the SQLite database file and required tables when it first starts.
 
 ---
 
@@ -218,10 +200,11 @@ Once both servers are running, you can access the different sections of the admi
 
 - **Dashboard:** Analytics and reporting overview
 - **Members:** Manage gym members (add, edit, delete)
-- **Classes:** Manage fitness classes
-- **Schedules:** Schedule classes and manage capacity
+- **Biometric:** Consolidated ESP32 fingerprint enrollment and device management
+- **Classes:** Manage fitness classes and schedules (schedules now under Classes tab)
 - **Attendance:** Track member attendance and simulate check-ins
 - **Financials:** Manage membership plans and view payment integration
+- **Settings:** General settings and ESP32 device management (Device Manager, Monitor, Analytics tabs)
 
 ---
 
@@ -263,47 +246,673 @@ The backend provides the following REST API endpoints:
 |              | `GET`  | `/api/reports/financial-summary` | Get outstanding invoices, payment history, member payment status |
 |              | `GET`  | `/api/reports/unpaid-members-this-month` | Members with no payments in the current month |
 
+### Authentication & Security
+
+- JWT authentication is ready for future implementation
+- All endpoints are currently public (no authentication required)
+- CORS is configured for development and production use
+
+### Error Handling
+
+The API uses standard HTTP status codes:
+- `200` - Success
+- `400` - Bad Request (validation errors)
+- `404` - Not Found
+- `409` - Conflict (e.g., duplicate check-in)
+- `500` - Internal Server Error
+
 ---
 
-## Biometric Testing Commands
+## ESP32 Biometric Integration
 
-The application includes cross-platform testing scripts to verify biometric device communication:
+This project supports ESP32-based fingerprint door lock systems for attendance check-ins and access control. The ESP32 devices connect via WiFi and communicate using JSON over TCP/IP.
 
-### Available Test Scripts
+### Overview
+
+- **Hardware**: ESP32 + R307 Fingerprint Sensor + Door Lock Control
+- **Connectivity**: WiFi-based, no additional gateway required
+- **Real-time**: Live event streaming and device monitoring
+- **Remote Control**: Unlock doors and enroll fingerprints remotely
+- **Status Monitoring**: Device health, connectivity, and performance tracking
+
+### What We Store
+
+- A mapping between your app's `member_id` and the device's `device_user_id` in the `member_biometrics` table
+- Optionally, a fingerprint template string for backup/migration purposes
+
+### Configurable Working Hours
+
+Working hours are editable in Settings and enforced by the backend during check-in:
+- Morning session: `morning_session_start`–`morning_session_end` (default 05:00–11:00)
+- Evening session: `evening_session_start`–`evening_session_end` (default 16:00–22:00)
+
+### Device Communication
+
+ESP32 devices communicate via TCP/IP using JSON messages:
+- **Connection**: ESP32 connects to server via WiFi
+- **Protocol**: JSON over TCP/IP
+- **Events**: Real-time fingerprint scan events and device status
+- **Control**: Remote door unlock and fingerprint enrollment
+
+### Managing Biometric Links for Members
+
+- In the admin UI, open Members → "Biometric" on a member
+- Enter the `device_user_id` configured on the ESP32 device
+- This calls `PUT /api/members/:id/biometric` and stores the mapping
+- You can also manage via API:
+  - `PUT /api/members/:id/biometric`
+  - Body: `{ "device_user_id": "1234", "template": "<optional base64>" }`
+
+### Check-in from Devices or Apps
+
+- **ESP32 device call**: Automatic JSON message sent on fingerprint scan
+- **Direct app/server call**: `POST /api/attendance/check-in` with `{ memberId: 42 }` or `{ device_user_id: "1234" }`
+- **Device/webhook call**: `POST /api/attendance/device-webhook` with `{ device_user_id: "1234" }`
+
+### Error Handling
+
+- **Out-of-hours**: Backend returns `400` with a message reflecting current configured hours
+- **Duplicate daily check-in**: Backend returns `409` with `Member has already checked in today.`
+- **Unknown device user**: Backend returns `404` if no `member_biometrics` mapping is present
+
+## ESP32 Setup and Configuration
+
+### Prerequisites
+
+- **Hardware**: ESP32 + AS608 Fingerprint Sensor + Door Lock
+- **Software**: Node.js 16+, npm
+- **Network**: WiFi network for ESP32 connectivity
+
+### Quick Setup
+
+#### 1. Install Required Arduino Libraries
+
+**Method 1: Using Arduino IDE Library Manager**
+1. Open Arduino IDE
+2. Go to **Tools → Manage Libraries...**
+3. Search and install the following libraries:
+   - `ArduinoJson` by Benoit Blanchon (version 6.x)
+   - `Adafruit Fingerprint Sensor Library` by Adafruit (compatible with R307 sensor)
+
+**Method 2: Using Arduino IDE Board Manager**
+1. Go to **File → Preferences**
+2. Add ESP32 board URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_dev_index.json`
+3. Go to **Tools → Board → Boards Manager**
+4. Search and install `esp32` by Espressif Systems
+
+#### 2. Upload ESP32 Firmware
+
+1. Open `esp32_door_lock/esp32_door_lock.ino` in Arduino IDE
+2. Select the correct board: **Tools → Board → ESP32 Arduino → ESP32 Dev Module**
+3. **Configuration Options** (choose one):
+   
+   **Option A: Use Web Interface** (Recommended)
+   - Upload firmware with default settings
+   - Configure via web interface after upload (see step 7)
+   
+   **Option B: Custom Default Configuration**
+   ```bash
+   # Copy configuration template
+   cp esp32_door_lock/config.h.example esp32_door_lock/config.h
+   
+   # Edit config.h with your preferred defaults:
+   # DEFAULT_WIFI_SSID = "YOUR_WIFI_NAME"
+   # DEFAULT_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"  
+   # DEFAULT_GYM_SERVER_IP = "YOUR_SERVER_IP"
+   # DEFAULT_GYM_SERVER_PORT = 3001  # Must match main server PORT in .env
+   ```
+
+4. Connect ESP32 to computer via USB
+5. Select the correct port: **Tools → Port → (your ESP32 port)**
+6. Click **Upload** button
+7. **Configure Device** (if using Option A):
+   - Open Serial Monitor at **115200 baud** to see device IP
+   - Navigate to `http://ESP32_IP/config` in your browser
+   - Enter your WiFi credentials and server settings
+
+#### 3. Hardware Connections
+
+> **📋 ESP32 Pin Reference**: For detailed pin capabilities and limitations, see the [ESP32 Pin Reference](http://wiki.fluidnc.com/en/hardware/esp32_pin_reference) documentation.
+
+```text
+ESP32 Pin Connections Schematic
+================================
+
+Power Supply:
+┌─────────────────┐    ┌─────────────────┐
+│   12V Power     │    │     5V Power    │
+│   Supply        │    │    Supply       │
+└─────────┬───────┘    └─────────┬───────┘
+          │                      │
+          │                      │
+          ▼                      ▼
+    ┌─────────────┐        ┌─────────────┐
+    │   Door Lock │        │   R307      │
+    │   Relay     │        │  Fingerprint│
+    │             │        │   Sensor    │
+    └─────┬───────┘        └─────┬───────┘
+          │                      │
+          │                      │
+          │                      │
+          ▼                      ▼
+    ┌─────-───────┐        ┌─────-───────┐
+    │   Pin 18    │        │   Pin 16    │
+    │  (Relay)    │        │   (RX)      │
+    └─────────────┘        └─────────────┘
+
+ESP32 Development Board:
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│  ┌─────────────────────────────────────────┐    │
+│  │              ESP32                      │    │
+│  │                                         │    │
+│  │  ┌─────-┐ ┌────────┐ ┌─────┐ ┌─────┐    │    │
+│  │  │Pin4  │ │Pin5    │ │Pin16│ │Pin17│    │    │
+│  │  │Enroll│ │Override│ │RX   │ │TX   │    │    │
+│  │  └─────-┘ └────────┘ └─────┘ └─────┘    │    │
+│  │                                         │    │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐        │    │
+│  │  │Pin18│ │Pin19│ │Pin21│ │Pin22│        │    │
+│  │  │Relay│ │Green│ │Red  │ │Blue │        │    │
+│  │  │     │ │LED  │ │LED  │ │LED  │        │    │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘        │    │
+│  │                                         │    │
+│  │  ┌─────-┐                               │    │
+│  │  │Pin23 │                               │    │
+│  │  │Buzzer│                               │    │
+│  │  └─────-┘                               │    │
+│  └─────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────┘
+
+Detailed Pin Mapping:
+┌─────────────┬─────────────┬─────────────────────┐
+│   ESP32 Pin │ Component   │     Connection      │
+├─────────────┼─────────────┼─────────────────────┤
+│   Pin 4     │ Enroll      │ Push Button (GND)   │
+│   Pin 5     │ Override    │ Push Button (GND)   │
+│   Pin 16    │ R307 RX     │ Sensor TX           │
+│   Pin 17    │ R307 TX     │ Sensor RX           │
+│   Pin 18    │ Door Lock   │ Relay Module        │
+│   Pin 19    │ Green LED   │ LED + Resistor      │
+│   Pin 21    │ Red LED     │ LED + Resistor      │
+│   Pin 22    │ Blue LED    │ LED + Resistor      │
+│   Pin 23    │ Buzzer      │ Buzzer Module       │
+│   VIN       │ Power       │ 5V Supply           │
+│   GND       │ Ground      │ Common Ground       │
+│   3.3V      │ Logic       │ 3.3V Logic Level    │
+└─────────────┴─────────────┴─────────────────────┘
+
+
+Wiring Notes:
+• All components share a common ground (GND)
+• R307 sensor operates at 5V but ESP32 pins are 3.3V tolerant
+• Relay module requires 12V for door lock operation
+• LEDs require current-limiting resistors (220Ω recommended)
+• Buttons connect between GPIO pins and GND
+• Buzzer can be active (3.3V) or passive (requires driver circuit)
+```
+
+##### 3.6 Push Button Connection Schematics
+
+###### Enroll Button (Pin 4) - Fingerprint Enrollment Control
+
+```text
+Enroll Button Wiring Diagram (Pin 4)
+====================================
+
+┌────────────────────────────────────────────────┐
+│                Enroll Button                   │
+│  ┌─────────────────────────────────────────┐   │
+│  │                                         │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐        │   │
+│  │  │     │ │     │ │     │ │     │        │   │
+│  │  │     │ │     │ │     │ │     │        │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘        │   │
+│  └─────────────────────────────────────────┘   │
+└────────────────────────────────────────────────┘
+         │         │         │         │
+         │         │         │         │
+         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+    │ Pin 4   │ │  GND    │ │         │ │         │
+    │(GPIO4)  │ │(Common) │ │         │ │         │
+    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+
+Connection Details:
+• Pin 4 (GPIO4) → One terminal of push button
+• GND (Common) → Other terminal of push button
+• Button type: Momentary push button (normally open)
+• No external resistors required (ESP32 has internal pull-up)
+
+Functioning:
+• **Normal State**: Pin 4 reads HIGH (3.3V) due to internal pull-up
+• **Pressed State**: Pin 4 reads LOW (0V) when button is pressed
+• **Enrollment Trigger**: Pressing button initiates fingerprint enrollment mode
+• **LED Feedback**: Green LED illuminates during enrollment process
+• **Buzzer Feedback**: Confirmation beep on successful enrollment
+
+Enrollment Process:
+1. Press Enroll button → ESP32 enters enrollment mode
+2. Green LED turns ON → Indicates enrollment is active
+3. Place finger on sensor → R307 captures fingerprint
+4. Remove and replace finger → Second capture for verification
+5. Processing → ESP32 creates fingerprint template
+6. Success → Green LED blinks, buzzer beeps, door unlocks
+7. Failure → Red LED blinks, buzzer error tone
+8. Return to normal → System ready for next operation
+
+Button Specifications:
+• Type: Momentary push button (SPST)
+• Contact: Normally Open (NO)
+• Rating: 3.3V, 50mA minimum
+• Mounting: Panel mount or PCB mount
+• Actuation force: 100-200g typical
+```
+
+###### Override Button (Pin 5) - Emergency Door Unlock
+
+```text
+Override Button Wiring Diagram (Pin 5)
+=====================================
+
+┌──────────────────────────────────────────────┐
+│               Override Button                │
+│  ┌───────────────────────────────────────┐   │
+│  │                                       │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
+│  └───────────────────────────────────────┘   │
+└──────────────────────────────────────────────┘
+         │         │         │         │
+         │         │         │         │
+         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+    │ Pin 5   │ │  GND    │ │         │ │         │
+    │(GPIO5)  │ │(Common) │ │         │ │         │
+    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+
+
+Connection Details:
+• Pin 5 (GPIO5) → One terminal of push button
+• GND (Common) → Other terminal of push button
+• Button type: Momentary push button (normally open)
+• No external resistors required (ESP32 has internal pull-up)
+
+Functioning:
+• **Normal State**: Pin 5 reads HIGH (3.3V) due to internal pull-up
+• **Pressed State**: Pin 5 reads LOW (0V) when button is pressed
+• **Emergency Unlock**: Pressing button immediately unlocks door
+• **Bypass Security**: Overrides all fingerprint authentication
+• **Audit Trail**: Override events are logged with timestamp
+
+Override Process:
+1. Press Override button → ESP32 immediately unlocks door
+2. Blue LED illuminates → Indicates override is active
+3. Door relay activates → Door lock releases
+4. Buzzer sounds → Confirmation tone
+5. Override logged → Event recorded in system memory
+6. Door remains unlocked → Until manually relocked or timeout
+7. Return to normal → System ready for normal operation
+
+Security Considerations:
+• **Emergency Access**: Provides immediate entry during emergencies
+• **Audit Logging**: All override events are timestamped and logged
+• **No Authentication**: Bypasses fingerprint verification completely
+• **Physical Security**: Button should be accessible but not easily visible
+• **Timeout Protection**: Consider implementing auto-relock after override
+
+Button Specifications:
+• Type: Momentary push button (SPST)
+• Contact: Normally Open (NO)
+• Rating: 3.3V, 50mA minimum
+• Mounting: Panel mount or PCB mount
+• Actuation force: 100-200g typical
+• Color: Red recommended for emergency override
+• Protection: Consider adding protective cover or key switch
+```
+
+##### 3.7 Button Integration with ESP32 Firmware
+
+###### Button State Detection
+
+```cpp
+// Button pin definitions
+#define ENROLL_BUTTON_PIN 4
+#define OVERRIDE_BUTTON_PIN 5
+
+// Button state variables
+bool enrollButtonPressed = false;
+bool overrideButtonPressed = false;
+bool lastEnrollButtonState = HIGH;
+bool lastOverrideButtonState = HIGH;
+
+// Button debouncing
+unsigned long lastEnrollDebounceTime = 0;
+unsigned long lastOverrideDebounceTime = 0;
+unsigned long debounceDelay = 50; // 50ms debounce
+```
+
+###### Button Reading Function
+
+```cpp
+void readButtons() {
+  // Read current button states
+  bool enrollReading = digitalRead(ENROLL_BUTTON_PIN);
+  bool overrideReading = digitalRead(OVERRIDE_BUTTON_PIN);
+  
+  // Enroll button debouncing
+  if (enrollReading != lastEnrollButtonState) {
+    lastEnrollDebounceTime = millis();
+  }
+  
+  if ((millis() - lastEnrollDebounceTime) > debounceDelay) {
+    if (enrollReading != enrollButtonPressed) {
+      enrollButtonPressed = enrollReading;
+      
+      if (enrollButtonPressed) {
+        // Button pressed - start enrollment
+        startEnrollmentMode();
+      }
+    }
+  }
+  
+  // Override button debouncing
+  if (overrideReading != lastOverrideButtonState) {
+    lastOverrideDebounceTime = millis();
+  }
+  
+  if ((millis() - lastOverrideDebounceTime) > debounceDelay) {
+    if (overrideReading != overrideButtonPressed) {
+      overrideButtonPressed = overrideReading;
+      
+      if (overrideButtonPressed) {
+        // Button pressed - emergency unlock
+        emergencyUnlock();
+      }
+    }
+  }
+  
+  // Update last button states
+  lastEnrollButtonState = enrollReading;
+  lastOverrideButtonState = overrideReading;
+}
+```
+
+###### Enrollment Mode Function
+
+```cpp
+void startEnrollmentMode() {
+  if (enrollmentInProgress) {
+    return; // Already enrolling
+  }
+  
+  // Set enrollment mode
+  enrollmentInProgress = true;
+  enrollmentStep = 0;
+  
+  // Visual feedback
+  digitalWrite(GREEN_LED_PIN, HIGH);
+  digitalWrite(RED_LED_PIN, LOW);
+  digitalWrite(BLUE_LED_PIN, LOW);
+  
+  // Audio feedback
+  buzzerBeep(200); // Short beep
+  
+  // Send enrollment start event to server
+  sendEnrollmentEvent("enrollment_started");
+  
+  Serial.println("🎯 Enrollment mode activated - place finger on sensor");
+}
+```
+
+###### Emergency Unlock Function
+
+```cpp
+void emergencyUnlock() {
+  // Immediate door unlock
+  digitalWrite(DOOR_RELAY_PIN, HIGH);
+  
+  // Visual feedback
+  digitalWrite(BLUE_LED_PIN, HIGH);
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
+  
+  // Audio feedback
+  buzzerBeep(500); // Longer beep for override
+  
+  // Log override event
+  String overrideEvent = "{\"event\":\"override_unlock\",\"timestamp\":\"" + getCurrentTimestamp() + "\"}";
+  sendEventToServer(overrideEvent);
+  
+  Serial.println("🚨 EMERGENCY OVERRIDE - Door unlocked");
+  
+  // Auto-relock after 10 seconds
+  delay(10000);
+  digitalWrite(DOOR_RELAY_PIN, LOW);
+  digitalWrite(BLUE_LED_PIN, LOW);
+  
+  Serial.println("🔒 Door auto-relocked after override");
+}
+```
+
+###### Button Setup in setup() Function
+
+```cpp
+void setup() {
+  // Initialize button pins
+  pinMode(ENROLL_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(OVERRIDE_BUTTON_PIN, INPUT_PULLUP);
+  
+  // Button state initialization
+  lastEnrollButtonState = digitalRead(ENROLL_BUTTON_PIN);
+  lastOverrideButtonState = digitalRead(OVERRIDE_BUTTON_PIN);
+  
+  Serial.println("✅ Push buttons initialized with internal pull-up resistors");
+}
+```
+
+###### Main Loop Integration
+
+```cpp
+void loop() {
+  // Read button states every loop iteration
+  readButtons();
+  
+  // Other system operations...
+  handleFingerprintSensor();
+  sendHeartbeat();
+  checkWiFiConnection();
+  
+  // Small delay to prevent overwhelming the system
+  delay(10);
+}
+```
+
+##### 3.5 Detailed Connection Schematics
+
+###### R307 Fingerprint Sensor Connection
+
+```text
+R307 Fingerprint Sensor Wiring Diagram
+======================================
+
+┌──────────────────────────────────────────────┐
+│                    R307 Sensor               │
+│  ┌───────────────────────────────────────┐   │
+│  │                                       │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
+│  │  │ VCC │ │ TX  │ │ RX  │ │ GND │      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
+│  └───────────────────────────────────────┘   │
+└──────────────────────────────────────────────┘
+         │         │         │         │
+         │         │         │         │
+         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌────────┐ ┌────────┐ ┌─────────┐
+    │   5V    │ │ Pin 16 │ │ Pin 17 │ │  GND    │
+    │ Supply  │ │ (RX)   │ │ (TX)   │ │(Common) │
+    └─────────┘ └────────┘ └────────┘ └─────────┘
+
+Connection Details:
+• VCC → 5V Power Supply (from ESP32 VIN or external 5V)
+• TX  → ESP32 Pin 16 (RX) - Sensor sends data to ESP32
+• RX  → ESP32 Pin 17 (TX) - ESP32 sends commands to sensor
+• GND → Common Ground (shared with ESP32 GND)
+
+Note: R307 operates at 5V logic level, but ESP32 pins are 3.3V tolerant
+```
+
+###### 5V Relay Module Connection
+
+```text
+5V Relay Module Wiring Diagram
+==============================
+
+┌──────────────────────────────────────────────┐
+│                 5V Relay Module              │
+│  ┌───────────────────────────────────────┐   │
+│  │                                       │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
+│  │  │ VCC │ │ GND │ │ IN  │ │ COM │      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
+│  └───────────────────────────────────────┘   │
+└──────────────────────────────────────────────┘
+         │         │         │         │
+         │         │         │         │
+         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌─────────┐ ┌────────┐ ┌────────┐
+    │   5V    │ │  GND    │ │ Pin 18 │ │ 12V    │
+    │ Supply  │ │(Common) │ │(Signal)│ │Supply  │
+    └─────────┘ └─────────┘ └────────┘ └────────┘
+
+Connection Details:
+• VCC → 5V Power Supply (from ESP32 VIN or external 5V)
+• GND → Common Ground (shared with ESP32 GND)
+• IN  → ESP32 Pin 18 (Digital Output Signal)
+• COM → 12V Power Supply (for relay coil operation)
+
+Relay Operation:
+• When Pin 18 is HIGH (3.3V), relay activates (NO contact closes)
+• When Pin 18 is LOW (0V), relay deactivates (NO contact opens)
+• Relay provides electrical isolation between ESP32 and door lock circuit
+```
+
+###### Electromagnetic Door Lock Circuit
+
+```text
+Electromagnetic Door Lock Circuit
+================================
+
+┌──────────────────────────────────────────────┐
+│               12V Power Supply               │
+│  ┌───────────────────────────────────────┐   │
+│  │                                       │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
+│  │  │ +12V│ │     │ │     │ │ GND │      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
+│  └───────────────────────────────────────┘   │
+└──────────────────────────────────────────────┘
+         │                           │
+         │                           │
+         ▼                           ▼
+    ┌─────────┐               ┌─────────┐
+    │ Relay   │               │  GND    │
+    │  NO     │               │(Common) │
+    │Contact  │               │         │
+    └────┬────┘               └────┬────┘
+         │                         │
+         │                         │
+         ▼                         ▼
+    ┌─────────┐               ┌─────────┐
+    │Electro- │               │Electro- │
+    │magnetic │               │magnetic │
+    │Door Lock│               │Door Lock│
+    │  +12V   │               │  GND    │
+    └─────────┘               └─────────┘
+
+Connection Details:
+• 12V+ → Relay NO (Normally Open) Contact
+• Relay NO Contact → Electromagnetic Door Lock +12V Terminal
+• 12V- → Common Ground (shared with ESP32 GND)
+• Door Lock GND → Common Ground
+
+Circuit Operation:
+• When relay activates (Pin 18 HIGH), NO contact closes
+• 12V flows through relay to door lock, activating the electromagnet
+• Door lock releases (unlocks) when electromagnet is energized
+• When relay deactivates (Pin 18 LOW), NO contact opens
+• Door lock remains locked (electromagnet de-energized)
+
+Safety Features:
+• Relay provides electrical isolation between low-voltage ESP32 and high-voltage door lock
+• Door lock automatically locks when power is removed (fail-safe operation)
+• No current flows through door lock when relay is inactive
+```
+
+#### 4. Configuration Management
+
+The ESP32 supports dynamic, environment-driven configuration:
+
+1. **Web Interface**: `http://ESP32_IP/config` - User-friendly configuration form
+2. **API Endpoints**: REST API for programmatic configuration
+3. **Remote Management**: Configure from gym management system
+4. **Development Defaults**: Optional `config.h` file for custom defaults
+
+#### 5. Critical Port Configuration
+
+**IMPORTANT**: The ESP32 must connect to the **main server port** (PORT in .env), NOT the BIOMETRIC_PORT:
+
+- **✅ Correct**: ESP32 port = 3001 (matches main server PORT)
+- **❌ Wrong**: ESP32 port = 8080 (causes HTTP timeout errors)
+
+#### 6. Testing Commands
 
 ```bash
-# Check if biometric service is listening (cross-platform)
-npm run biometric:check
+# Setup and testing
+npm run esp32:setup          # Setup database tables
+npm run esp32:test           # Run integration tests
+npm run esp32:help           # Show all available commands
 
-# Send comprehensive test messages to verify communication (cross-platform)
-npm run biometric:test
-
-# Start the biometric listener service
-npm run biometric:start
-
-# Set up biometric database tables
-npm run biometric:setup
-
-# Get help for test options
-npm run biometric:help
-
-# Start main app with biometric integration enabled
-npm run start:with-biometric
+# Server management
+npm run start:with-biometric # Start with ESP32 support
+npm run biometric:start      # Start biometric service only
+npm run biometric:check      # Check service status
 ```
 
-### Environment Configuration
+### Web Interface Features
 
-Configure biometric settings in your `.env` file:
+#### Consolidated Biometric Management (`/biometric`)
+- Unified fingerprint enrollment with guided process
+- Device selection and real-time enrollment monitoring
+- Manual member-device linking
+- View biometric events and enrollment status
 
-```env
-ENABLE_BIOMETRIC=true
-BIOMETRIC_PORT=8080
-BIOMETRIC_HOST=0.0.0.0
-```
+#### ESP32 Device Management (`/settings/esp32-devices`)
+- View all connected ESP32 devices
+- Remote door unlock
+- Device status monitoring
+- Start remote enrollment
 
-**Note:** The test scripts automatically load environment variables from your `.env` file and work on both Windows and Unix-based systems.
+#### Real-time Monitor (`/settings/esp32-monitor`)
+- Live event stream
+- Device health monitoring
+- Connection status
 
-📖 **For complete biometric setup and configuration guide, see [BIOMETRIC_INTEGRATION_GUIDE.md](BIOMETRIC_INTEGRATION_GUIDE.md)**
+#### Analytics (`/settings/esp32-analytics`)
+- Usage statistics
+- Access logs
+- Performance metrics
+
+#### ESP32 Configuration (`/settings`)
+- Configure ESP32 device host and port settings
+- Set local listener host and port  
+- Network configuration with helpful defaults
+- Remote configuration of ESP32 devices via API
 
 ---
 
@@ -321,100 +930,481 @@ The application automatically creates the following database tables:
 - **invoices:** Billing records for members
 - **payments:** Payment transaction records
 
-## Email Automation
+## Services
 
-The system automatically sends emails for:
+### Biometric Integration Service
 
-1. **Welcome Email:** Sent when a new member is registered
-2. **Booking Confirmation:** Sent when a member books a class
-3. **Payment Confirmation:** Sent when a payment is successfully processed
+The `biometricIntegration.js` service handles:
+- ESP32 device communication
+- WebSocket client management
+- Enrollment mode management
+- Real-time status updates
 
-All emails use professional HTML templates with gym branding.
+### Email Service
 
-## Analytics & Reporting
+The `emailService.js` service handles:
+- Welcome emails for new members
+- Booking confirmation emails
+- Payment confirmation emails
+- HTML email templates with gym branding
 
-The dashboard provides comprehensive analytics including:
+### Biometric Listener Service
 
-- **Summary Statistics:** Total members, revenue, new members this month, active schedules, unpaid members this month
-- **Member Growth:** 12-month trend of new member registrations
-- **Revenue Analytics:** Monthly revenue trends over the past year
-- **Popular Classes:** Rankings of classes by total bookings
-- **Attendance Trends:** Daily check-in statistics for the last 30 days
-
-## Current Behavior Notes
-
-- Attendance check-ins are only allowed during Morning (05:00–11:00) or Evening (16:00–22:00) sessions, and a member can check in only once per calendar date.
-- Attendance view supports date range filtering (default: current week).
-- In the Financials “Record Manual Payment” modal, selecting a member fetches their unpaid invoices and lets you auto-fill invoice and amount by selection.
-- Dashboard cards are clickable and navigate to filtered views (e.g., unpaid members or pending payments).
-- Dashboard card visibility can be configured in Settings.
-
-### Branding & Theme
-- Settings → Accent Colors lets you configure:
-  - Primary/Secondary mode: Solid or Gradient
-  - Gradient editor (Linear/Radial, angle, color stops)
-- Exposed CSS variables for custom styling: `--accent-primary-color`, `--accent-secondary-color`, `--accent-primary-bg`, `--accent-secondary-bg`.
-- Secondary accent is applied to: contained/outlined buttons, h4/h5 headings (gradient text), section header borders, and invoice header label.
-
-### Invoices
-- Open from Financials → Recent Payment History by clicking a row.
-- Print: prints only the invoice area.
-- Download: generates a PDF via html2canvas + jsPDF (no print dialog).
-- Send via WhatsApp: opens WhatsApp Web with a prefilled message to the member’s phone number.
+The `biometricListener.js` service handles:
+- TCP socket connections to ESP32 devices
+- Real-time event processing
+- Device status monitoring
 
 ---
 
-## Biometric Device Integration (Secureye S‑B100CB)
+## Troubleshooting
 
-This project supports integrating the Secureye S‑B100CB Biometric Fingerprint Scanner for attendance check-ins over IP (Ethernet) or via a small gateway. The device offers TCP/IP communication, 2000 user capacity, and access-control support per the vendor details. See the product page for reference: [Secureye S‑B100CB Biometric Fingerprint Scanner – IP (Ethernet & USB)](https://www.secureye.com/product/s-b100cb-biometric-fingerprint-scanner-ip-ethernet-usb-biometric).
+### ESP32 Integration Issues
 
-### What we store
-- A mapping between your app’s `member_id` and the device’s `device_user_id` in a new table `member_biometrics`.
-- Optionally, a fingerprint template string (e.g., base64) if you enroll/capture via an SDK or external tool.
+#### Port Configuration Problems
 
-### Configurable working hours
-Working hours are editable in Settings and enforced by the backend during check-in:
-- Morning session: `morning_session_start`–`morning_session_end` (default 05:00–11:00)
-- Evening session: `evening_session_start`–`evening_session_end` (default 16:00–22:00)
+**Critical Issue**: ESP32 must connect to the main server port (PORT in .env), NOT the BIOMETRIC_PORT:
 
-### How to wire the device
-There are two common ways to integrate the device with the backend:
+- **✅ Correct**: ESP32 port = 3001 (matches main server PORT)
+- **❌ Wrong**: ESP32 port = 8080 (causes HTTP timeout errors)
 
-1) Device push → Backend webhook
-- Configure the device (or its management software) to push user events to the backend:
-  - URL: `POST /api/attendance/device-webhook`
-  - Body: must include a device user field (any of `device_user_id`, `userId`, `UserID`, `EmpCode`, `emp_code`)
-  - Example JSON: `{ "device_user_id": "1234" }`
-- The backend resolves `device_user_id` → `member_id` via `member_biometrics` and performs the standard check-in with working-hours validation and “one check-in per day”.
+**Verification**:
+```bash
+# Check your .env file - ESP32 should use the PORT value, not BIOMETRIC_PORT
+cat .env | grep PORT
+# Should show: PORT=3001 (or your custom port)
 
-2) Local gateway → Backend
-- If the device cannot post directly, run a lightweight gateway on the same LAN that reads the device’s logs (via TCP/IP or vendor SDK) and POSTs to `POST /api/attendance/device-webhook` using the same schema as above.
+# Test the correct endpoint manually
+curl -X POST http://YOUR_SERVER_IP:3001/api/biometric/esp32-webhook \
+  -H "Content-Type: application/json" \
+  -d '{"deviceId":"TEST","event":"test"}'
+```
 
-### Managing biometric links for members
-- In the admin UI, open Members → “Biometric” on a member.
-- Enter the Secureye `device_user_id` you configured on the device (or paste a template if available).
-- This calls `PUT /api/members/:id/biometric` and stores the mapping/template.
-- You can also upsert via API directly:
-  - `PUT /api/members/:id/biometric`
-  - Body: `{ "device_user_id": "1234", "template": "<optional base64>" }`
+#### WiFi Connection Issues
 
-### Check-in from devices or apps
-- Direct app/server call: `POST /api/attendance/check-in` with either `{ memberId: 42 }` or `{ device_user_id: "1234" }`
-- Device/webhook call: `POST /api/attendance/device-webhook` with `{ device_user_id: "1234" }`
+- **Web Configuration**: Access `http://ESP32_IP/config` to update WiFi credentials
+- **Serial Monitor**: Check for detailed WiFi connection logs at 115200 baud
+- **Connection Status**: Look for detailed error messages like `NO_SSID_AVAILABLE`, `WRONG_PASSWORD`, `CONNECT_FAILED`
 
-### Error handling
-- Out-of-hours: backend returns `400` with a message reflecting current configured hours.
-- Duplicate daily check-in: backend returns `409` with `Member has already checked in today.`
-- Unknown device user: backend returns `404` if no `member_biometrics` mapping is present.
+#### Device Not Connecting
 
-### Notes
-- The device supports TCP/IP and USB. For production, prefer an IP-based configuration and a small webhook/gateway approach for reliability.
-- If you use vendor SDKs for template management, store a template string with the member for future migrations; the backend does not need to interpret the template, it only stores it.
-- Ensure the device’s internal user IDs match the `device_user_id` you set for each member.
+- **Firewall**: Check firewall settings for ports 80 (ESP32 web interface) and 3001 (main server)
+- **Network Restrictions**: Ensure ESP32 can reach gym server (same network or proper routing)
+- **WiFi Requirements**: ESP32 only supports 2.4GHz networks (not 5GHz)
+- **MAC Filtering**: Check if router has MAC address filtering enabled
 
-Reference: [Secureye S‑B100CB Biometric Fingerprint Scanner – IP (Ethernet & USB)](https://www.secureye.com/product/s-b100cb-biometric-fingerprint-scanner-ip-ethernet-usb-biometric)
+### Timestamp and Timezone Issues
 
-## Windows standalone build (Service + Installer, SQLite)
+#### Timezone Discrepancy Between Biometric Events and Attendance
+
+**Problem**: Biometric events and attendance records showing different timestamps.
+
+**Root Cause**: Inconsistent timestamp handling between ESP32 device and server.
+
+**Solution**: 
+1. **ESP32 Configuration**: Update `esp32_door_lock/config.h` with your gym's timezone:
+   ```cpp
+   #define TIMEZONE_OFFSET 19800   // UTC+5:30 (India)
+   #define TIMEZONE_OFFSET -18000  // UTC-5 (Eastern US)
+   #define TIMEZONE_OFFSET 0       // UTC+0 (UK)
+   ```
+
+2. **Server-Side Fix**: Already implemented in `src/services/biometricIntegration.js`
+
+3. **Verification**: Both biometric events and attendance records should show identical timestamps
+
+#### Heartbeat Timestamp Issues
+
+**Problem**: Invalid timestamps like "01/01/65090, 00:00:00" in heartbeat events.
+
+**Root Cause**: ESP32 sending heartbeats before NTP time synchronization.
+
+**Solution**: 
+1. **NTP Time Synchronization Wait**: ESP32 now waits up to 30 seconds for NTP time
+2. **Improved Fallback**: Uses reasonable timestamps instead of raw `millis()`
+3. **Heartbeat Validation**: Skips heartbeats with invalid timestamps
+
+#### Attendance Date Filtering Issues
+
+**Problem**: Date range filtering not providing full-day coverage.
+
+**Solution**: 
+- Start date automatically includes 00:00:00 hours
+- End date automatically includes 23:59:59 hours
+- No attendance records are missed due to time precision issues
+
+### NTP Time Synchronization Issues
+
+#### Problem Description
+The ESP32 door lock system may fail to synchronize time with NTP servers, resulting in the error:
+```
+⚠️ NTP time synchronization failed - continuing with fallback time
+Device will use approximate time based on uptime
+```
+
+#### Root Causes & Solutions
+
+**1. Network Firewall Issues**
+- **Problem**: Corporate networks, routers, or ISPs often block NTP traffic on port 123
+- **Solutions**:
+  - Check if port 123 (UDP) is open on your network
+  - Contact network administrator to whitelist NTP traffic
+  - Use alternative NTP servers that might not be blocked
+  - Consider using HTTP-based time services as fallback
+
+**2. DNS Resolution Problems**
+- **Problem**: ESP32 cannot resolve NTP server hostnames
+- **Solutions**:
+  - Verify DNS server configuration in WiFi settings
+  - Try using IP addresses instead of hostnames
+  - Check if DNS server (8.8.8.8, 1.1.1.1) is accessible
+
+**3. Network Congestion or Slow Connection**
+- **Problem**: Network is too slow for NTP requests to complete within timeout
+- **Solutions**:
+  - Increased timeout from 10s to 30s in the updated code
+  - Added multiple NTP servers for redundancy
+  - Implemented retry logic with exponential backoff
+
+**4. Router Configuration Issues**
+- **Problem**: Router blocks outgoing NTP requests or has restrictive firewall rules
+- **Solutions**:
+  - Check router's firewall settings
+  - Disable "Block WAN Requests" if enabled
+  - Whitelist NTP servers in router configuration
+  - Update router firmware
+
+**5. ISP Restrictions**
+- **Problem**: Internet Service Provider blocks or throttles NTP traffic
+- **Solutions**:
+  - Contact ISP to confirm NTP access
+  - Use alternative NTP servers
+  - Consider VPN if allowed
+
+#### Updated Code Improvements
+
+The code has been updated with the following improvements:
+
+**1. Multiple NTP Servers**
+```cpp
+configTime(TIMEZONE_OFFSET, DST_OFFSET, 
+           "pool.ntp.org",           // Primary
+           "time.nist.gov",          // Secondary (US)
+           "time.google.com",        // Tertiary (Google)
+           "time.windows.com");      // Quaternary (Microsoft)
+```
+
+**2. Increased Timeout**
+- Initial sync: 30 seconds (was 10 seconds)
+- Manual resync: 15 seconds
+- Periodic resync: Every 30 minutes if time is invalid
+
+**3. Better Error Reporting**
+- Detailed error messages with possible causes
+- Network diagnostic information
+- Time validation to detect invalid years
+
+**4. Automatic Recovery**
+- Periodic NTP resynchronization attempts
+- Fallback time calculation based on device uptime
+- Manual resync via web interface
+
+#### Manual Testing & Debugging
+
+**1. Web Interface Testing**
+Access the ESP32 web interface and use the "Resync Time" button:
+```
+http://[ESP32_IP_ADDRESS]/resync-time
+```
+
+**2. Serial Monitor Debugging**
+Monitor the serial output for detailed NTP status:
+```
+🔄 Manual NTP resynchronization requested...
+Attempting manual NTP synchronization...
+✅ Manual NTP resynchronization successful!
+Updated time: 2025-01-01 12:34:56
+```
+
+**3. Network Connectivity Test**
+Test basic network connectivity from ESP32:
+```cpp
+// Add this to your code for testing
+void testNetworkConnectivity() {
+  HTTPClient http;
+  http.begin("http://httpbin.org/ip");
+  int httpCode = http.GET();
+  if (httpCode > 0) {
+    Serial.printf("Network test successful: HTTP %d\n", httpCode);
+  } else {
+    Serial.printf("Network test failed: %s\n", http.errorToString(httpCode).c_str());
+  }
+  http.end();
+}
+```
+
+#### Alternative Solutions
+
+**1. HTTP-Based Time Service**
+If NTP continues to fail, implement HTTP time service as fallback:
+```cpp
+String getTimeFromHTTP() {
+  HTTPClient http;
+  http.begin("http://worldtimeapi.org/api/timezone/Etc/UTC");
+  int httpCode = http.GET();
+  if (httpCode == 200) {
+    String payload = http.getString();
+    // Parse JSON response for datetime
+    // Example: {"datetime":"2025-01-01T12:34:56.123456+00:00"}
+    return payload;
+  }
+  http.end();
+  return "";
+}
+```
+
+**2. Local Network Time Server**
+Set up a local NTP server on your network:
+- Use a Raspberry Pi or other device
+- Configure it as an NTP server
+- Point ESP32 to local IP instead of external servers
+
+**3. RTC Module**
+Add a Real-Time Clock module for offline timekeeping:
+- DS3231 or PCF8563 RTC module
+- Battery backup for power outages
+- Manual time setting capability
+
+#### Configuration Recommendations
+
+**1. Network Settings**
+- Ensure ESP32 has stable WiFi connection
+- Use static IP if DHCP is unreliable
+- Configure DNS servers manually if needed
+
+**2. Timezone Configuration**
+Verify `config.h` settings:
+```cpp
+#define TIMEZONE_OFFSET 19800  // UTC+5:30 (India)
+#define DST_OFFSET 0           // No daylight saving time
+```
+
+**3. Firewall Rules**
+Add these rules to your router/firewall:
+```
+Allow UDP 123 (NTP) outbound to:
+- pool.ntp.org
+- time.nist.gov
+- time.google.com
+- time.windows.com
+```
+
+#### Monitoring & Maintenance
+
+**1. Regular Checks**
+- Monitor serial output for NTP failures
+- Check web interface status page
+- Verify timestamp accuracy in server logs
+
+**2. Log Analysis**
+Look for patterns in NTP failures:
+- Time of day (network congestion)
+- Specific NTP servers failing
+- Network events coinciding with failures
+
+**3. Performance Metrics**
+Track NTP sync success rate:
+- Successful syncs vs. failures
+- Sync duration times
+- Fallback time usage frequency
+
+#### Support & Escalation
+
+If NTP issues persist after implementing these solutions:
+
+1. **Network Analysis**: Use network monitoring tools to identify bottlenecks
+2. **ISP Contact**: Verify NTP access with your internet provider
+3. **Alternative Networks**: Test on different WiFi networks
+4. **Hardware Check**: Verify ESP32 WiFi module functionality
+5. **Community Support**: Check ESP32 forums for similar issues
+
+#### Quick Fix Checklist
+
+- [ ] Verify WiFi connection stability
+- [ ] Check router firewall settings
+- [ ] Test DNS resolution
+- [ ] Verify NTP port 123 access
+- [ ] Update ESP32 code with improved NTP handling
+- [ ] Test manual time resync via web interface
+- [ ] Monitor serial output for detailed error messages
+- [ ] Consider alternative NTP servers
+- [ ] Check timezone configuration in config.h
+
+### Library Installation Issues
+
+- **ArduinoJson.h not found**: Install `ArduinoJson` library via Arduino IDE Library Manager
+- **Adafruit_Fingerprint.h not found**: Install `Adafruit Fingerprint Sensor Library` via Library Manager (compatible with R307 sensor)
+- **ESP32 board not found**: Add ESP32 board URL in Preferences and install via Board Manager
+- **Compilation errors**: Ensure you're using ArduinoJson version 6.x (not 7.x which has breaking changes)
+
+### Serial Monitor Issues
+
+- **Garbled characters at startup** (``): These are normal ESP32 boot messages sent at 74880 baud rate
+- **Solution**: Set your Serial Monitor to **115200 baud rate** and ignore the initial garbled text
+- **Expected output**: Garbled boot messages followed by clear text after separator lines (`========================================`)
+
+### Database Issues
+
+```bash
+# Reset ESP32 database tables
+npm run esp32:setup
+
+# Manual database check
+sqlite3 data/data/gmgmt.sqlite
+.tables
+SELECT * FROM devices;
+```
+
+### WebSocket Issues
+
+#### Enrollment Stuck in "Enrolling" State
+
+**Problem**: The client UI remains stuck in the "enrolling" state even when the ESP32 has completed enrollment.
+
+**Root Cause**: Communication gap between ESP32 and frontend via WebSocket.
+
+**Solution**: 
+1. **Direct WebSocket Updates**: Modified `biometricController.js` to send WebSocket updates immediately when processing ESP32 webhook events
+2. **Comprehensive Status Handling**: Added WebSocket updates for all enrollment outcomes (success/failure/cancellation)
+3. **Member Name Resolution**: Enhanced member name lookup for better user experience
+4. **Enrollment Mode Management**: Added logic to stop enrollment mode when ESP32 completes enrollment
+
+#### WebSocket Connection Issues
+
+**Problem**: Frontend not receiving real-time enrollment status updates.
+
+**Root Cause**: Frontend relying on polling instead of WebSocket connection.
+
+**Solution**: 
+1. **WebSocket Server**: Added WebSocket server to `src/app.js` using the `ws` package
+2. **Enhanced BiometricIntegration Service**: Added WebSocket client management methods
+3. **Frontend WebSocket Integration**: Updated frontend to connect to WebSocket server and handle real-time updates
+4. **Fallback Mechanism**: WebSocket is primary, polling remains as fallback
+
+### Enrollment ID Issues
+
+#### ESP32 Always Enrolling with ID 1
+
+**Problem**: ESP32 device was always enrolling fingerprints with ID 1 instead of the member ID that was selected for enrollment.
+
+**Root Cause**: The `startEnrollmentMode()` function was overwriting the `enrollmentID` with `getNextAvailableID()`.
+
+**Solution**: 
+1. **Preserve Member ID**: Modified `startEnrollmentMode()` to only set `enrollmentID` if it hasn't been set by a remote command
+2. **Reset enrollmentID After Completion**: Added logic to reset `enrollmentID` after enrollment completes (success or failure)
+3. **Reset enrollmentID on Cancellation**: Added reset logic when enrollment is cancelled
+4. **Enhanced Debugging**: Added comprehensive logging to track the enrollment flow
+
+---
+
+## Development
+
+### Project Structure
+
+```
+src/
+├── api/
+│   ├── controllers/          # API endpoint handlers
+│   ├── middlewares/          # Express middleware
+│   └── routes/               # API route definitions
+├── config/                   # Configuration files
+├── models/                   # Database models
+├── services/                 # Business logic services
+└── app.js                    # Main application entry point
+```
+
+### Environment Variables
+
+Create a `.env` file in the project root with the following variables:
+
+```env
+# Server Configuration
+PORT=3001
+NODE_ENV=development
+
+# Database (SQLite - automatically created)
+# No additional configuration required
+
+# JWT Configuration
+JWT_SECRET=your_super_secret_jwt_key
+
+# Email Configuration
+EMAIL_USER=your_email@gmail.com
+EMAIL_PASS=your_app_password
+
+# ESP32 Biometric Integration
+ENABLE_BIOMETRIC=true
+BIOMETRIC_PORT=8080
+BIOMETRIC_HOST=0.0.0.0
+```
+
+### Running in Development
+
+```bash
+# Install dependencies
+npm install
+
+# Start the development server
+npm start
+
+# Start with ESP32 support
+npm run start:with-biometric
+
+# Run tests
+npm test
+```
+
+### Testing ESP32 Integration
+
+```bash
+# Setup ESP32 database tables
+npm run esp32:setup
+
+# Run integration tests
+npm run esp32:test
+
+# Check biometric service status
+npm run biometric:check
+
+# Show all available commands
+npm run esp32:help
+```
+
+### WebSocket Testing
+
+Test WebSocket functionality using:
+
+```bash
+# Test WebSocket connection
+node -e "
+const ws = new (require('ws'))('ws://localhost:3001/ws');
+ws.on('open', () => console.log('✅ Connected'));
+ws.on('message', (data) => console.log('📡 Received:', data.toString()));
+setTimeout(() => ws.close(), 3000);
+"
+```
+
+### Dependencies
+
+Key dependencies for ESP32 integration:
+- `ws` package for WebSocket server functionality
+- `sqlite3` for database operations
+- `nodemailer` for email notifications
+- `crypto` for JWT operations
+
+---
+
+## Windows Standalone Build (Service + Installer, SQLite)
 
 This section documents how to ship GMgmt as a self-contained Windows application that runs as a Windows Service and uses SQLite (single-file database). It covers both 32-bit (x86) and 64-bit (x64) Windows.
 
@@ -432,13 +1422,13 @@ This section documents how to ship GMgmt as a self-contained Windows application
 - NSIS or WiX Toolset for building the installer (examples below use NSIS).
 - Optional: NSSM if you prefer service install via command line instead of bundling `node-windows`.
 
-### 1) Switch backend database to SQLite
+### 1) Database Configuration
 
-1. Replace PostgreSQL with SQLite dependency:
+The application uses SQLite by default:
 
    ```bash
-   npm uninstall pg
-   npm install better-sqlite3@^9
+   # SQLite dependency is already included
+   # No additional database setup required
    ```
 
 2. Add a small adapter `src/config/sqlite.js` that:
@@ -558,10 +1548,10 @@ SectionEnd
 - If building on CI for x86, run `npm ci` with `npm_config_target_arch=ia32`.
 - Use Node 18 for x86; x64 can also use Node 18+ (keep in sync with native deps).
 
-### 7) Optional: Migrate data from PostgreSQL
+### 7) Data Import (Optional)
 
-- Export tables from Postgres to CSV.
-- Initialize a fresh SQLite DB (created on first run) and import CSVs using the SQLite CLI:
+- If migrating from another database system, export tables to CSV.
+- Import CSVs using the SQLite CLI:
 
 ```sql
 .mode csv
@@ -584,10 +1574,27 @@ Verify foreign keys and adjust IDs if required. SQLite autoincrements without se
 2. Browse to `http://localhost:3001` to use the app.
 3. Manage the `GMgmt` Windows Service via Services.msc (start/stop) when needed.
 
+---
+
+## Documentation Structure
+
+This project maintains separate documentation for different components:
+
+- **📖 [Main README.md](README.md)** - Project overview, installation, ESP32 integration, troubleshooting, backend API, and development information
+- **📖 [Frontend Documentation](client/README.md)** - React components, UI features, styling, and frontend-specific information
+
+Each README focuses on its specific domain while maintaining cross-references for comprehensive understanding. All backend and ESP32-related documentation has been consolidated into this main README.
+
+---
+
 ## Future Enhancements
 
 The current application is feature-complete for gym management. Future development could include:
 
+-   **Advanced Role Management**: Multiple admin levels (super admin, manager, staff) with granular permissions
+-   **Role-based Access Control (RBAC)**: Fine-grained access control for different admin roles
+-   **Admin Dashboard**: Specialized interface for admin users with enhanced analytics and controls
+-   **Audit Logging**: Track admin actions and privilege usage for security compliance
 -   A dedicated **Member Portal/Mobile App** for clients to manage their own profiles and bookings.
 -   **SMS notifications** integration alongside email communications.
 -   **Advanced member retention analytics** with churn prediction.
@@ -595,6 +1602,36 @@ The current application is feature-complete for gym management. Future developme
 -   **Wearable device integration** for real-time fitness tracking.
 -   **Social features** for member community building.
 
+---
+
 ## Support
 
 For technical support or feature requests, please refer to the API documentation above or contact the development team.
+
+### Additional Resources
+
+#### API Endpoints
+- **Device Management**: `/api/biometric/devices/*` for device management
+- **ESP32 Configuration**: 
+  - `GET /api/config` - Retrieve device configuration
+  - `POST /api/config` - Update device configuration
+- **Device Control**:
+  - `POST /unlock` - Emergency unlock
+  - `POST /enroll` - Start fingerprint enrollment
+- **Status Monitoring**: `/status` - Device status and health information
+
+#### Configuration Files
+- **ESP32 Firmware**: `esp32_door_lock/esp32_door_lock.ino`
+- **Configuration Template**: `esp32_door_lock/config.h.example`
+- **Environment Variables**: `.env` file for server configuration
+
+#### Frontend Components
+- **ESP32 Device Manager**: `/client/src/components/ESP32DeviceManager.js`
+- **Monitor Interface**: `/client/src/components/ESP32Monitor.js`
+- **Analytics Dashboard**: `/client/src/components/ESP32Analytics.js`
+- **Settings Integration**: `/client/src/components/Settings.js`
+
+#### Testing Scripts
+- **`tools/calculate_timezone_offset.js`**: Timezone offset calculator
+- **`tools/test_timestamp_fix.js`**: Timestamp fix verification
+- **`tools/test_esp32_integration.js`**: ESP32 integration testing
