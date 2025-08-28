@@ -327,7 +327,7 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 
 #### 3. Hardware Connections
 
-```
+```text
 ESP32 Pin Connections Schematic
 ================================
 
@@ -347,33 +347,34 @@ Power Supply:
           │                      │
           │                      │
           │                      │
-    ┌─────▼───────┐        ┌─────▼───────┐
-    │   Pin 18    │        │   Pin 16   │
-    │  (Relay)    │        │   (RX)     │
+          ▼                      ▼
+    ┌─────-───────┐        ┌─────-───────┐
+    │   Pin 18    │        │   Pin 16    │
+    │  (Relay)    │        │   (RX)      │
     └─────────────┘        └─────────────┘
 
 ESP32 Development Board:
 ┌─────────────────────────────────────────────────┐
 │                                                 │
-│  ┌─────────────────────────────────────────┐   │
-│  │              ESP32                      │   │
-│  │                                         │   │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
-│  │  │Pin4 │ │Pin5 │ │Pin16│ │Pin17│      │   │
-│  │  │Enroll│ │Override│ │RX   │ │TX   │      │   │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  │                                         │   │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
-│  │  │Pin18│ │Pin19│ │Pin21│ │Pin22│      │   │
-│  │  │Relay│ │Green│ │Red  │ │Blue │      │   │
-│  │  │     │ │LED  │ │LED  │ │LED  │      │   │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  │                                         │   │
-│  │  ┌─────┐                               │   │
-│  │  │Pin23│                               │   │
-│  │  │Buzzer│                               │   │
-│  │  └─────┘                               │   │
-│  └─────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────┐    │
+│  │              ESP32                      │    │
+│  │                                         │    │
+│  │  ┌─────-┐ ┌────────┐ ┌─────┐ ┌─────┐    │    │
+│  │  │Pin4  │ │Pin5    │ │Pin16│ │Pin17│    │    │
+│  │  │Enroll│ │Override│ │RX   │ │TX   │    │    │
+│  │  └─────-┘ └────────┘ └─────┘ └─────┘    │    │
+│  │                                         │    │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐        │    │
+│  │  │Pin18│ │Pin19│ │Pin21│ │Pin22│        │    │
+│  │  │Relay│ │Green│ │Red  │ │Blue │        │    │
+│  │  │     │ │LED  │ │LED  │ │LED  │        │    │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘        │    │
+│  │                                         │    │
+│  │  ┌─────-┐                               │    │
+│  │  │Pin23 │                               │    │
+│  │  │Buzzer│                               │    │
+│  │  └─────-┘                               │    │
+│  └─────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────┘
 
 Detailed Pin Mapping:
@@ -394,6 +395,7 @@ Detailed Pin Mapping:
 │   3.3V      │ Logic       │ 3.3V Logic Level    │
 └─────────────┴─────────────┴─────────────────────┘
 
+
 Wiring Notes:
 • All components share a common ground (GND)
 • R307 sensor operates at 5V but ESP32 pins are 3.3V tolerant
@@ -401,32 +403,311 @@ Wiring Notes:
 • LEDs require current-limiting resistors (220Ω recommended)
 • Buttons connect between GPIO pins and GND
 • Buzzer can be active (3.3V) or passive (requires driver circuit)
+```
+
+##### 3.6 Push Button Connection Schematics
+
+###### Enroll Button (Pin 4) - Fingerprint Enrollment Control
+
+```text
+Enroll Button Wiring Diagram (Pin 4)
+====================================
+
+┌────────────────────────────────────────────────┐
+│                Enroll Button                   │
+│  ┌─────────────────────────────────────────┐   │
+│  │                                         │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐        │   │
+│  │  │     │ │     │ │     │ │     │        │   │
+│  │  │     │ │     │ │     │ │     │        │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘        │   │
+│  └─────────────────────────────────────────┘   │
+└────────────────────────────────────────────────┘
+         │         │         │         │
+         │         │         │         │
+         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+    │ Pin 4   │ │  GND    │ │         │ │         │
+    │(GPIO4)  │ │(Common) │ │         │ │         │
+    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+
+Connection Details:
+• Pin 4 (GPIO4) → One terminal of push button
+• GND (Common) → Other terminal of push button
+• Button type: Momentary push button (normally open)
+• No external resistors required (ESP32 has internal pull-up)
+
+Functioning:
+• **Normal State**: Pin 4 reads HIGH (3.3V) due to internal pull-up
+• **Pressed State**: Pin 4 reads LOW (0V) when button is pressed
+• **Enrollment Trigger**: Pressing button initiates fingerprint enrollment mode
+• **LED Feedback**: Green LED illuminates during enrollment process
+• **Buzzer Feedback**: Confirmation beep on successful enrollment
+
+Enrollment Process:
+1. Press Enroll button → ESP32 enters enrollment mode
+2. Green LED turns ON → Indicates enrollment is active
+3. Place finger on sensor → R307 captures fingerprint
+4. Remove and replace finger → Second capture for verification
+5. Processing → ESP32 creates fingerprint template
+6. Success → Green LED blinks, buzzer beeps, door unlocks
+7. Failure → Red LED blinks, buzzer error tone
+8. Return to normal → System ready for next operation
+
+Button Specifications:
+• Type: Momentary push button (SPST)
+• Contact: Normally Open (NO)
+• Rating: 3.3V, 50mA minimum
+• Mounting: Panel mount or PCB mount
+• Actuation force: 100-200g typical
+```
+
+###### Override Button (Pin 5) - Emergency Door Unlock
+
+```text
+Override Button Wiring Diagram (Pin 5)
+=====================================
+
+┌──────────────────────────────────────────────┐
+│               Override Button                │
+│  ┌───────────────────────────────────────┐   │
+│  │                                       │   │
+│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  │     │ │     │ │     │ │     │      │   │
+│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
+│  └───────────────────────────────────────┘   │
+└──────────────────────────────────────────────┘
+         │         │         │         │
+         │         │         │         │
+         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+    │ Pin 5   │ │  GND    │ │         │ │         │
+    │(GPIO5)  │ │(Common) │ │         │ │         │
+    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+
+
+Connection Details:
+• Pin 5 (GPIO5) → One terminal of push button
+• GND (Common) → Other terminal of push button
+• Button type: Momentary push button (normally open)
+• No external resistors required (ESP32 has internal pull-up)
+
+Functioning:
+• **Normal State**: Pin 5 reads HIGH (3.3V) due to internal pull-up
+• **Pressed State**: Pin 5 reads LOW (0V) when button is pressed
+• **Emergency Unlock**: Pressing button immediately unlocks door
+• **Bypass Security**: Overrides all fingerprint authentication
+• **Audit Trail**: Override events are logged with timestamp
+
+Override Process:
+1. Press Override button → ESP32 immediately unlocks door
+2. Blue LED illuminates → Indicates override is active
+3. Door relay activates → Door lock releases
+4. Buzzer sounds → Confirmation tone
+5. Override logged → Event recorded in system memory
+6. Door remains unlocked → Until manually relocked or timeout
+7. Return to normal → System ready for normal operation
+
+Security Considerations:
+• **Emergency Access**: Provides immediate entry during emergencies
+• **Audit Logging**: All override events are timestamped and logged
+• **No Authentication**: Bypasses fingerprint verification completely
+• **Physical Security**: Button should be accessible but not easily visible
+• **Timeout Protection**: Consider implementing auto-relock after override
+
+Button Specifications:
+• Type: Momentary push button (SPST)
+• Contact: Normally Open (NO)
+• Rating: 3.3V, 50mA minimum
+• Mounting: Panel mount or PCB mount
+• Actuation force: 100-200g typical
+• Color: Red recommended for emergency override
+• Protection: Consider adding protective cover or key switch
+```
+
+##### 3.7 Button Integration with ESP32 Firmware
+
+###### Button State Detection
+
+```cpp
+// Button pin definitions
+#define ENROLL_BUTTON_PIN 4
+#define OVERRIDE_BUTTON_PIN 5
+
+// Button state variables
+bool enrollButtonPressed = false;
+bool overrideButtonPressed = false;
+bool lastEnrollButtonState = HIGH;
+bool lastOverrideButtonState = HIGH;
+
+// Button debouncing
+unsigned long lastEnrollDebounceTime = 0;
+unsigned long lastOverrideDebounceTime = 0;
+unsigned long debounceDelay = 50; // 50ms debounce
+```
+
+###### Button Reading Function
+
+```cpp
+void readButtons() {
+  // Read current button states
+  bool enrollReading = digitalRead(ENROLL_BUTTON_PIN);
+  bool overrideReading = digitalRead(OVERRIDE_BUTTON_PIN);
+  
+  // Enroll button debouncing
+  if (enrollReading != lastEnrollButtonState) {
+    lastEnrollDebounceTime = millis();
+  }
+  
+  if ((millis() - lastEnrollDebounceTime) > debounceDelay) {
+    if (enrollReading != enrollButtonPressed) {
+      enrollButtonPressed = enrollReading;
+      
+      if (enrollButtonPressed) {
+        // Button pressed - start enrollment
+        startEnrollmentMode();
+      }
+    }
+  }
+  
+  // Override button debouncing
+  if (overrideReading != lastOverrideButtonState) {
+    lastOverrideDebounceTime = millis();
+  }
+  
+  if ((millis() - lastOverrideDebounceTime) > debounceDelay) {
+    if (overrideReading != overrideButtonPressed) {
+      overrideButtonPressed = overrideReading;
+      
+      if (overrideButtonPressed) {
+        // Button pressed - emergency unlock
+        emergencyUnlock();
+      }
+    }
+  }
+  
+  // Update last button states
+  lastEnrollButtonState = enrollReading;
+  lastOverrideButtonState = overrideReading;
+}
+```
+
+###### Enrollment Mode Function
+
+```cpp
+void startEnrollmentMode() {
+  if (enrollmentInProgress) {
+    return; // Already enrolling
+  }
+  
+  // Set enrollment mode
+  enrollmentInProgress = true;
+  enrollmentStep = 0;
+  
+  // Visual feedback
+  digitalWrite(GREEN_LED_PIN, HIGH);
+  digitalWrite(RED_LED_PIN, LOW);
+  digitalWrite(BLUE_LED_PIN, LOW);
+  
+  // Audio feedback
+  buzzerBeep(200); // Short beep
+  
+  // Send enrollment start event to server
+  sendEnrollmentEvent("enrollment_started");
+  
+  Serial.println("🎯 Enrollment mode activated - place finger on sensor");
+}
+```
+
+###### Emergency Unlock Function
+
+```cpp
+void emergencyUnlock() {
+  // Immediate door unlock
+  digitalWrite(DOOR_RELAY_PIN, HIGH);
+  
+  // Visual feedback
+  digitalWrite(BLUE_LED_PIN, HIGH);
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
+  
+  // Audio feedback
+  buzzerBeep(500); // Longer beep for override
+  
+  // Log override event
+  String overrideEvent = "{\"event\":\"override_unlock\",\"timestamp\":\"" + getCurrentTimestamp() + "\"}";
+  sendEventToServer(overrideEvent);
+  
+  Serial.println("🚨 EMERGENCY OVERRIDE - Door unlocked");
+  
+  // Auto-relock after 10 seconds
+  delay(10000);
+  digitalWrite(DOOR_RELAY_PIN, LOW);
+  digitalWrite(BLUE_LED_PIN, LOW);
+  
+  Serial.println("🔒 Door auto-relocked after override");
+}
+```
+
+###### Button Setup in setup() Function
+
+```cpp
+void setup() {
+  // Initialize button pins
+  pinMode(ENROLL_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(OVERRIDE_BUTTON_PIN, INPUT_PULLUP);
+  
+  // Button state initialization
+  lastEnrollButtonState = digitalRead(ENROLL_BUTTON_PIN);
+  lastOverrideButtonState = digitalRead(OVERRIDE_BUTTON_PIN);
+  
+  Serial.println("✅ Push buttons initialized with internal pull-up resistors");
+}
+```
+
+###### Main Loop Integration
+
+```cpp
+void loop() {
+  // Read button states every loop iteration
+  readButtons();
+  
+  // Other system operations...
+  handleFingerprintSensor();
+  sendHeartbeat();
+  checkWiFiConnection();
+  
+  // Small delay to prevent overwhelming the system
+  delay(10);
+}
+```
 
 ##### 3.5 Detailed Connection Schematics
 
 ###### R307 Fingerprint Sensor Connection
 
-```
+```text
 R307 Fingerprint Sensor Wiring Diagram
 ======================================
 
-┌─────────────────────────────────────────────────┐
-│                    R307 Sensor                  │
-│  ┌─────────────────────────────────────────┐   │
-│  │                                         │   │
+┌──────────────────────────────────────────────┐
+│                    R307 Sensor               │
+│  ┌───────────────────────────────────────┐   │
+│  │                                       │   │
 │  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
 │  │  │ VCC │ │ TX  │ │ RX  │ │ GND │      │   │
 │  │  │     │ │     │ │     │ │     │      │   │
 │  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  └─────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
+│  └───────────────────────────────────────┘   │
+└──────────────────────────────────────────────┘
          │         │         │         │
          │         │         │         │
          ▼         ▼         ▼         ▼
-    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+    ┌─────────┐ ┌────────┐ ┌────────┐ ┌─────────┐
     │   5V    │ │ Pin 16 │ │ Pin 17 │ │  GND    │
     │ Supply  │ │ (RX)   │ │ (TX)   │ │(Common) │
-    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+    └─────────┘ └────────┘ └────────┘ └─────────┘
 
 Connection Details:
 • VCC → 5V Power Supply (from ESP32 VIN or external 5V)
@@ -439,27 +720,27 @@ Note: R307 operates at 5V logic level, but ESP32 pins are 3.3V tolerant
 
 ###### 5V Relay Module Connection
 
-```
+```text
 5V Relay Module Wiring Diagram
 ==============================
 
-┌─────────────────────────────────────────────────┐
-│                 5V Relay Module                 │
-│  ┌─────────────────────────────────────────┐   │
-│  │                                         │   │
+┌──────────────────────────────────────────────┐
+│                 5V Relay Module              │
+│  ┌───────────────────────────────────────┐   │
+│  │                                       │   │
 │  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
 │  │  │ VCC │ │ GND │ │ IN  │ │ COM │      │   │
 │  │  │     │ │     │ │     │ │     │      │   │
 │  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  └─────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
+│  └───────────────────────────────────────┘   │
+└──────────────────────────────────────────────┘
          │         │         │         │
          │         │         │         │
          ▼         ▼         ▼         ▼
-    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+    ┌─────────┐ ┌─────────┐ ┌────────┐ ┌────────┐
     │   5V    │ │  GND    │ │ Pin 18 │ │ 12V    │
     │ Supply  │ │(Common) │ │(Signal)│ │Supply  │
-    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+    └─────────┘ └─────────┘ └────────┘ └────────┘
 
 Connection Details:
 • VCC → 5V Power Supply (from ESP32 VIN or external 5V)
@@ -475,20 +756,20 @@ Relay Operation:
 
 ###### Electromagnetic Door Lock Circuit
 
-```
+```text
 Electromagnetic Door Lock Circuit
 ================================
 
-┌─────────────────────────────────────────────────┐
-│               12V Power Supply                 │
-│  ┌─────────────────────────────────────────┐   │
-│  │                                         │   │
+┌──────────────────────────────────────────────┐
+│               12V Power Supply               │
+│  ┌───────────────────────────────────────┐   │
+│  │                                       │   │
 │  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
 │  │  │ +12V│ │     │ │     │ │ GND │      │   │
 │  │  │     │ │     │ │     │ │     │      │   │
 │  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  └─────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
+│  └───────────────────────────────────────┘   │
+└──────────────────────────────────────────────┘
          │                           │
          │                           │
          ▼                           ▼
@@ -497,9 +778,9 @@ Electromagnetic Door Lock Circuit
     │  NO     │               │(Common) │
     │Contact  │               │         │
     └────┬────┘               └────┬────┘
-         │                        │
-         │                        │
-         ▼                        ▼
+         │                         │
+         │                         │
+         ▼                         ▼
     ┌─────────┐               ┌─────────┐
     │Electro- │               │Electro- │
     │magnetic │               │magnetic │
@@ -524,6 +805,7 @@ Safety Features:
 • Relay provides electrical isolation between low-voltage ESP32 and high-voltage door lock
 • Door lock automatically locks when power is removed (fail-safe operation)
 • No current flows through door lock when relay is inactive
+```
 
 #### 4. Configuration Management
 
