@@ -216,7 +216,8 @@ exports.getUnpaidMembersThisMonth = async (_req, res) => {
         const result = await pool.query(`
             SELECT m.id, m.name, m.email
             FROM members m
-            WHERE NOT EXISTS (
+            WHERE m.is_admin = 0
+              AND NOT EXISTS (
                 SELECT 1
                 FROM payments p
                 JOIN invoices i ON p.invoice_id = i.id
@@ -319,6 +320,7 @@ exports.getUpcomingRenewals = async (_req, res) => {
             LEFT JOIN payments p ON i.id = p.invoice_id
             LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
             WHERE mp.id IS NOT NULL
+              AND m.is_admin = 0
             GROUP BY m.id, m.name, m.phone, m.email, m.join_date, mp.name, mp.duration_days, mp.price
             HAVING julianday(next_due_date) - julianday('now') <= $1 
                AND julianday(next_due_date) - julianday('now') >= 0

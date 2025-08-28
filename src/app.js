@@ -104,19 +104,29 @@ const startServer = async () => {
 
         // Start biometric integration if enabled
         if (process.env.ENABLE_BIOMETRIC === 'true') {
-            const BiometricIntegration = require('./services/biometricIntegration');
-            const { setBiometricIntegration } = require('./api/controllers/biometricController');
-            const biometricPort = process.env.BIOMETRIC_PORT || 8080;
-            
-            console.log('🔐 Starting biometric integration...');
-            const biometricIntegration = new BiometricIntegration(biometricPort);
-            biometricIntegration.start();
-            
-            // Connect integration with controller
-            setBiometricIntegration(biometricIntegration);
-            
-            // Store reference for potential cleanup
-            app.biometricIntegration = biometricIntegration;
+            console.log('🔐 ENABLE_BIOMETRIC is true, starting biometric integration...');
+            try {
+                const BiometricIntegration = require('./services/biometricIntegration');
+                const { setBiometricIntegration } = require('./api/controllers/biometricController');
+                const biometricPort = process.env.BIOMETRIC_PORT || 8080;
+                
+                console.log('🔐 Creating biometric integration instance on port:', biometricPort);
+                const biometricIntegration = new BiometricIntegration(biometricPort);
+                
+                console.log('🔐 Starting biometric integration...');
+                biometricIntegration.start();
+                
+                console.log('🔐 Connecting integration with controller...');
+                setBiometricIntegration(biometricIntegration);
+                
+                // Store reference for potential cleanup
+                app.biometricIntegration = biometricIntegration;
+                console.log('✅ Biometric integration started successfully');
+            } catch (error) {
+                console.error('❌ Failed to start biometric integration:', error);
+            }
+        } else {
+            console.log('⚠️ ENABLE_BIOMETRIC is not true, biometric integration disabled');
         }
     } catch (error) {
         console.error('Failed to start server:', error);

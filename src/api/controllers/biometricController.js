@@ -12,28 +12,37 @@ const getMemberBiometricStatus = async (req, res) => {
   try {
     const { memberId } = req.params;
     
+    console.log('🔍 getMemberBiometricStatus called for member:', memberId);
+    console.log('🔍 biometricIntegration available:', !!biometricIntegration);
+    
     if (!biometricIntegration) {
+      console.log('❌ Biometric service not available');
       return res.status(503).json({ 
         success: false, 
         message: 'Biometric service not available' 
       });
     }
 
+    console.log('🔍 Calling biometricIntegration.getMemberBiometricStatus...');
     const status = await biometricIntegration.getMemberBiometricStatus(parseInt(memberId));
     
+    console.log('🔍 Status result:', status);
+    
     if (!status) {
+      console.log('❌ Status is null, returning Member not found');
       return res.status(404).json({ 
         success: false, 
         message: 'Member not found' 
       });
     }
 
+    console.log('✅ Successfully got biometric status');
     res.json({ 
       success: true, 
       data: status 
     });
   } catch (error) {
-    console.error('Error getting member biometric status:', error);
+    console.error('❌ Error getting member biometric status:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Failed to get biometric status',

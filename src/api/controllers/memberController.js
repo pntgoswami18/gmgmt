@@ -89,10 +89,10 @@ exports.createMember = async (req, res) => {
 // Update a member (email removed)
 exports.updateMember = async (req, res) => {
     const { id } = req.params;
-    const { name, phone, address, birthday, photo_url, is_admin } = req.body;
+    const { name, phone, address, birthday, photo_url, is_admin, membership_plan_id } = req.body;
     try {
         // Load existing to allow partial updates while ensuring mandatory fields present post-update
-        const existingRes = await pool.query('SELECT name, phone, address, birthday, photo_url, is_admin FROM members WHERE id = $1', [id]);
+        const existingRes = await pool.query('SELECT name, phone, address, birthday, photo_url, is_admin, membership_plan_id FROM members WHERE id = $1', [id]);
         if (existingRes.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });
         }
@@ -114,10 +114,24 @@ exports.updateMember = async (req, res) => {
         const safeBirthday = birthday === undefined ? existing.birthday || null : birthday || null;
         const safePhotoUrl = photo_url === undefined ? existing.photo_url || null : photo_url || null;
         const safeAdminStatus = is_admin === undefined ? existing.is_admin : (is_admin ? 1 : 0);
+        
+        // Handle membership plan ID - admin users should not have membership plans
+        let safeMembershipPlanId = null;
+        if (is_admin !== 1) {
+            if (membership_plan_id !== undefined) {
+                safeMembershipPlanId = membership_plan_id ? parseInt(membership_plan_id, 10) : null;
+            } else {
+                // If not explicitly set, keep existing value
+                safeMembershipPlanId = existing.membership_plan_id || null;
+            }
+        } else {
+            // If user is being set as admin, remove any existing membership plan
+            safeMembershipPlanId = null;
+        }
 
         await pool.query(
-            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5, is_admin = $6 WHERE id = $7',
-            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, safeAdminStatus, id]
+            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5, is_admin = $6, membership_plan_id = $7 WHERE id = $8',
+            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, safeAdminStatus, safeMembershipPlanId, id]
         );
         const updatedMember = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
         if (updatedMember.rows.length === 0) {
