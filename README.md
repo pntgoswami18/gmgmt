@@ -327,6 +327,8 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 
 #### 3. Hardware Connections
 
+> **📋 ESP32 Pin Reference**: For detailed pin capabilities and limitations, see the [ESP32 Pin Reference](http://wiki.fluidnc.com/en/hardware/esp32_pin_reference) documentation.
+
 ```text
 ESP32 Pin Connections Schematic
 ================================
