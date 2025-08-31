@@ -436,7 +436,7 @@ const getSystemStatus = async (req, res) => {
 const getMembersWithoutBiometric = async (req, res) => {
   try {
     const query = `
-      SELECT id, name, email, phone, join_date 
+      SELECT id, name, email, phone, join_date, is_admin 
       FROM members 
       WHERE (biometric_id IS NULL OR biometric_id = '') AND is_active = 1
       ORDER BY name ASC
@@ -465,7 +465,7 @@ const getMembersWithoutBiometric = async (req, res) => {
 const getMembersWithBiometric = async (req, res) => {
   try {
     const query = `
-      SELECT id, name, email, phone, join_date, biometric_id
+      SELECT id, name, email, phone, join_date, biometric_id, is_admin
       FROM members 
       WHERE biometric_id IS NOT NULL AND biometric_id != '' AND is_active = 1
       ORDER BY name ASC
