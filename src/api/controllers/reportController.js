@@ -137,6 +137,11 @@ exports.getSummaryStats = async (req, res) => {
 // Get financial summary
 exports.getFinancialSummary = async (req, res) => {
     try {
+        const { startDate, endDate } = req.query;
+
+        // Build date filter condition for payment history
+        const dateFilter = startDate && endDate ? `AND p.payment_date >= '${startDate}' AND p.payment_date <= '${endDate}'` : '';
+
         const outstandingInvoices = await pool.query(`
             SELECT i.id, m.name as member_name, i.amount, i.due_date
             FROM invoices i
@@ -151,50 +156,51 @@ exports.getFinancialSummary = async (req, res) => {
             FROM payments p
             JOIN invoices i ON p.invoice_id = i.id
             JOIN members m ON i.member_id = m.id
+            WHERE 1=1 ${dateFilter}
             ORDER BY p.payment_date DESC
             LIMIT 20
         `);
 
         const memberPaymentStatus = await pool.query(`
-            SELECT 
-                m.id, 
-                m.name, 
+            SELECT
+                m.id,
+                m.name,
                 m.email,
                 m.join_date,
                 mp.name as plan_name,
                 mp.duration_days,
                 (
-                    SELECT MAX(p.payment_date) 
-                    FROM payments p 
-                    JOIN invoices i ON p.invoice_id = i.id 
-                    WHERE i.member_id = m.id
+                    SELECT MAX(p.payment_date)
+                    FROM payments p
+                    JOIN invoices i ON p.invoice_id = i.id
+                    WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
                 ) as last_payment_date,
                 (
-                    SELECT i.status 
-                    FROM invoices i 
-                    WHERE i.member_id = m.id 
-                    ORDER BY i.due_date DESC 
+                    SELECT i.status
+                    FROM invoices i
+                    WHERE i.member_id = m.id
+                    ORDER BY i.due_date DESC
                     LIMIT 1
                 ) as last_invoice_status,
-                CASE 
+                CASE
                     WHEN mp.duration_days IS NULL THEN 0
                     WHEN (
-                        SELECT MAX(p.payment_date) 
-                        FROM payments p 
-                        JOIN invoices i ON p.invoice_id = i.id 
-                        WHERE i.member_id = m.id
-                    ) IS NULL THEN 
-                        CASE 
+                        SELECT MAX(p.payment_date)
+                        FROM payments p
+                        JOIN invoices i ON p.invoice_id = i.id
+                        WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
+                    ) IS NULL THEN
+                        CASE
                             WHEN julianday('now') - julianday(m.join_date) > mp.duration_days THEN 1
                             ELSE 0
                         END
-                    ELSE 
-                        CASE 
+                    ELSE
+                        CASE
                             WHEN julianday('now') - julianday((
-                                SELECT MAX(p.payment_date) 
-                                FROM payments p 
-                                JOIN invoices i ON p.invoice_id = i.id 
-                                WHERE i.member_id = m.id
+                                SELECT MAX(p.payment_date)
+                                FROM payments p
+                                JOIN invoices i ON p.invoice_id = i.id
+                                WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
                             )) > mp.duration_days THEN 1
                             ELSE 0
                         END
