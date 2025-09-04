@@ -11,6 +11,16 @@ exports.getAllSettings = async (req, res) => {
         const settings = {};
         for (const row of settingsResult.rows) {
             let value = row.value;
+            
+            // Try to parse JSON arrays
+            if (value && (value.startsWith('[') && value.endsWith(']'))) {
+                try {
+                    value = JSON.parse(value);
+                } catch (e) {
+                    // If parsing fails, keep the original string value
+                }
+            }
+            
             settings[row.key] = value;
         }
         
@@ -54,6 +64,9 @@ exports.updateAllSettings = async (req, res) => {
 
                 if (value === undefined || value === null) {
                     value = null;
+                } else if (Array.isArray(value)) {
+                    // Store arrays as JSON strings
+                    value = JSON.stringify(value);
                 } else if (typeof value !== 'string' && typeof value !== 'number') {
                     // Store booleans and other primitives as strings in TEXT column
                     value = String(value);
