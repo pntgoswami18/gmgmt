@@ -50,7 +50,7 @@ exports.getMemberById = async (req, res) => {
 
 // Create a new member (email removed)
 exports.createMember = async (req, res) => {
-    const { name, phone, membership_plan_id, address, birthday, photo_url, is_admin } = req.body;
+    const { name, phone, membership_plan_id, address, birthday, photo_url, is_admin, join_date } = req.body;
     try {
         if (!phone) {
             return res.status(400).json({ message: 'Phone is required' });
@@ -64,9 +64,12 @@ exports.createMember = async (req, res) => {
 
         const adminStatus = is_admin ? 1 : 0;
 
+        // Use provided join_date or default to current date
+        const finalJoinDate = join_date || new Date().toISOString().split('T')[0];
+
         await pool.query(
-            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active, is_admin) VALUES ($1, $2, $3, $4, $5, $6, 1, $7)',
-            [name, phone || null, planId, address || null, birthday || null, photo_url || null, adminStatus]
+            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active, is_admin, join_date) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8)',
+            [name, phone || null, planId, address || null, birthday || null, photo_url || null, adminStatus, finalJoinDate]
         );
         const newMember = await pool.query('SELECT * FROM members ORDER BY id DESC LIMIT 1');
 
@@ -89,7 +92,7 @@ exports.createMember = async (req, res) => {
 // Update a member (email removed)
 exports.updateMember = async (req, res) => {
     const { id } = req.params;
-    const { name, phone, address, birthday, photo_url, is_admin, membership_plan_id } = req.body;
+    const { name, phone, address, birthday, photo_url, is_admin, membership_plan_id, join_date } = req.body;
     try {
         // Load existing to allow partial updates while ensuring mandatory fields present post-update
         const existingRes = await pool.query('SELECT name, phone, address, birthday, photo_url, is_admin, membership_plan_id FROM members WHERE id = $1', [id]);
@@ -114,6 +117,7 @@ exports.updateMember = async (req, res) => {
         const safeBirthday = birthday === undefined ? existing.birthday || null : birthday || null;
         const safePhotoUrl = photo_url === undefined ? existing.photo_url || null : photo_url || null;
         const safeAdminStatus = is_admin === undefined ? existing.is_admin : (is_admin ? 1 : 0);
+        const safeJoinDate = join_date === undefined ? existing.join_date || new Date().toISOString().split('T')[0] : join_date;
         
         // Handle membership plan ID - admin users should not have membership plans
         let safeMembershipPlanId = null;
@@ -130,8 +134,8 @@ exports.updateMember = async (req, res) => {
         }
 
         await pool.query(
-            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5, is_admin = $6, membership_plan_id = $7 WHERE id = $8',
-            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, safeAdminStatus, safeMembershipPlanId, id]
+            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5, is_admin = $6, membership_plan_id = $7, join_date = $8 WHERE id = $9',
+            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, safeAdminStatus, safeMembershipPlanId, safeJoinDate, id]
         );
         const updatedMember = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
         if (updatedMember.rows.length === 0) {

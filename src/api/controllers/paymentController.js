@@ -1,4 +1,5 @@
 const { pool } = require('../../config/sqlite');
+const { calculateDueDateForPlan } = require('../../utils/dateUtils');
 
 // Card payment processing is disabled (Stripe removed)
 exports.processPayment = async (_req, res) => {
@@ -9,10 +10,12 @@ exports.processPayment = async (_req, res) => {
 
 // Create an invoice for a member (manual or pre-payment)
 exports.createInvoice = async (req, res) => {
-    const { member_id, plan_id, amount, due_date } = req.body;
+    const { member_id, plan_id, amount, due_date, join_date } = req.body;
     try {
         // If no plan_id provided, try to get member's current plan
         let finalPlanId = plan_id;
+        let finalDueDate = due_date;
+        
         if (!finalPlanId && member_id) {
             const memberPlan = await pool.query('SELECT membership_plan_id FROM members WHERE id = $1', [member_id]);
             if (memberPlan.rows.length > 0) {
@@ -20,7 +23,15 @@ exports.createInvoice = async (req, res) => {
             }
         }
         
-        await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id, finalPlanId || null, amount, due_date, 'unpaid']);
+        // If no due_date provided but we have a plan and join_date, calculate it
+        if (!finalDueDate && finalPlanId && join_date) {
+            const plan = await pool.query('SELECT * FROM membership_plans WHERE id = $1', [finalPlanId]);
+            if (plan.rows.length > 0) {
+                finalDueDate = calculateDueDateForPlan(join_date, plan.rows[0]);
+            }
+        }
+        
+        await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id, finalPlanId || null, amount, finalDueDate, 'unpaid']);
         const newInvoice = await pool.query('SELECT * FROM invoices ORDER BY id DESC LIMIT 1');
         res.status(201).json(newInvoice.rows[0]);
     } catch (err) {
