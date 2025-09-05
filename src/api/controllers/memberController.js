@@ -116,7 +116,7 @@ exports.getMemberById = async (req, res) => {
 
 // Create a new member (email removed)
 exports.createMember = async (req, res) => {
-    const { name, phone, membership_plan_id, address, birthday, photo_url, is_admin, join_date } = req.body;
+    const { name, phone, membership_plan_id, address, birthday, photo_url, is_admin, join_date, due_date } = req.body;
     try {
         if (!phone) {
             return res.status(400).json({ message: 'Phone is required' });
