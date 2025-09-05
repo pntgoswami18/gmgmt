@@ -151,10 +151,14 @@ exports.getAttendanceByMember = async (req, res) => {
     }
 };
 
-// Get attendance records for all members (optionally filtered by date range)
+// Get attendance records for all members with pagination
 exports.getAllAttendance = async (req, res) => {
     try {
-        const { start, end, member_type } = req.query;
+        const { start, end, member_type, page = 1, limit = 50, search = '' } = req.query;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const offset = (pageNum - 1) * limitNum;
+
         let query = `
             SELECT a.id, a.member_id, a.check_in_time, m.name AS member_name, m.is_admin
             FROM attendance a
@@ -177,11 +181,36 @@ exports.getAllAttendance = async (req, res) => {
         } else if (member_type === 'members') {
             query += ` AND (m.is_admin IS NULL OR m.is_admin = 0)`;
         }
-        query += ' ORDER BY a.check_in_time DESC';
+
+        // Add search condition
+        if (search.trim()) {
+            query += ` AND m.name ILIKE $${params.length + 1}`;
+            params.push(`%${search.trim()}%`);
+        }
+
+        // Get total count
+        const countQuery = query.replace('SELECT a.id, a.member_id, a.check_in_time, m.name AS member_name, m.is_admin', 'SELECT COUNT(*) as total');
+        const countResult = await pool.query(countQuery, params);
+        const total = parseInt(countResult.rows[0]?.total || 0, 10);
+
+        // Add ordering and pagination
+        query += ` ORDER BY a.check_in_time DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        params.push(limitNum, offset);
 
         const result = await pool.query(query, params);
-        res.json(result.rows);
+        const records = result.rows || [];
+
+        res.json({
+            attendance: records,
+            pagination: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                totalPages: Math.ceil(total / limitNum)
+            }
+        });
     } catch (err) {
+        console.error('Error fetching all attendance:', err);
         res.status(500).json({ message: err.message });
     }
 };

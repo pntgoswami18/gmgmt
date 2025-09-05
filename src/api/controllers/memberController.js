@@ -24,11 +24,65 @@ const isValidPhone = (value) => {
     return digits.length >= 10 && digits.length <= 15;
 };
 
-// Get all members
+// Get all members with pagination support
 exports.getAllMembers = async (req, res) => {
     try {
-        const allMembers = await pool.query('SELECT * FROM members ORDER BY id ASC');
-        res.json(allMembers.rows);
+        const { page = 1, limit = 10, search = '', filter = 'all' } = req.query;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const offset = (pageNum - 1) * limitNum;
+
+        // Build search condition
+        let searchCondition = '';
+        let searchParams = [];
+        if (search.trim()) {
+            searchCondition = `AND (name ILIKE $${searchParams.length + 1} OR phone ILIKE $${searchParams.length + 2} OR email ILIKE $${searchParams.length + 3})`;
+            const searchTerm = `%${search.trim()}%`;
+            searchParams.push(searchTerm, searchTerm, searchTerm);
+        }
+
+        // Build filter condition
+        let filterCondition = '';
+        let filterParams = [];
+        if (filter === 'admins') {
+            filterCondition = `AND is_admin = 1`;
+        } else if (filter === 'members') {
+            filterCondition = `AND is_admin != 1`;
+        } else if (filter === 'new-this-month') {
+            filterCondition = `AND date(join_date) >= date('now','start of month')`;
+        } else if (filter === 'unpaid-this-month') {
+            // This will be handled separately as it requires a complex query
+            filterCondition = `AND is_admin != 1 AND NOT EXISTS (
+                SELECT 1 FROM payments p 
+                JOIN invoices i ON p.invoice_id = i.id 
+                WHERE i.member_id = members.id 
+                AND date(p.payment_date) >= date('now','start of month')
+            )`;
+        }
+
+        // Get total count
+        const countQuery = `SELECT COUNT(*) as total FROM members WHERE 1=1 ${searchCondition} ${filterCondition}`;
+        const countResult = await pool.query(countQuery, [...searchParams, ...filterParams]);
+        const total = parseInt(countResult.rows[0].total, 10);
+
+        // Get paginated results
+        const query = `
+            SELECT * FROM members 
+            WHERE 1=1 ${searchCondition} ${filterCondition}
+            ORDER BY id ASC 
+            LIMIT $${searchParams.length + filterParams.length + 1} OFFSET $${searchParams.length + filterParams.length + 2}
+        `;
+        const members = await pool.query(query, [...searchParams, ...filterParams, limitNum, offset]);
+
+        res.json({
+            members: members.rows,
+            pagination: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                totalPages: Math.ceil(total / limitNum)
+            }
+        });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }

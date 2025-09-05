@@ -284,50 +284,67 @@ const getEnrollmentStatus = async (req, res) => {
   }
 };
 
-// Get biometric events/logs
+// Get biometric events/logs with pagination
 const getBiometricEvents = async (req, res) => {
   try {
-    const { memberId } = req.query;
-    const limit = parseInt(req.query.limit) || 50;
-    const offset = parseInt(req.query.offset) || 0;
+    const { memberId, page = 1, limit = 50, search = '' } = req.query;
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const offset = (pageNum - 1) * limitNum;
 
     let query = `
       SELECT be.*, m.name as member_name 
       FROM biometric_events be
       LEFT JOIN members m ON be.member_id = m.id
+      WHERE 1=1
     `;
     let params = [];
 
     if (memberId) {
-      query += ' WHERE be.member_id = ?';
+      query += ' AND be.member_id = ?';
       params.push(memberId);
     }
 
+    // Add search condition
+    if (search.trim()) {
+      query += ' AND (m.name ILIKE ? OR be.event_type ILIKE ? OR be.message ILIKE ?)';
+      const searchTerm = `%${search.trim()}%`;
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM biometric_events be LEFT JOIN members m ON be.member_id = m.id WHERE 1=1';
+    let countParams = [];
+
+    if (memberId) {
+      countQuery += ' AND be.member_id = ?';
+      countParams.push(memberId);
+    }
+
+    if (search.trim()) {
+      countQuery += ' AND (m.name ILIKE ? OR be.event_type ILIKE ? OR be.message ILIKE ?)';
+      const searchTerm = `%${search.trim()}%`;
+      countParams.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0]?.total || 0, 10);
+
+    // Add ordering and pagination
     query += ' ORDER BY be.timestamp DESC LIMIT ? OFFSET ?';
-    params.push(limit, offset);
+    params.push(limitNum, offset);
 
     const eventsResult = await pool.query(query, params);
     const events = eventsResult.rows || [];
 
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM biometric_events';
-    let countParams = [];
-
-    if (memberId) {
-      countQuery += ' WHERE member_id = ?';
-      countParams.push(memberId);
-    }
-
-    const countResult = await pool.query(countQuery, countParams);
-    const totalCount = countResult.rows[0]?.total || 0;
-
     res.json({ 
       success: true, 
-      data: {
-        events,
-        total: totalCount,
-        limit,
-        offset
+      data: events,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
       }
     });
   } catch (error) {
@@ -335,7 +352,7 @@ const getBiometricEvents = async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Failed to get biometric events',
-      error: error.message 
+      error: error.message
     });
   }
 };
@@ -432,24 +449,54 @@ const getSystemStatus = async (req, res) => {
   }
 };
 
-// Get members without biometric data
+// Get members without biometric data with pagination
 const getMembersWithoutBiometric = async (req, res) => {
   try {
+    const { page = 1, limit = 10, search = '' } = req.query;
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const offset = (pageNum - 1) * limitNum;
+
+    // Build search condition
+    let searchCondition = '';
+    let searchParams = [];
+    if (search.trim()) {
+      searchCondition = `AND (name ILIKE $${searchParams.length + 1} OR email ILIKE $${searchParams.length + 2} OR phone ILIKE $${searchParams.length + 3})`;
+      const searchTerm = `%${search.trim()}%`;
+      searchParams.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM members 
+      WHERE (biometric_id IS NULL OR biometric_id = '') AND is_active = 1 ${searchCondition}
+    `;
+    const countResult = await pool.query(countQuery, searchParams);
+    const total = parseInt(countResult.rows[0].total, 10);
+
+    // Get paginated results
     const query = `
       SELECT id, name, email, phone, join_date, is_admin 
       FROM members 
-      WHERE (biometric_id IS NULL OR biometric_id = '') AND is_active = 1
-      ORDER BY name ASC
+      WHERE (biometric_id IS NULL OR biometric_id = '') AND is_active = 1 ${searchCondition}
+      ORDER BY name ASC 
+      LIMIT $${searchParams.length + 1} OFFSET $${searchParams.length + 2}
     `;
-
-    const result = await pool.query(query);
+    const result = await pool.query(query, [...searchParams, limitNum, offset]);
     const members = result.rows || [];
 
-    console.log(`Found ${members.length} members without biometric data`);
+    console.log(`Found ${members.length} members without biometric data (page ${pageNum})`);
 
     res.json({ 
       success: true, 
-      data: members 
+      data: members,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
+      }
     });
   } catch (error) {
     console.error('Error getting members without biometric:', error);
@@ -461,24 +508,54 @@ const getMembersWithoutBiometric = async (req, res) => {
   }
 };
 
-// Get members with biometric data
+// Get members with biometric data with pagination
 const getMembersWithBiometric = async (req, res) => {
   try {
+    const { page = 1, limit = 10, search = '' } = req.query;
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const offset = (pageNum - 1) * limitNum;
+
+    // Build search condition
+    let searchCondition = '';
+    let searchParams = [];
+    if (search.trim()) {
+      searchCondition = `AND (name ILIKE $${searchParams.length + 1} OR email ILIKE $${searchParams.length + 2} OR phone ILIKE $${searchParams.length + 3})`;
+      const searchTerm = `%${search.trim()}%`;
+      searchParams.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    // Get total count
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM members 
+      WHERE biometric_id IS NOT NULL AND biometric_id != '' AND is_active = 1 ${searchCondition}
+    `;
+    const countResult = await pool.query(countQuery, searchParams);
+    const total = parseInt(countResult.rows[0].total, 10);
+
+    // Get paginated results
     const query = `
       SELECT id, name, email, phone, join_date, biometric_id, is_admin
       FROM members 
-      WHERE biometric_id IS NOT NULL AND biometric_id != '' AND is_active = 1
-      ORDER BY name ASC
+      WHERE biometric_id IS NOT NULL AND biometric_id != '' AND is_active = 1 ${searchCondition}
+      ORDER BY name ASC 
+      LIMIT $${searchParams.length + 1} OFFSET $${searchParams.length + 2}
     `;
-    
-    const result = await pool.query(query);
+    const result = await pool.query(query, [...searchParams, limitNum, offset]);
     const members = result.rows || [];
     
-    console.log(`Found ${members.length} members with biometric data`);
+    console.log(`Found ${members.length} members with biometric data (page ${pageNum})`);
     
     res.json({
       success: true,
-      data: members
+      data: members,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum)
+      }
     });
   } catch (error) {
     console.error('Error getting members with biometric:', error);
