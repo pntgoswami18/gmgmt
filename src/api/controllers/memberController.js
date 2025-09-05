@@ -65,11 +65,23 @@ exports.getAllMembers = async (req, res) => {
         const countResult = await pool.query(countQuery, [...searchParams, ...filterParams]);
         const total = parseInt(countResult.rows[0].total, 10);
 
-        // Get paginated results
+        // Get paginated results with payment status
         const query = `
-            SELECT * FROM members 
+            SELECT 
+                m.*,
+                CASE 
+                    WHEN m.is_admin = 1 THEN 0
+                    WHEN EXISTS (
+                        SELECT 1 FROM invoices i 
+                        WHERE i.member_id = m.id 
+                        AND i.status = 'unpaid' 
+                        AND julianday('now') > julianday(i.due_date)
+                    ) THEN 1
+                    ELSE 0
+                END as has_overdue_payments
+            FROM members m
             WHERE 1=1 ${searchCondition} ${filterCondition}
-            ORDER BY id ASC 
+            ORDER BY m.id ASC 
             LIMIT $${searchParams.length + filterParams.length + 1} OFFSET $${searchParams.length + filterParams.length + 2}
         `;
         const members = await pool.query(query, [...searchParams, ...filterParams, limitNum, offset]);
