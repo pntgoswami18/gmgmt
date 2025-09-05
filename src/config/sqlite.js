@@ -15,7 +15,12 @@ db.pragma('journal_mode = WAL');
 
 function replacePgParamsWithQMarks(sql) {
   // Replace $1, $2 ... with ? for sqlite
-  return sql.replace(/\$(\d+)/g, '?');
+  let text = sql.replace(/\$(\d+)/g, '?');
+  
+  // Replace ILIKE with LIKE for SQLite compatibility
+  text = text.replace(/ILIKE/gi, 'LIKE');
+  
+  return text;
 }
 
 function execute(sql, params = []) {
