@@ -120,6 +120,16 @@ function initializeDatabase() {
        template TEXT,
        created_at TEXT DEFAULT (datetime('now'))
      );`,
+    `CREATE TABLE IF NOT EXISTS referrals (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       referrer_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+       referred_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+       discount_amount REAL NOT NULL,
+       status TEXT DEFAULT 'pending',
+       created_at TEXT DEFAULT (datetime('now')),
+       applied_at TEXT,
+       UNIQUE(referred_id)
+     );`,
   ];
 
   const insertDefaultSettings = [
@@ -142,6 +152,8 @@ function initializeDatabase() {
     ['show_card_new_members_this_month', 'true'],
     ['show_card_unpaid_members_this_month', 'true'],
     ['show_card_active_schedules', 'true'],
+    ['referral_system_enabled', 'false'],
+    ['referral_discount_amount', '100'],
   ];
 
   const trx = db.transaction(() => {

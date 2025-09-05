@@ -99,6 +99,49 @@ exports.recordManualPayment = async (req, res) => {
 
         await pool.query('UPDATE invoices SET status = $1 WHERE id = $2', ['paid', ensuredInvoiceId]);
 
+        // Apply referral discounts if any pending referrals exist for this member
+        try {
+            const referralResult = await pool.query(`
+                SELECT r.id, r.discount_amount, r.referrer_id
+                FROM referrals r
+                WHERE r.referrer_id = (
+                    SELECT member_id FROM invoices WHERE id = ?
+                ) AND r.status = 'pending'
+                ORDER BY r.created_at ASC
+                LIMIT 1
+            `, [ensuredInvoiceId]);
+
+            if (referralResult.rows.length > 0) {
+                const referral = referralResult.rows[0];
+                
+                // Get referrer's next unpaid invoice
+                const nextInvoiceResult = await pool.query(`
+                    SELECT i.id, i.amount
+                    FROM invoices i
+                    WHERE i.member_id = ? AND i.status = 'unpaid' AND i.id != ?
+                    ORDER BY i.due_date ASC
+                    LIMIT 1
+                `, [referral.referrer_id, ensuredInvoiceId]);
+
+                if (nextInvoiceResult.rows.length > 0) {
+                    const nextInvoice = nextInvoiceResult.rows[0];
+                    const newAmount = Math.max(0, nextInvoice.amount - referral.discount_amount);
+
+                    // Update invoice amount
+                    await pool.query('UPDATE invoices SET amount = ? WHERE id = ?', [newAmount, nextInvoice.id]);
+
+                    // Update referral status
+                    await pool.query(
+                        'UPDATE referrals SET status = ?, applied_at = ? WHERE id = ?',
+                        ['applied', new Date().toISOString(), referral.id]
+                    );
+                }
+            }
+        } catch (referralError) {
+            console.error('Error applying referral discount:', referralError);
+            // Don't fail the payment if referral discount fails
+        }
+
         res.status(201).json({ message: 'Manual payment recorded', payment: payment.rows[0], invoice_id: ensuredInvoiceId });
     } catch (err) {
         res.status(400).json({ message: err.message });

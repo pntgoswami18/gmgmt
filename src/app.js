@@ -17,6 +17,7 @@ const reportRoutes = require('./api/routes/reports');
 const scheduleRoutes = require('./api/routes/schedules');
 const settingsRoutes = require('./api/routes/settings');
 const biometricRoutes = require('./api/routes/biometric');
+const referralRoutes = require('./api/routes/referrals');
 
 app.use(cors());
 app.use(express.json());
@@ -41,6 +42,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/biometric', biometricRoutes);
+app.use('/api/referrals', referralRoutes);
 
 // Serve frontend build after API routes so /api/* is not intercepted
 const path = require('path');
