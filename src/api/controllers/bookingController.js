@@ -73,8 +73,13 @@ exports.cancelBooking = async (req, res) => {
     const { bookingId } = req.params;
     try {
         // Instead of deleting, we can update the status to 'cancelled'
+        await pool.query(
+            `UPDATE bookings SET status = 'cancelled' WHERE id = $1`,
+            [bookingId]
+        );
+
         const cancelledBooking = await pool.query(
-            `UPDATE bookings SET status = 'cancelled' WHERE id = $1 RETURNING *`,
+            `SELECT * FROM bookings WHERE id = $1`,
             [bookingId]
         );
 

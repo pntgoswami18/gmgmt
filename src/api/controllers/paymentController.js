@@ -238,13 +238,17 @@ exports.getInvoiceByInvoiceId = async (req, res) => {
             FROM invoices i
             LEFT JOIN members m ON i.member_id = m.id
             LEFT JOIN membership_plans mp ON i.plan_id = mp.id
-            LEFT JOIN LATERAL (
-                SELECT id, amount, payment_date, payment_method, transaction_id
+            LEFT JOIN (
+                SELECT 
+                    invoice_id,
+                    id,
+                    amount,
+                    payment_date,
+                    payment_method,
+                    transaction_id,
+                    ROW_NUMBER() OVER (PARTITION BY invoice_id ORDER BY payment_date DESC) as rn
                 FROM payments
-                WHERE invoice_id = i.id
-                ORDER BY payment_date DESC
-                LIMIT 1
-            ) p ON true
+            ) p ON p.invoice_id = i.id AND p.rn = 1
             WHERE i.id = $1`,
             [invoiceId]
         );

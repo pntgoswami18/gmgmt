@@ -73,10 +73,8 @@ exports.updateAllSettings = async (req, res) => {
                 }
 
                 const query = `
-                    INSERT INTO settings (key, value)
-                    VALUES ($1, $2)
-                    ON CONFLICT (key) DO UPDATE
-                    SET value = EXCLUDED.value;
+                    INSERT OR REPLACE INTO settings (key, value)
+                    VALUES ($1, $2);
                 `;
                 
                 await pool.query(query, [key, value]);
@@ -99,7 +97,7 @@ exports.uploadLogo = async (req, res) => {
     }
     const logoUrl = `/uploads/${req.file.filename}`;
     try {
-        await pool.query('INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value', [ 'gym_logo', logoUrl ]);
+        await pool.query('INSERT OR REPLACE INTO settings(key,value) VALUES($1,$2)', [ 'gym_logo', logoUrl ]);
         res.json({ message: 'Logo uploaded successfully', logoUrl });
     } catch (err) {
         res.status(500).json({ message: err.message });
