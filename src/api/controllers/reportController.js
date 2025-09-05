@@ -137,85 +137,134 @@ exports.getSummaryStats = async (req, res) => {
 // Get financial summary
 exports.getFinancialSummary = async (req, res) => {
     try {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, page = 1, limit = 10, table = 'all' } = req.query;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const offset = (pageNum - 1) * limitNum;
 
         // Build date filter condition for payment history
         const dateFilter = startDate && endDate ? `AND p.payment_date >= '${startDate}' AND p.payment_date <= '${endDate}'` : '';
 
-        const outstandingInvoices = await pool.query(`
-            SELECT i.id, m.name as member_name, i.amount, i.due_date
-            FROM invoices i
-            JOIN members m ON i.member_id = m.id
-            WHERE i.status = 'unpaid'
-              AND m.is_admin = 0
-            ORDER BY i.due_date ASC
-        `);
+        const result = {};
 
-        const paymentHistory = await pool.query(`
-            SELECT p.id, m.name as member_name, p.amount, p.payment_date
-            FROM payments p
-            JOIN invoices i ON p.invoice_id = i.id
-            JOIN members m ON i.member_id = m.id
-            WHERE 1=1 ${dateFilter}
-            ORDER BY p.payment_date DESC
-            LIMIT 20
-        `);
+        // Get outstanding invoices with pagination
+        if (table === 'all' || table === 'outstanding') {
+            const outstandingInvoices = await pool.query(`
+                SELECT i.id, m.name as member_name, i.amount, i.due_date
+                FROM invoices i
+                JOIN members m ON i.member_id = m.id
+                WHERE i.status = 'unpaid'
+                  AND m.is_admin = 0
+                ORDER BY i.due_date ASC
+                LIMIT ${limitNum} OFFSET ${offset}
+            `);
 
-        const memberPaymentStatus = await pool.query(`
-            SELECT
-                m.id,
-                m.name,
-                m.email,
-                m.join_date,
-                mp.name as plan_name,
-                mp.duration_days,
-                (
-                    SELECT MAX(p.payment_date)
-                    FROM payments p
-                    JOIN invoices i ON p.invoice_id = i.id
-                    WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
-                ) as last_payment_date,
-                (
-                    SELECT i.status
-                    FROM invoices i
-                    WHERE i.member_id = m.id
-                    ORDER BY i.due_date DESC
-                    LIMIT 1
-                ) as last_invoice_status,
-                CASE
-                    WHEN mp.duration_days IS NULL THEN 0
-                    WHEN (
+            const outstandingCount = await pool.query(`
+                SELECT COUNT(*) as total
+                FROM invoices i
+                JOIN members m ON i.member_id = m.id
+                WHERE i.status = 'unpaid'
+                  AND m.is_admin = 0
+            `);
+
+            result.outstandingInvoices = outstandingInvoices.rows;
+            result.outstandingInvoicesTotal = outstandingCount.rows[0].total;
+            result.outstandingInvoicesPage = pageNum;
+            result.outstandingInvoicesLimit = limitNum;
+        }
+
+        // Get payment history with pagination
+        if (table === 'all' || table === 'payments') {
+            const paymentHistory = await pool.query(`
+                SELECT p.id, m.name as member_name, p.amount, p.payment_date
+                FROM payments p
+                JOIN invoices i ON p.invoice_id = i.id
+                JOIN members m ON i.member_id = m.id
+                WHERE 1=1 ${dateFilter}
+                ORDER BY p.payment_date DESC
+                LIMIT ${limitNum} OFFSET ${offset}
+            `);
+
+            const paymentCount = await pool.query(`
+                SELECT COUNT(*) as total
+                FROM payments p
+                JOIN invoices i ON p.invoice_id = i.id
+                JOIN members m ON i.member_id = m.id
+                WHERE 1=1 ${dateFilter}
+            `);
+
+            result.paymentHistory = paymentHistory.rows;
+            result.paymentHistoryTotal = paymentCount.rows[0].total;
+            result.paymentHistoryPage = pageNum;
+            result.paymentHistoryLimit = limitNum;
+        }
+
+        // Get member payment status with pagination
+        if (table === 'all' || table === 'members') {
+            const memberPaymentStatus = await pool.query(`
+                SELECT
+                    m.id,
+                    m.name,
+                    m.email,
+                    m.join_date,
+                    mp.name as plan_name,
+                    mp.duration_days,
+                    (
                         SELECT MAX(p.payment_date)
                         FROM payments p
                         JOIN invoices i ON p.invoice_id = i.id
                         WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
-                    ) IS NULL THEN
-                        CASE
-                            WHEN julianday('now') - julianday(m.join_date) > mp.duration_days THEN 1
-                            ELSE 0
-                        END
-                    ELSE
-                        CASE
-                            WHEN julianday('now') - julianday((
-                                SELECT MAX(p.payment_date)
-                                FROM payments p
-                                JOIN invoices i ON p.invoice_id = i.id
-                                WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
-                            )) > mp.duration_days THEN 1
-                            ELSE 0
-                        END
-                END as is_overdue_for_plan
-            FROM members m
-            LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
-            WHERE m.is_admin = 0
-            ORDER BY m.name ASC
-        `);
+                    ) as last_payment_date,
+                    (
+                        SELECT i.status
+                        FROM invoices i
+                        WHERE i.member_id = m.id
+                        ORDER BY i.due_date DESC
+                        LIMIT 1
+                    ) as last_invoice_status,
+                    CASE
+                        WHEN mp.duration_days IS NULL THEN 0
+                        WHEN (
+                            SELECT MAX(p.payment_date)
+                            FROM payments p
+                            JOIN invoices i ON p.invoice_id = i.id
+                            WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
+                        ) IS NULL THEN
+                            CASE
+                                WHEN julianday('now') - julianday(m.join_date) > mp.duration_days THEN 1
+                                ELSE 0
+                            END
+                        ELSE
+                            CASE
+                                WHEN julianday('now') - julianday((
+                                    SELECT MAX(p.payment_date)
+                                    FROM payments p
+                                    JOIN invoices i ON p.invoice_id = i.id
+                                    WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
+                                )) > mp.duration_days THEN 1
+                                ELSE 0
+                            END
+                    END as is_overdue_for_plan
+                FROM members m
+                LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
+                WHERE m.is_admin = 0
+                ORDER BY m.name ASC
+                LIMIT ${limitNum} OFFSET ${offset}
+            `);
 
-        res.json({
-            outstandingInvoices: outstandingInvoices.rows,
-            paymentHistory: paymentHistory.rows,
-            memberPaymentStatus: memberPaymentStatus.rows
-        });
+            const memberCount = await pool.query(`
+                SELECT COUNT(*) as total
+                FROM members m
+                WHERE m.is_admin = 0
+            `);
+
+            result.memberPaymentStatus = memberPaymentStatus.rows;
+            result.memberPaymentStatusTotal = memberCount.rows[0].total;
+            result.memberPaymentStatusPage = pageNum;
+            result.memberPaymentStatusLimit = limitNum;
+        }
+
+        res.json(result);
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
