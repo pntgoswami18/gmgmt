@@ -104,7 +104,7 @@ exports.recordManualPayment = async (req, res) => {
             const referralResult = await pool.query(`
                 SELECT r.id, r.discount_amount, r.referrer_id
                 FROM referrals r
-                WHERE r.referrer_id = (
+                WHERE r.referred_id = (
                     SELECT member_id FROM invoices WHERE id = ?
                 ) AND r.status = 'pending'
                 ORDER BY r.created_at ASC

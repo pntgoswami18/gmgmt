@@ -1,4 +1,4 @@
-const pool = require('../../config/sqlite');
+const { pool } = require('../../config/sqlite');
 
 // Create a new referral
 const createReferral = async (req, res) => {
