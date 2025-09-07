@@ -1,4 +1,5 @@
 const { pool } = require('../../config/sqlite');
+const { calculateDueDateForPlan } = require('../../utils/dateUtils');
 
 // Card payment processing is disabled (Stripe removed)
 exports.processPayment = async (_req, res) => {
@@ -9,10 +10,12 @@ exports.processPayment = async (_req, res) => {
 
 // Create an invoice for a member (manual or pre-payment)
 exports.createInvoice = async (req, res) => {
-    const { member_id, plan_id, amount, due_date } = req.body;
+    const { member_id, plan_id, amount, due_date, join_date } = req.body;
     try {
         // If no plan_id provided, try to get member's current plan
         let finalPlanId = plan_id;
+        let finalDueDate = due_date;
+        
         if (!finalPlanId && member_id) {
             const memberPlan = await pool.query('SELECT membership_plan_id FROM members WHERE id = $1', [member_id]);
             if (memberPlan.rows.length > 0) {
@@ -20,7 +23,15 @@ exports.createInvoice = async (req, res) => {
             }
         }
         
-        await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id, finalPlanId || null, amount, due_date, 'unpaid']);
+        // If no due_date provided but we have a plan and join_date, calculate it
+        if (!finalDueDate && finalPlanId && join_date) {
+            const plan = await pool.query('SELECT * FROM membership_plans WHERE id = $1', [finalPlanId]);
+            if (plan.rows.length > 0) {
+                finalDueDate = calculateDueDateForPlan(join_date, plan.rows[0]);
+            }
+        }
+        
+        await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id, finalPlanId || null, amount, finalDueDate, 'unpaid']);
         const newInvoice = await pool.query('SELECT * FROM invoices ORDER BY id DESC LIMIT 1');
         res.status(201).json(newInvoice.rows[0]);
     } catch (err) {
@@ -36,6 +47,18 @@ exports.recordManualPayment = async (req, res) => {
         const normalizedAmount = parseFloat(amount);
         if (Number.isNaN(normalizedAmount) || normalizedAmount <= 0) {
             return res.status(400).json({ message: 'Invalid amount' });
+        }
+
+        // If member_id is provided, check if member is an admin user - admins are exempt from payments
+        if (member_id) {
+            const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = $1', [member_id]);
+            if (memberCheck.rows.length === 0) {
+                return res.status(404).json({ message: 'Member not found' });
+            }
+            
+            if (memberCheck.rows[0].is_admin === 1) {
+                return res.status(400).json({ message: 'Admin users are exempt from payments and cannot have payments recorded against them' });
+            }
         }
 
         let ensuredInvoiceId = invoice_id ? parseInt(invoice_id, 10) : null;
@@ -75,6 +98,49 @@ exports.recordManualPayment = async (req, res) => {
         const payment = await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 1');
 
         await pool.query('UPDATE invoices SET status = $1 WHERE id = $2', ['paid', ensuredInvoiceId]);
+
+        // Apply referral discounts if any pending referrals exist for this member
+        try {
+            const referralResult = await pool.query(`
+                SELECT r.id, r.discount_amount, r.referrer_id
+                FROM referrals r
+                WHERE r.referred_id = (
+                    SELECT member_id FROM invoices WHERE id = ?
+                ) AND r.status = 'pending'
+                ORDER BY r.created_at ASC
+                LIMIT 1
+            `, [ensuredInvoiceId]);
+
+            if (referralResult.rows.length > 0) {
+                const referral = referralResult.rows[0];
+                
+                // Get referrer's next unpaid invoice
+                const nextInvoiceResult = await pool.query(`
+                    SELECT i.id, i.amount
+                    FROM invoices i
+                    WHERE i.member_id = ? AND i.status = 'unpaid' AND i.id != ?
+                    ORDER BY i.due_date ASC
+                    LIMIT 1
+                `, [referral.referrer_id, ensuredInvoiceId]);
+
+                if (nextInvoiceResult.rows.length > 0) {
+                    const nextInvoice = nextInvoiceResult.rows[0];
+                    const newAmount = Math.max(0, nextInvoice.amount - referral.discount_amount);
+
+                    // Update invoice amount
+                    await pool.query('UPDATE invoices SET amount = ? WHERE id = ?', [newAmount, nextInvoice.id]);
+
+                    // Update referral status
+                    await pool.query(
+                        'UPDATE referrals SET status = ?, applied_at = ? WHERE id = ?',
+                        ['applied', new Date().toISOString(), referral.id]
+                    );
+                }
+            }
+        } catch (referralError) {
+            console.error('Error applying referral discount:', referralError);
+            // Don't fail the payment if referral discount fails
+        }
 
         res.status(201).json({ message: 'Manual payment recorded', payment: payment.rows[0], invoice_id: ensuredInvoiceId });
     } catch (err) {
@@ -215,13 +281,17 @@ exports.getInvoiceByInvoiceId = async (req, res) => {
             FROM invoices i
             LEFT JOIN members m ON i.member_id = m.id
             LEFT JOIN membership_plans mp ON i.plan_id = mp.id
-            LEFT JOIN LATERAL (
-                SELECT id, amount, payment_date, payment_method, transaction_id
+            LEFT JOIN (
+                SELECT 
+                    invoice_id,
+                    id,
+                    amount,
+                    payment_date,
+                    payment_method,
+                    transaction_id,
+                    ROW_NUMBER() OVER (PARTITION BY invoice_id ORDER BY payment_date DESC) as rn
                 FROM payments
-                WHERE invoice_id = i.id
-                ORDER BY payment_date DESC
-                LIMIT 1
-            ) p ON true
+            ) p ON p.invoice_id = i.id AND p.rn = 1
             WHERE i.id = $1`,
             [invoiceId]
         );

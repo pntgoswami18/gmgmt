@@ -9,10 +9,25 @@ exports.getAllSettings = async (req, res) => {
         console.log('Settings query result:', settingsResult.rows);
         
         const settings = {};
-        for (const row of settingsResult.rows) {
-            let value = row.value;
-            settings[row.key] = value;
+        for (const { key, value: rawValue } of settingsResult.rows) {
+            let value = rawValue;
+            
+            // Try to parse JSON arrays
+            if (value && (value.startsWith('[') && value.endsWith(']'))) {
+                try {
+                    value = JSON.parse(value);
+                } catch (e) {
+                    // If parsing fails, keep the original string value
+                }
+            }
+            
+            settings[key] = value;
         }
+        
+        // Add environment-based settings that are not stored in database
+        settings.main_server_port = process.env.PORT || '3001';
+        settings.biometric_port_env = process.env.BIOMETRIC_PORT || '8080';
+        settings.biometric_host_env = process.env.BIOMETRIC_HOST || '0.0.0.0';
         
         console.log('Final settings object:', settings);
         res.json(settings);
@@ -49,16 +64,17 @@ exports.updateAllSettings = async (req, res) => {
 
                 if (value === undefined || value === null) {
                     value = null;
+                } else if (Array.isArray(value)) {
+                    // Store arrays as JSON strings
+                    value = JSON.stringify(value);
                 } else if (typeof value !== 'string' && typeof value !== 'number') {
                     // Store booleans and other primitives as strings in TEXT column
                     value = String(value);
                 }
 
                 const query = `
-                    INSERT INTO settings (key, value)
-                    VALUES ($1, $2)
-                    ON CONFLICT (key) DO UPDATE
-                    SET value = EXCLUDED.value;
+                    INSERT OR REPLACE INTO settings (key, value)
+                    VALUES ($1, $2);
                 `;
                 
                 await pool.query(query, [key, value]);
@@ -81,7 +97,7 @@ exports.uploadLogo = async (req, res) => {
     }
     const logoUrl = `/uploads/${req.file.filename}`;
     try {
-        await pool.query('INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value', [ 'gym_logo', logoUrl ]);
+        await pool.query('INSERT OR REPLACE INTO settings(key,value) VALUES($1,$2)', [ 'gym_logo', logoUrl ]);
         res.json({ message: 'Logo uploaded successfully', logoUrl });
     } catch (err) {
         res.status(500).json({ message: err.message });

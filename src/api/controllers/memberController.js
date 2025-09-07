@@ -24,11 +24,77 @@ const isValidPhone = (value) => {
     return digits.length >= 10 && digits.length <= 15;
 };
 
-// Get all members
+// Get all members with pagination support
 exports.getAllMembers = async (req, res) => {
     try {
-        const allMembers = await pool.query('SELECT * FROM members ORDER BY id ASC');
-        res.json(allMembers.rows);
+        const { page = 1, limit = 10, search = '', filter = 'all' } = req.query;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const offset = (pageNum - 1) * limitNum;
+
+        // Build search condition
+        let searchCondition = '';
+        let searchParams = [];
+        if (search.trim()) {
+            searchCondition = `AND (name ILIKE $${searchParams.length + 1} OR phone ILIKE $${searchParams.length + 2} OR email ILIKE $${searchParams.length + 3})`;
+            const searchTerm = `%${search.trim()}%`;
+            searchParams.push(searchTerm, searchTerm, searchTerm);
+        }
+
+        // Build filter condition
+        let filterCondition = '';
+        let filterParams = [];
+        if (filter === 'admins') {
+            filterCondition = `AND is_admin = 1`;
+        } else if (filter === 'members') {
+            filterCondition = `AND is_admin != 1`;
+        } else if (filter === 'new-this-month') {
+            filterCondition = `AND date(join_date) >= date('now','start of month')`;
+        } else if (filter === 'unpaid-this-month') {
+            // This will be handled separately as it requires a complex query
+            filterCondition = `AND is_admin != 1 AND NOT EXISTS (
+                SELECT 1 FROM payments p 
+                JOIN invoices i ON p.invoice_id = i.id 
+                WHERE i.member_id = members.id 
+                AND date(p.payment_date) >= date('now','start of month')
+            )`;
+        }
+
+        // Get total count
+        const countQuery = `SELECT COUNT(*) as total FROM members WHERE 1=1 ${searchCondition} ${filterCondition}`;
+        const countResult = await pool.query(countQuery, [...searchParams, ...filterParams]);
+        const total = parseInt(countResult.rows[0].total, 10);
+
+        // Get paginated results with payment status
+        const query = `
+            SELECT 
+                m.*,
+                CASE 
+                    WHEN m.is_admin = 1 THEN 0
+                    WHEN EXISTS (
+                        SELECT 1 FROM invoices i 
+                        WHERE i.member_id = m.id 
+                        AND i.status = 'unpaid' 
+                        AND julianday('now') > julianday(i.due_date)
+                    ) THEN 1
+                    ELSE 0
+                END as has_overdue_payments
+            FROM members m
+            WHERE 1=1 ${searchCondition} ${filterCondition}
+            ORDER BY m.id ASC 
+            LIMIT $${searchParams.length + filterParams.length + 1} OFFSET $${searchParams.length + filterParams.length + 2}
+        `;
+        const members = await pool.query(query, [...searchParams, ...filterParams, limitNum, offset]);
+
+        res.json({
+            members: members.rows,
+            pagination: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                totalPages: Math.ceil(total / limitNum)
+            }
+        });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
@@ -50,7 +116,7 @@ exports.getMemberById = async (req, res) => {
 
 // Create a new member (email removed)
 exports.createMember = async (req, res) => {
-    const { name, phone, membership_plan_id, address, birthday, photo_url } = req.body;
+    const { name, phone, membership_plan_id, address, birthday, photo_url, is_admin, join_date, due_date } = req.body;
     try {
         if (!phone) {
             return res.status(400).json({ message: 'Phone is required' });
@@ -62,9 +128,14 @@ exports.createMember = async (req, res) => {
             ? null
             : parseInt(membership_plan_id, 10);
 
+        const adminStatus = is_admin ? 1 : 0;
+
+        // Use provided join_date or default to current date
+        const finalJoinDate = join_date || new Date().toISOString().split('T')[0];
+
         await pool.query(
-            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active) VALUES ($1, $2, $3, $4, $5, $6, 1)',
-            [name, phone || null, planId, address || null, birthday || null, photo_url || null]
+            'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active, is_admin, join_date) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8)',
+            [name, phone || null, planId, address || null, birthday || null, photo_url || null, adminStatus, finalJoinDate]
         );
         const newMember = await pool.query('SELECT * FROM members ORDER BY id DESC LIMIT 1');
 
@@ -87,10 +158,10 @@ exports.createMember = async (req, res) => {
 // Update a member (email removed)
 exports.updateMember = async (req, res) => {
     const { id } = req.params;
-    const { name, phone, address, birthday, photo_url } = req.body;
+    const { name, phone, address, birthday, photo_url, is_admin, membership_plan_id, join_date } = req.body;
     try {
         // Load existing to allow partial updates while ensuring mandatory fields present post-update
-        const existingRes = await pool.query('SELECT name, phone, address, birthday, photo_url FROM members WHERE id = $1', [id]);
+        const existingRes = await pool.query('SELECT name, phone, address, birthday, photo_url, is_admin, membership_plan_id FROM members WHERE id = $1', [id]);
         if (existingRes.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });
         }
@@ -111,10 +182,26 @@ exports.updateMember = async (req, res) => {
         const safeAddress = address === undefined ? existing.address || null : address || null;
         const safeBirthday = birthday === undefined ? existing.birthday || null : birthday || null;
         const safePhotoUrl = photo_url === undefined ? existing.photo_url || null : photo_url || null;
+        const safeAdminStatus = is_admin === undefined ? existing.is_admin : (is_admin ? 1 : 0);
+        const safeJoinDate = join_date === undefined ? existing.join_date || new Date().toISOString().split('T')[0] : join_date;
+        
+        // Handle membership plan ID - admin users should not have membership plans
+        let safeMembershipPlanId = null;
+        if (is_admin !== 1) {
+            if (membership_plan_id !== undefined) {
+                safeMembershipPlanId = membership_plan_id ? parseInt(membership_plan_id, 10) : null;
+            } else {
+                // If not explicitly set, keep existing value
+                safeMembershipPlanId = existing.membership_plan_id || null;
+            }
+        } else {
+            // If user is being set as admin, remove any existing membership plan
+            safeMembershipPlanId = null;
+        }
 
         await pool.query(
-            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5 WHERE id = $6',
-            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, id]
+            'UPDATE members SET name = $1, phone = $2, address = $3, birthday = $4, photo_url = $5, is_admin = $6, membership_plan_id = $7, join_date = $8 WHERE id = $9',
+            [finalName, finalPhone, safeAddress, safeBirthday, safePhotoUrl, safeAdminStatus, safeMembershipPlanId, safeJoinDate, id]
         );
         const updatedMember = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
         if (updatedMember.rows.length === 0) {
@@ -136,7 +223,7 @@ exports.updateMember = async (req, res) => {
 // Upsert biometric data for a member
 exports.upsertBiometric = async (req, res) => {
     const { id } = req.params; // member id
-    const { device_user_id, sensor_member_id, template } = req.body; // template may be base64 string
+    const { device_user_id, template } = req.body; // template may be base64 string
 
     if (!device_user_id && !template) {
         return res.status(400).json({ message: 'device_user_id or template is required' });
@@ -161,19 +248,18 @@ exports.upsertBiometric = async (req, res) => {
 
         // Update member with biometric data
         await pool.query(
-            'UPDATE members SET biometric_id = ?, biometric_sensor_member_id = ? WHERE id = ?',
-            [device_user_id || null, sensor_member_id || null, id]
+            'UPDATE members SET biometric_id = ? WHERE id = ?',
+            [device_user_id || null, id]
         );
 
         // Get updated member data
-        const updatedMember = await pool.query('SELECT id, name, biometric_id, biometric_sensor_member_id FROM members WHERE id = ?', [id]);
+        const updatedMember = await pool.query('SELECT id, name, biometric_id FROM members WHERE id = ?', [id]);
         
         res.json({ 
             message: 'Biometric data saved', 
             member: updatedMember.rows[0],
             biometric: {
                 device_user_id: device_user_id || null,
-                sensor_member_id: sensor_member_id || null,
                 template: template || null
             }
         });

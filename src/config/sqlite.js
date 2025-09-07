@@ -15,7 +15,12 @@ db.pragma('journal_mode = WAL');
 
 function replacePgParamsWithQMarks(sql) {
   // Replace $1, $2 ... with ? for sqlite
-  return sql.replace(/\$(\d+)/g, '?');
+  let text = sql.replace(/\$(\d+)/g, '?');
+  
+  // Replace ILIKE with LIKE for SQLite compatibility
+  text = text.replace(/ILIKE/gi, 'LIKE');
+  
+  return text;
 }
 
 function execute(sql, params = []) {
@@ -45,13 +50,16 @@ function initializeDatabase() {
        name TEXT NOT NULL,
        email TEXT UNIQUE,
        phone TEXT,
-       membership_type TEXT,
+       membership_type TEXT DEFAULT 'standard',
        membership_plan_id INTEGER,
        join_date TEXT DEFAULT (date('now')),
-       address TEXT,
-       birthday TEXT,
-       photo_url TEXT,
-       is_active INTEGER DEFAULT 1
+       address TEXT DEFAULT '',
+       birthday TEXT DEFAULT '',
+       photo_url TEXT DEFAULT '',
+       is_active INTEGER DEFAULT 1,
+       biometric_id TEXT DEFAULT '',
+       biometric_sensor_member_id TEXT DEFAULT '',
+       is_admin INTEGER DEFAULT 0
      );`,
     `CREATE TABLE IF NOT EXISTS settings (
        key TEXT PRIMARY KEY,
@@ -115,6 +123,39 @@ function initializeDatabase() {
        template TEXT,
        created_at TEXT DEFAULT (datetime('now'))
      );`,
+    `CREATE TABLE IF NOT EXISTS referrals (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       referrer_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+       referred_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+       discount_amount REAL NOT NULL,
+       status TEXT DEFAULT 'pending',
+       created_at TEXT DEFAULT (datetime('now')),
+       applied_at TEXT,
+       UNIQUE(referred_id)
+     );`,
+    `CREATE TABLE IF NOT EXISTS biometric_events (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+       biometric_id TEXT,
+       event_type TEXT NOT NULL,
+       device_id TEXT,
+       timestamp TEXT NOT NULL,
+       success BOOLEAN NOT NULL,
+       error_message TEXT,
+       raw_data TEXT,
+       sensor_member_id TEXT,
+       created_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS security_logs (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       event_type TEXT NOT NULL,
+       timestamp TEXT NOT NULL,
+       details TEXT,
+       member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+       device_id TEXT,
+       ip_address TEXT,
+       created_at TEXT DEFAULT (datetime('now'))
+     );`,
   ];
 
   const insertDefaultSettings = [
@@ -137,25 +178,74 @@ function initializeDatabase() {
     ['show_card_new_members_this_month', 'true'],
     ['show_card_unpaid_members_this_month', 'true'],
     ['show_card_active_schedules', 'true'],
+    ['referral_system_enabled', 'false'],
+    ['referral_discount_amount', '100'],
+    ['ask_unlock_reason', 'true'],
+    ['card_order', '["total_members","total_revenue","new_members_this_month","unpaid_members_this_month","active_schedules"]'],
+    ['esp32_host', 'localhost'],
+    ['esp32_port', '5005'],
+    ['local_listen_host', '0.0.0.0'],
+    ['local_listen_port', '5005'],
+    ['membership_types', '["standard","premium","vip"]'],
   ];
 
   const trx = db.transaction(() => {
     for (const s of statements) db.prepare(s).run();
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_members_phone ON members(phone) WHERE phone IS NOT NULL;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_timestamp ON biometric_events(timestamp);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_member_id ON biometric_events(member_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_biometric_id ON biometric_events(biometric_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_sensor_member_id ON biometric_events(sensor_member_id) WHERE sensor_member_id IS NOT NULL;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_security_logs_timestamp ON security_logs(timestamp);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_security_logs_event_type ON security_logs(event_type);");
     for (const [k, v] of insertDefaultSettings) {
       db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)').run(k, v);
     }
   });
   trx();
 
-  // Ensure legacy databases have is_active column
+  // Ensure legacy databases have required columns with defaults
   try {
     const cols = db.prepare("PRAGMA table_info(members)").all();
-    const hasActive = cols.some(c => String(c.name).toLowerCase() === 'is_active');
-    if (!hasActive) {
+    const colNames = cols.map(c => String(c.name).toLowerCase());
+    
+    // Add is_active column if missing
+    if (!colNames.includes('is_active')) {
       db.prepare("ALTER TABLE members ADD COLUMN is_active INTEGER DEFAULT 1").run();
       db.prepare("UPDATE members SET is_active = 1 WHERE is_active IS NULL").run();
     }
+    
+    // Add membership_type column if missing
+    if (!colNames.includes('membership_type')) {
+      db.prepare("ALTER TABLE members ADD COLUMN membership_type TEXT DEFAULT 'standard'").run();
+      db.prepare("UPDATE members SET membership_type = 'standard' WHERE membership_type IS NULL").run();
+    }
+    
+    // Add is_admin column if missing
+    if (!colNames.includes('is_admin')) {
+      db.prepare("ALTER TABLE members ADD COLUMN is_admin INTEGER DEFAULT 0").run();
+      db.prepare("UPDATE members SET is_admin = 0 WHERE is_admin IS NULL").run();
+    }
+    
+    // Add biometric_id column if missing
+    if (!colNames.includes('biometric_id')) {
+      db.prepare("ALTER TABLE members ADD COLUMN biometric_id TEXT DEFAULT ''").run();
+      db.prepare("UPDATE members SET biometric_id = '' WHERE biometric_id IS NULL").run();
+    }
+    
+    // Add biometric_sensor_member_id column if missing
+    if (!colNames.includes('biometric_sensor_member_id')) {
+      db.prepare("ALTER TABLE members ADD COLUMN biometric_sensor_member_id TEXT DEFAULT ''").run();
+      db.prepare("UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL").run();
+    }
+    
+    // Update existing NULL values to empty strings for text fields
+    db.prepare("UPDATE members SET address = '' WHERE address IS NULL").run();
+    db.prepare("UPDATE members SET birthday = '' WHERE birthday IS NULL").run();
+    db.prepare("UPDATE members SET photo_url = '' WHERE photo_url IS NULL").run();
+    db.prepare("UPDATE members SET biometric_id = '' WHERE biometric_id IS NULL").run();
+    db.prepare("UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL").run();
+    
   } catch (_) {}
 }
 

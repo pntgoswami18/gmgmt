@@ -39,16 +39,21 @@ const performCheckIn = async (resolvedMemberId, res) => {
         return res.status(400).json({ message: `Check-in allowed only during Morning (${settingsMap.morning_session_start || '05:00'}-${settingsMap.morning_session_end || '11:00'}) or Evening (${settingsMap.evening_session_start || '16:00'}-${settingsMap.evening_session_end || '22:00'}) sessions.` });
     }
 
-    // Only one check-in per day
-    const alreadyCheckedInToday = await pool.query(
-        `SELECT 1 FROM attendance 
-         WHERE member_id = $1 AND DATE(check_in_time) = DATE('now') 
-         LIMIT 1`,
-        [resolvedMemberId]
-    );
+    // Only one check-in per day (unless admin)
+    const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = $1', [resolvedMemberId]);
+    const isAdmin = memberCheck.rows[0]?.is_admin === 1;
+    
+    if (!isAdmin) {
+        const alreadyCheckedInToday = await pool.query(
+            `SELECT 1 FROM attendance 
+             WHERE member_id = $1 AND DATE(check_in_time) = DATE('now') 
+             LIMIT 1`,
+            [resolvedMemberId]
+        );
 
-    if (alreadyCheckedInToday.rowCount > 0) {
-        return res.status(409).json({ message: 'Member has already checked in today.' });
+        if (alreadyCheckedInToday.rowCount > 0) {
+            return res.status(409).json({ message: 'Member has already checked in today.' });
+        }
     }
 
     await pool.query(
@@ -96,7 +101,7 @@ exports.checkIn = async (req, res) => {
     }
 };
 
-// Device webhook compatible with Secureye push formats
+// Device webhook compatible with ESP32 device formats
 exports.deviceWebhook = async (req, res) => {
     try {
         const deviceUserId = req.body?.device_user_id || req.body?.userId || req.body?.UserID || req.body?.EmpCode || req.body?.emp_code;
@@ -126,13 +131,16 @@ exports.getAttendanceByMember = async (req, res) => {
         const { start, end } = req.query;
         let query = 'SELECT * FROM attendance WHERE member_id = $1';
         const params = [memberId];
+        
         if (start) {
+            // Start date: include from 00:00:00 (beginning of the day)
             params.push(start);
-            query += ` AND DATE(check_in_time) >= DATE($${params.length})`;
+            query += ` AND check_in_time >= datetime($${params.length}, '00:00:00')`;
         }
         if (end) {
+            // End date: include until 23:59:59 (end of the day)
             params.push(end);
-            query += ` AND DATE(check_in_time) <= DATE($${params.length})`;
+            query += ` AND check_in_time <= datetime($${params.length}, '23:59:59')`;
         }
         query += ' ORDER BY check_in_time DESC';
 
@@ -143,29 +151,66 @@ exports.getAttendanceByMember = async (req, res) => {
     }
 };
 
-// Get attendance records for all members (optionally filtered by date range)
+// Get attendance records for all members with pagination
 exports.getAllAttendance = async (req, res) => {
     try {
-        const { start, end } = req.query;
+        const { start, end, member_type, page = 1, limit = 50, search = '' } = req.query;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const offset = (pageNum - 1) * limitNum;
+
         let query = `
-            SELECT a.id, a.member_id, a.check_in_time, m.name AS member_name
+            SELECT a.id, a.member_id, a.check_in_time, m.name AS member_name, m.is_admin
             FROM attendance a
             JOIN members m ON m.id = a.member_id
             WHERE 1=1`;
         const params = [];
+        
         if (start) {
+            // Start date: include from 00:00:00 (beginning of the day)
             params.push(start);
-            query += ` AND DATE(a.check_in_time) >= DATE($${params.length})`;
+            query += ` AND a.check_in_time >= datetime($${params.length}, '00:00:00')`;
         }
         if (end) {
+            // End date: include until 23:59:59 (end of the day)
             params.push(end);
-            query += ` AND DATE(a.check_in_time) <= DATE($${params.length})`;
+            query += ` AND a.check_in_time <= datetime($${params.length}, '23:59:59')`;
         }
-        query += ' ORDER BY a.check_in_time DESC';
+        if (member_type === 'admins') {
+            query += ` AND m.is_admin = 1`;
+        } else if (member_type === 'members') {
+            query += ` AND (m.is_admin IS NULL OR m.is_admin = 0)`;
+        }
+
+        // Add search condition
+        if (search.trim()) {
+            query += ` AND m.name ILIKE $${params.length + 1}`;
+            params.push(`%${search.trim()}%`);
+        }
+
+        // Get total count
+        const countQuery = query.replace('SELECT a.id, a.member_id, a.check_in_time, m.name AS member_name, m.is_admin', 'SELECT COUNT(*) as total');
+        const countResult = await pool.query(countQuery, params);
+        const total = parseInt(countResult.rows[0]?.total || 0, 10);
+
+        // Add ordering and pagination
+        query += ` ORDER BY a.check_in_time DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        params.push(limitNum, offset);
 
         const result = await pool.query(query, params);
-        res.json(result.rows);
+        const records = result.rows || [];
+
+        res.json({
+            attendance: records,
+            pagination: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                totalPages: Math.ceil(total / limitNum)
+            }
+        });
     } catch (err) {
+        console.error('Error fetching all attendance:', err);
         res.status(500).json({ message: err.message });
     }
 };
