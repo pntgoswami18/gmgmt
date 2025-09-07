@@ -9,8 +9,8 @@ exports.getAllSettings = async (req, res) => {
         console.log('Settings query result:', settingsResult.rows);
         
         const settings = {};
-        for (const row of settingsResult.rows) {
-            let value = row.value;
+        for (const { key, value: rawValue } of settingsResult.rows) {
+            let value = rawValue;
             
             // Try to parse JSON arrays
             if (value && (value.startsWith('[') && value.endsWith(']'))) {
@@ -21,7 +21,7 @@ exports.getAllSettings = async (req, res) => {
                 }
             }
             
-            settings[row.key] = value;
+            settings[key] = value;
         }
         
         // Add environment-based settings that are not stored in database
