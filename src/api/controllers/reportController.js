@@ -199,9 +199,31 @@ exports.getFinancialSummary = async (req, res) => {
             result.paymentHistoryLimit = limitNum;
         }
 
-        // Get member payment status with pagination
+        // Get member payment status with pagination - Optimized query
         if (table === 'all' || table === 'members') {
             const memberPaymentStatus = await pool.query(`
+                WITH member_payments AS (
+                    SELECT 
+                        i.member_id,
+                        MAX(p.payment_date) as last_payment_date
+                    FROM payments p
+                    JOIN invoices i ON p.invoice_id = i.id
+                    WHERE 1=1 ${dateFilter}
+                    GROUP BY i.member_id
+                ),
+                member_invoices AS (
+                    SELECT 
+                        member_id,
+                        status as last_invoice_status
+                    FROM (
+                        SELECT 
+                            member_id,
+                            status,
+                            ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY due_date DESC) as rn
+                        FROM invoices
+                    ) ranked
+                    WHERE rn = 1
+                )
                 SELECT
                     m.id,
                     m.name,
@@ -209,44 +231,25 @@ exports.getFinancialSummary = async (req, res) => {
                     m.join_date,
                     mp.name as plan_name,
                     mp.duration_days,
-                    (
-                        SELECT MAX(p.payment_date)
-                        FROM payments p
-                        JOIN invoices i ON p.invoice_id = i.id
-                        WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
-                    ) as last_payment_date,
-                    (
-                        SELECT i.status
-                        FROM invoices i
-                        WHERE i.member_id = m.id
-                        ORDER BY i.due_date DESC
-                        LIMIT 1
-                    ) as last_invoice_status,
+                    mpay.last_payment_date,
+                    mi.last_invoice_status,
                     CASE
                         WHEN mp.duration_days IS NULL THEN 0
-                        WHEN (
-                            SELECT MAX(p.payment_date)
-                            FROM payments p
-                            JOIN invoices i ON p.invoice_id = i.id
-                            WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
-                        ) IS NULL THEN
+                        WHEN mpay.last_payment_date IS NULL THEN
                             CASE
                                 WHEN julianday('now') - julianday(m.join_date) > mp.duration_days THEN 1
                                 ELSE 0
                             END
                         ELSE
                             CASE
-                                WHEN julianday('now') - julianday((
-                                    SELECT MAX(p.payment_date)
-                                    FROM payments p
-                                    JOIN invoices i ON p.invoice_id = i.id
-                                    WHERE i.member_id = m.id ${dateFilter.replace('p.payment_date', 'p.payment_date')}
-                                )) > mp.duration_days THEN 1
+                                WHEN julianday('now') - julianday(mpay.last_payment_date) > mp.duration_days THEN 1
                                 ELSE 0
                             END
                     END as is_overdue_for_plan
                 FROM members m
                 LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
+                LEFT JOIN member_payments mpay ON m.id = mpay.member_id
+                LEFT JOIN member_invoices mi ON m.id = mi.member_id
                 WHERE m.is_admin = 0
                 ORDER BY m.name ASC
                 LIMIT ${limitNum} OFFSET ${offset}
