@@ -67,8 +67,14 @@ String device_id = "";
 #define WIFI_TIMEOUT          30000   // 30 seconds
 #define HEARTBEAT_INTERVAL    60000   // 1 minute
 #define HTTP_TIMEOUT          15000   // 15 seconds for server communications
+#define HTTP_VALIDATION_TIMEOUT 3000  // 3 seconds for validation requests
 #define BUTTON_DEBOUNCE       50      // 50ms - Reduced for faster button response
 #define EMERGENCY_UNLOCK_TIME 5000    // 5 seconds for emergency unlock (longer than normal)
+
+// Cache Configuration
+#define MAX_CACHED_MEMBERS    100     // Maximum number of members to cache
+#define CACHE_VALIDITY_TIME   300000  // 5 minutes cache validity
+#define CACHE_UPDATE_INTERVAL 300000  // 5 minutes between cache updates
 
 // ==================== GLOBAL OBJECTS ====================
 HardwareSerial fingerprintSerial(2);  // Use Serial2 for fingerprint sensor
@@ -77,6 +83,15 @@ WebServer webServer(80);               // Web interface for configuration
 Preferences preferences;               // Non-volatile storage
 HTTPClient http;                       // HTTP client for server communication
 
+// ==================== MEMBER CACHE STRUCTURE ====================
+struct MemberAuth {
+  int biometricId;
+  bool isAuthorized;
+  unsigned long lastUpdate;
+  unsigned long expiryTime;
+  int memberId;
+};
+
 // ==================== GLOBAL VARIABLES ====================
 bool systemReady = false;
 bool enrollmentMode = false;
@@ -84,9 +99,15 @@ int enrollmentID = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastButtonCheck = 0;
 unsigned long lastNTPResync = 0;  // Track last NTP resync attempt
+unsigned long lastCacheUpdate = 0;  // Track last cache update
 int fingerprintID = -1;
 String deviceStatus = "ready";
 struct tm timeinfo;  // Global variable for time functions
+
+// Member authorization cache
+MemberAuth memberCache[MAX_CACHED_MEMBERS];
+int cacheSize = 0;
+bool cacheInitialized = false;
 
 // Non-blocking door unlock variables
 bool doorUnlockActive = false;
@@ -107,6 +128,14 @@ void sendToServer(String jsonData);
 void resyncNTPTime(); // Add NTP resync function declaration
 void startNonBlockingUnlock(unsigned long duration, bool emergency = false);
 void updateDoorUnlockState();
+
+// Cache management functions
+bool checkLocalAuthorization(int biometricId);
+bool validateWithServer(int biometricId);
+void updateMemberCache();
+void handleCacheUpdate(String jsonResponse);
+void initializeCache();
+void clearCache();
 
 // ==================== TIME FUNCTIONS ====================
 void waitForNTPTime() {
@@ -376,6 +405,9 @@ void setup() {
   // Initialize web server
   initializeWebServer();
   
+  // Initialize member cache
+  initializeCache();
+  
   // System ready
   systemReady = true;
   setStatusLED("ready");
@@ -416,6 +448,12 @@ void loop() {
     
     sendHeartbeat();
     lastHeartbeat = millis();
+  }
+  
+  // Update member cache periodically
+  if (millis() - lastCacheUpdate > CACHE_UPDATE_INTERVAL) {
+    updateMemberCache();
+    lastCacheUpdate = millis();
   }
   
   // Periodic NTP resynchronization (every 30 minutes if time is invalid)
@@ -607,11 +645,29 @@ void checkFingerprint() {
   if (fingerprintID > 0) {
     Serial.printf("Fingerprint matched: ID %d\n", fingerprintID);
     
-    // Grant access using non-blocking unlock for faster response
-    startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
+    // Check local cache first for fast authorization
+    bool isAuthorized = checkLocalAuthorization(fingerprintID);
     
-    // Send data to gym management system
-    sendBiometricData(fingerprintID, "authorized");
+    if (isAuthorized) {
+      // Fast path - unlock immediately using cache
+      Serial.printf("✅ Cache hit - Authorized member ID %d\n", fingerprintID);
+      startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
+      sendBiometricData(fingerprintID, "authorized");
+    } else {
+      // Slow path - validate with server first
+      Serial.printf("⏳ Cache miss - Validating member ID %d with server\n", fingerprintID);
+      bool serverAuth = validateWithServer(fingerprintID);
+      
+      if (serverAuth) {
+        Serial.printf("✅ Server validation - Authorized member ID %d\n", fingerprintID);
+        startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
+        sendBiometricData(fingerprintID, "authorized");
+      } else {
+        Serial.printf("❌ Server validation - Unauthorized member ID %d\n", fingerprintID);
+        accessDenied();
+        sendBiometricData(fingerprintID, "unauthorized");
+      }
+    }
     
     // Wait a moment before checking again
     delay(2000);
@@ -1662,5 +1718,203 @@ void handleApiConfigSave() {
     }
   } else {
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"No changes detected\"}");
+  }
+}
+
+// ==================== CACHE MANAGEMENT FUNCTIONS ====================
+void initializeCache() {
+  Serial.println("🔄 Initializing member authorization cache...");
+  clearCache();
+  
+  // Request initial cache update
+  updateMemberCache();
+  
+  Serial.printf("✅ Cache initialized with %d members\n", cacheSize);
+}
+
+void clearCache() {
+  cacheSize = 0;
+  for (int i = 0; i < MAX_CACHED_MEMBERS; i++) {
+    memberCache[i].biometricId = 0;
+    memberCache[i].isAuthorized = false;
+    memberCache[i].lastUpdate = 0;
+    memberCache[i].expiryTime = 0;
+    memberCache[i].memberId = 0;
+  }
+  cacheInitialized = true;
+}
+
+bool checkLocalAuthorization(int biometricId) {
+  // Check if cache is initialized
+  if (!cacheInitialized) {
+    Serial.println("⚠️ Cache not initialized, defaulting to server validation");
+    return false;
+  }
+  
+  // Search cache for biometric ID
+  for (int i = 0; i < cacheSize; i++) {
+    if (memberCache[i].biometricId == biometricId) {
+      // Check if cache entry is still valid
+      if (millis() - memberCache[i].lastUpdate < CACHE_VALIDITY_TIME) {
+        Serial.printf("📋 Cache entry found: ID %d, Authorized: %s\n", 
+                     biometricId, memberCache[i].isAuthorized ? "YES" : "NO");
+        return memberCache[i].isAuthorized;
+      } else {
+        Serial.printf("⏰ Cache entry expired for ID %d\n", biometricId);
+        return false;
+      }
+    }
+  }
+  
+  Serial.printf("🔍 Cache miss for biometric ID %d\n", biometricId);
+  return false;
+}
+
+bool validateWithServer(int biometricId) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("❌ WiFi not connected - cannot validate with server");
+    return false;
+  }
+  
+  // Create validation request
+  String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/validate";
+  
+  StaticJsonDocument<200> doc;
+  doc["biometricId"] = biometricId;
+  doc["deviceId"] = device_id;
+  doc["timestamp"] = getISO8601Time();
+  
+  String jsonString;
+  serializeJson(doc, jsonString);
+  
+  Serial.printf("📡 Validating biometric ID %d with server...\n", biometricId);
+  
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+  http.setTimeout(HTTP_VALIDATION_TIMEOUT);
+  
+  int httpResponseCode = http.POST(jsonString);
+  
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    StaticJsonDocument<200> responseDoc;
+    
+    if (deserializeJson(responseDoc, response)) {
+      bool isAuthorized = responseDoc["authorized"];
+      int memberId = responseDoc["memberId"] | 0;
+      
+      Serial.printf("✅ Server validation result: ID %d, Authorized: %s\n", 
+                   biometricId, isAuthorized ? "YES" : "NO");
+      
+      // Update cache with server response
+      updateCacheEntry(biometricId, isAuthorized, memberId);
+      
+      http.end();
+      return isAuthorized;
+    } else {
+      Serial.println("❌ Failed to parse server validation response");
+    }
+  } else {
+    Serial.printf("❌ Server validation failed with HTTP %d\n", httpResponseCode);
+  }
+  
+  http.end();
+  return false; // Default to deny on server error
+}
+
+void updateCacheEntry(int biometricId, bool isAuthorized, int memberId) {
+  // Find existing entry or create new one
+  int index = -1;
+  for (int i = 0; i < cacheSize; i++) {
+    if (memberCache[i].biometricId == biometricId) {
+      index = i;
+      break;
+    }
+  }
+  
+  // If not found and cache not full, add new entry
+  if (index == -1 && cacheSize < MAX_CACHED_MEMBERS) {
+    index = cacheSize;
+    cacheSize++;
+  }
+  
+  // Update cache entry
+  if (index != -1) {
+    memberCache[index].biometricId = biometricId;
+    memberCache[index].isAuthorized = isAuthorized;
+    memberCache[index].lastUpdate = millis();
+    memberCache[index].expiryTime = millis() + CACHE_VALIDITY_TIME;
+    memberCache[index].memberId = memberId;
+    
+    Serial.printf("📝 Cache updated: ID %d, Authorized: %s\n", 
+                 biometricId, isAuthorized ? "YES" : "NO");
+  }
+}
+
+void updateMemberCache() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠️ WiFi not connected - skipping cache update");
+    return;
+  }
+  
+  Serial.println("🔄 Updating member cache from server...");
+  
+  // Send cache update request
+  String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/cache-update";
+  
+  StaticJsonDocument<200> doc;
+  doc["deviceId"] = device_id;
+  doc["event"] = "cache_update";
+  doc["timestamp"] = getISO8601Time();
+  
+  String jsonString;
+  serializeJson(doc, jsonString);
+  
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+  http.setTimeout(HTTP_TIMEOUT);
+  
+  int httpResponseCode = http.POST(jsonString);
+  
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    handleCacheUpdate(response);
+  } else {
+    Serial.printf("❌ Cache update failed with HTTP %d\n", httpResponseCode);
+  }
+  
+  http.end();
+}
+
+void handleCacheUpdate(String jsonResponse) {
+  StaticJsonDocument<1000> doc;
+  
+  if (deserializeJson(doc, jsonResponse)) {
+    // Clear existing cache
+    clearCache();
+    
+    // Update cache with server data
+    if (doc.containsKey("members") && doc["members"].is<JsonArray>()) {
+      JsonArray members = doc["members"];
+      
+      for (JsonObject member : members) {
+        if (cacheSize < MAX_CACHED_MEMBERS) {
+          memberCache[cacheSize].biometricId = member["biometricId"];
+          memberCache[cacheSize].isAuthorized = member["authorized"];
+          memberCache[cacheSize].lastUpdate = millis();
+          memberCache[cacheSize].expiryTime = millis() + CACHE_VALIDITY_TIME;
+          memberCache[cacheSize].memberId = member["memberId"];
+          cacheSize++;
+        }
+      }
+      
+      Serial.printf("✅ Cache updated with %d members from server\n", cacheSize);
+    } else {
+      Serial.println("⚠️ No member data received in cache update");
+    }
+  } else {
+    Serial.println("❌ Failed to parse cache update response");
   }
 }

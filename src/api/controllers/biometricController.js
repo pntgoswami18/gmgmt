@@ -1387,6 +1387,127 @@ const esp32Webhook = async (req, res) => {
   }
 };
 
+// Fast validation endpoint for ESP32 devices
+const validateBiometricId = async (req, res) => {
+  try {
+    const { biometricId, deviceId, timestamp } = req.body;
+    
+    console.log(`🔍 Validation request: biometricId=${biometricId}, deviceId=${deviceId}`);
+    
+    if (!biometricId) {
+      return res.status(400).json({ 
+        authorized: false,
+        error: 'biometricId is required' 
+      });
+    }
+
+    // Single optimized query for fast response
+    const query = `
+      SELECT 
+        m.id as member_id,
+        m.name,
+        m.biometric_id,
+        m.is_active,
+        m.membership_plan_id,
+        mp.name as plan_name,
+        mp.duration_days
+      FROM members m
+      LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
+      WHERE m.biometric_id = ?
+    `;
+    
+    const result = await pool.query(query, [biometricId]);
+    const member = result.rows[0];
+    
+    if (!member) {
+      console.log(`❌ Member not found for biometric ID: ${biometricId}`);
+      return res.json({ 
+        authorized: false,
+        memberId: null,
+        reason: 'member_not_found'
+      });
+    }
+    
+    const isAuthorized = member.is_active === 1;
+    
+    console.log(`✅ Validation result: memberId=${member.member_id}, authorized=${isAuthorized}`);
+    
+    // Send minimal response for speed
+    res.json({ 
+      authorized: isAuthorized,
+      memberId: member.member_id,
+      isActive: member.is_active,
+      planName: member.plan_name
+    });
+    
+  } catch (error) {
+    console.error('❌ Error validating biometric ID:', error);
+    res.status(500).json({ 
+      authorized: false,
+      error: 'validation_failed'
+    });
+  }
+};
+
+// Cache update endpoint for ESP32 devices
+const updateMemberCache = async (req, res) => {
+  try {
+    const { deviceId, event, timestamp } = req.body;
+    
+    console.log(`🔄 Cache update request from device: ${deviceId}`);
+    
+    if (!deviceId) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'deviceId is required' 
+      });
+    }
+
+    // Get all members with biometric IDs
+    const query = `
+      SELECT 
+        m.id as member_id,
+        m.biometric_id,
+        m.is_active,
+        m.membership_plan_id,
+        mp.name as plan_name
+      FROM members m
+      LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
+      WHERE m.biometric_id IS NOT NULL 
+        AND m.biometric_id != ''
+        AND m.biometric_id != '0'
+    `;
+    
+    const result = await pool.query(query);
+    const members = result.rows;
+    
+    // Format members for ESP32 cache
+    const cacheMembers = members.map(member => ({
+      biometricId: parseInt(member.biometric_id),
+      memberId: member.member_id,
+      authorized: member.is_active === 1,
+      planName: member.plan_name,
+      membershipPlanId: member.membership_plan_id
+    }));
+    
+    console.log(`✅ Sending cache update: ${cacheMembers.length} members to device ${deviceId}`);
+    
+    res.json({ 
+      success: true,
+      members: cacheMembers,
+      totalMembers: cacheMembers.length,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error updating member cache:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'cache_update_failed'
+    });
+  }
+};
+
 module.exports = {
   setBiometricIntegration,
   getMemberBiometricStatus,
@@ -1407,5 +1528,8 @@ module.exports = {
   startRemoteEnrollment,
   getDeviceStatus,
   getAllDevices,
-  esp32Webhook
+  esp32Webhook,
+  // Hybrid cache endpoints
+  validateBiometricId,
+  updateMemberCache
 };
