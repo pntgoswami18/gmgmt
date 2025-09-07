@@ -67,7 +67,8 @@ String device_id = "";
 #define WIFI_TIMEOUT          30000   // 30 seconds
 #define HEARTBEAT_INTERVAL    60000   // 1 minute
 #define HTTP_TIMEOUT          15000   // 15 seconds for server communications
-#define BUTTON_DEBOUNCE       200     // 200ms
+#define BUTTON_DEBOUNCE       50      // 50ms - Reduced for faster button response
+#define EMERGENCY_UNLOCK_TIME 5000    // 5 seconds for emergency unlock (longer than normal)
 
 // ==================== GLOBAL OBJECTS ====================
 HardwareSerial fingerprintSerial(2);  // Use Serial2 for fingerprint sensor
@@ -87,6 +88,16 @@ int fingerprintID = -1;
 String deviceStatus = "ready";
 struct tm timeinfo;  // Global variable for time functions
 
+// Non-blocking door unlock variables
+bool doorUnlockActive = false;
+unsigned long doorUnlockStartTime = 0;
+unsigned long doorUnlockDuration = DOOR_UNLOCK_TIME;
+bool isEmergencyUnlock = false;
+
+// Button safety variables
+unsigned long lastOverridePress = 0;
+const unsigned long MIN_BUTTON_INTERVAL = 1000;  // Minimum 1 second between override presses
+
 // ==================== FUNCTION DECLARATIONS ====================
 void sendEnrollmentProgress(String progressStep);
 void sendEnrollmentData(int memberID, String status);
@@ -94,6 +105,8 @@ void sendBiometricData(int memberID, String status);
 void sendHeartbeat();
 void sendToServer(String jsonData);
 void resyncNTPTime(); // Add NTP resync function declaration
+void startNonBlockingUnlock(unsigned long duration, bool emergency = false);
+void updateDoorUnlockState();
 
 // ==================== TIME FUNCTIONS ====================
 void waitForNTPTime() {
@@ -422,6 +435,9 @@ void loop() {
     lastButtonCheck = millis();
   }
   
+  // Update door unlock state (non-blocking)
+  updateDoorUnlockState();
+  
   // Main fingerprint checking logic
   if (!enrollmentMode) {
     checkFingerprint();
@@ -429,7 +445,7 @@ void loop() {
     handleEnrollment();
   }
   
-  delay(100);  // Small delay to prevent watchdog issues
+  delay(50);  // Reduced delay for faster response - SAFE for watchdog timer
 }
 
 // ==================== INITIALIZATION FUNCTIONS ====================
@@ -591,8 +607,8 @@ void checkFingerprint() {
   if (fingerprintID > 0) {
     Serial.printf("Fingerprint matched: ID %d\n", fingerprintID);
     
-    // Grant access
-    unlockDoor();
+    // Grant access using non-blocking unlock for faster response
+    startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
     
     // Send data to gym management system
     sendBiometricData(fingerprintID, "authorized");
@@ -670,6 +686,53 @@ void unlockDoor() {
   Serial.println("Door locked");
 }
 
+// Non-blocking door unlock function for instant response
+void startNonBlockingUnlock(unsigned long duration, bool emergency) {
+  Serial.println(emergency ? "🚨 Emergency unlock activated!" : "Door unlocked!");
+  
+  // Immediate relay control - INSTANT response
+  Serial.println("🔓 Opening relay (door unlocked) - INSTANT");
+  Serial.printf("📡 Sending LOW signal to relay module (PIN %d)\n", RELAY_PIN);
+  digitalWrite(RELAY_PIN, LOW);
+  Serial.println("✅ Relay signal: LOW (door should be unlocked) - INSTANT");
+  
+  // Set non-blocking unlock state
+  doorUnlockActive = true;
+  doorUnlockStartTime = millis();
+  doorUnlockDuration = duration;
+  isEmergencyUnlock = emergency;
+  
+  // Visual and audio feedback (non-blocking)
+  setStatusLED("granted");
+  playTone(1000, 200);
+  delay(100);  // Minimal delay for tone
+  playTone(1200, 200);
+  
+  Serial.printf("⏱️  Door will remain unlocked for %d seconds (non-blocking)\n", duration / 1000);
+}
+
+// Update door unlock state (called every loop iteration)
+void updateDoorUnlockState() {
+  if (doorUnlockActive) {
+    unsigned long elapsed = millis() - doorUnlockStartTime;
+    
+    if (elapsed >= doorUnlockDuration) {
+      // Time to lock the door
+      Serial.println("🔒 Closing relay (door locked)");
+      Serial.printf("📡 Sending HIGH signal to relay module (PIN %d)\n", RELAY_PIN);
+      digitalWrite(RELAY_PIN, HIGH);
+      Serial.println("✅ Relay signal: HIGH (door should be locked)");
+      setStatusLED("ready");
+      
+      Serial.println("Door locked");
+      
+      // Reset state
+      doorUnlockActive = false;
+      isEmergencyUnlock = false;
+    }
+  }
+}
+
 void accessDenied() {
   Serial.println("Access denied!");
   
@@ -684,11 +747,12 @@ void accessDenied() {
 }
 
 void emergencyUnlock() {
-  Serial.println("Emergency unlock activated!");
+  Serial.println("🚨 Emergency unlock activated!");
   Serial.printf("📡 Current relay state before emergency unlock: %s (PIN %d)\n", 
                 digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
   
-  unlockDoor();
+  // Use non-blocking unlock for instant response
+  startNonBlockingUnlock(EMERGENCY_UNLOCK_TIME, true);
   sendBiometricData(-999, "emergency_unlock");
 }
 
@@ -1037,14 +1101,22 @@ void checkButtons() {
   if (digitalRead(ENROLL_BUTTON_PIN) == LOW) {
     Serial.println("Enrollment button pressed");
     startEnrollmentMode();
-    delay(500);  // Prevent multiple triggers
+    delay(200);  // Reduced delay for faster response
   }
   
-  // Check override button
+  // Check override button with safety interval
   if (digitalRead(OVERRIDE_BUTTON_PIN) == LOW) {
-    Serial.println("Override button pressed");
-    emergencyUnlock();
-    delay(500);  // Prevent multiple triggers
+    unsigned long currentTime = millis();
+    
+    // Prevent rapid-fire button presses (safety measure)
+    if (currentTime - lastOverridePress > MIN_BUTTON_INTERVAL) {
+      Serial.println("🚨 Override button pressed - INSTANT UNLOCK");
+      emergencyUnlock();
+      lastOverridePress = currentTime;
+      delay(200);  // Reduced delay for faster response
+    } else {
+      Serial.println("⚠️ Override button ignored - too soon after last press");
+    }
   }
 }
 
@@ -1357,7 +1429,7 @@ void handleRemoteCommand() {
     Serial.printf("📡 Current relay state before access granted: %s (PIN %d)\n", 
                   digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
     // This could be used for additional access logging
-    unlockDoor();
+    startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Access granted\"}");
     
   } else if (command == "cancel_enrollment") {
