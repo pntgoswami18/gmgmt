@@ -68,10 +68,14 @@ const wss = new WebSocket.Server({
 // WebSocket connection handling
 wss.on('connection', (ws, req) => {
     console.log('🔌 WebSocket client connected from:', req.socket.remoteAddress);
+    console.log('🔌 Biometric integration available:', !!app.biometricIntegration);
     
     // Add client to biometric integration if available
     if (app.biometricIntegration) {
+        console.log('🔌 Adding WebSocket client to biometric integration');
         app.biometricIntegration.addWebSocketClient(ws);
+    } else {
+        console.log('⚠️ Biometric integration not available - WebSocket client not added');
     }
     
     ws.on('close', () => {
