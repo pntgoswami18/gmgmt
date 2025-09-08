@@ -44,6 +44,7 @@ app.use('/api/schedules', scheduleRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/biometric', biometricRoutes);
 app.use('/api/referrals', referralRoutes);
+app.use('/api/payment-deactivation', paymentDeactivationRoutes);
 
 // Serve frontend build after API routes so /api/* is not intercepted
 const path = require('path');
