@@ -1111,6 +1111,16 @@ const esp32Webhook = async (req, res) => {
       } else if (status === 'unauthorized') {
         eventType = 'access_denied';
         success = false;
+      } else if (status === 'button_override') {
+        eventType = 'button_override';
+        memberIdToUse = null;
+        biometricId = null;
+        success = true;
+      } else if (status === 'remote_unlock') {
+        eventType = 'remote_unlock';
+        memberIdToUse = null;
+        biometricId = null;
+        success = true;
       }
     } else if (event === 'Enroll') {
       console.log(`🎯 Processing enrollment event: status=${status}, userId=${userId}, deviceId=${deviceId}`);
@@ -1121,7 +1131,7 @@ const esp32Webhook = async (req, res) => {
         success = false; // Progress events should not mark as successful completion
         
         // Extract enrollment step from the message
-        const enrollmentStep = eventData.enrollmentStep;
+        const { enrollmentStep } = eventData;
         console.log(`🔄 Processing enrollment progress: ${enrollmentStep} for user ${userId}`);
         
         // Since we now pass memberId as userId to ESP32, userId IS the member ID
@@ -1361,7 +1371,8 @@ const esp32Webhook = async (req, res) => {
       raw_data: JSON.stringify({
         ...eventData,
         ip_address: ip_address || req.ip,
-        user_agent: req.get('User-Agent')
+        user_agent: req.get('User-Agent'),
+        reason: eventData.reason || null
       })
     };
 

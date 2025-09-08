@@ -122,12 +122,13 @@ const unsigned long MIN_BUTTON_INTERVAL = 1000;  // Minimum 1 second between ove
 // ==================== FUNCTION DECLARATIONS ====================
 void sendEnrollmentProgress(String progressStep);
 void sendEnrollmentData(int memberID, String status);
-void sendBiometricData(int memberID, String status);
+void sendBiometricData(int memberID, String status, String reason = "");
 void sendHeartbeat();
 void sendToServer(String jsonData);
 void resyncNTPTime(); // Add NTP resync function declaration
 void startNonBlockingUnlock(unsigned long duration, bool emergency = false);
 void updateDoorUnlockState();
+void emergencyUnlockWithReason(String reason);
 
 // Cache management functions
 bool checkLocalAuthorization(int biometricId);
@@ -803,13 +804,23 @@ void accessDenied() {
 }
 
 void emergencyUnlock() {
+  emergencyUnlockWithReason("button_override");
+}
+
+void emergencyUnlockWithReason(String reason) {
   Serial.println("🚨 Emergency unlock activated!");
   Serial.printf("📡 Current relay state before emergency unlock: %s (PIN %d)\n", 
                 digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
   
   // Use non-blocking unlock for instant response
   startNonBlockingUnlock(EMERGENCY_UNLOCK_TIME, true);
-  sendBiometricData(-999, "emergency_unlock");
+  
+  // Send appropriate event based on reason
+  if (reason == "button_override") {
+    sendBiometricData(-999, "button_override");
+  } else {
+    sendBiometricData(-999, "remote_unlock", reason);
+  }
 }
 
 // ==================== ENROLLMENT FUNCTIONS ====================
@@ -1020,7 +1031,7 @@ int getNextAvailableID() {
 }
 
 // ==================== COMMUNICATION FUNCTIONS ====================
-void sendBiometricData(int memberID, String status) {
+void sendBiometricData(int memberID, String status, String reason = "") {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected - data not sent");
     return;
@@ -1038,10 +1049,15 @@ void sendBiometricData(int memberID, String status) {
   doc["deviceType"] = "esp32_door_lock";
   doc["location"] = "main_entrance";
   
+  // Add reason if provided
+  if (reason.length() > 0) {
+    doc["reason"] = reason;
+  }
+  
   String jsonString;
   serializeJson(doc, jsonString);
   
-  Serial.printf("📤 Sending enrollment data: status=%s, memberId=%d\n", status.c_str(), memberID);
+  Serial.printf("📤 Sending biometric data: status=%s, memberId=%d, reason=%s\n", status.c_str(), memberID, reason.c_str());
   sendToServer(jsonString);
 }
 
@@ -1481,7 +1497,14 @@ void handleRemoteCommand() {
   } else if (command == "unlock_door") {
     Serial.printf("📡 Current relay state before remote unlock: %s (PIN %d)\n", 
                   digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
-    emergencyUnlock();
+    
+    // Extract reason from command data
+    String reason = "admin_unlock";
+    if (doc["data"]["reason"]) {
+      reason = doc["data"]["reason"].as<String>();
+    }
+    
+    emergencyUnlockWithReason(reason);
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Door unlocked\"}");
     
   } else if (command == "access_granted") {
