@@ -2,6 +2,7 @@ const BiometricListener = require('./biometricListener');
 const { pool } = require('../config/sqlite');
 const path = require('path');
 const os = require('os');
+const whatsappService = require('./whatsappService');
 
 class BiometricIntegration {
   constructor(port = 8080) {
@@ -620,6 +621,54 @@ class BiometricIntegration {
 
       await this.logBiometricEvent(enrollmentEvent);
       
+      // Send WhatsApp welcome message for first-time enrollment
+      try {
+        const memberResult = await pool.query('SELECT name, phone FROM members WHERE id = ?', [memberId]);
+        if (memberResult.rows.length > 0) {
+          const member = memberResult.rows[0];
+          const whatsappResult = await whatsappService.sendWelcomeMessage(
+            memberId, 
+            member.name, 
+            member.phone
+          );
+          
+          if (whatsappResult.success) {
+            console.log(`📱 WhatsApp welcome message prepared for ${member.name}`);
+            // Broadcast WhatsApp message status to WebSocket clients
+            this.broadcastToWebSocketClients({
+              type: 'whatsapp_welcome_sent',
+              memberId: memberId,
+              memberName: member.name,
+              success: true,
+              message: 'WhatsApp welcome message prepared successfully',
+              whatsappUrl: whatsappResult.whatsappUrl,
+              timestamp: new Date().toISOString()
+            });
+          } else {
+            console.log(`📱 WhatsApp welcome message failed for ${member.name}: ${whatsappResult.error}`);
+            // Broadcast WhatsApp message failure to WebSocket clients
+            this.broadcastToWebSocketClients({
+              type: 'whatsapp_welcome_failed',
+              memberId: memberId,
+              memberName: member.name,
+              success: false,
+              error: whatsappResult.error,
+              timestamp: new Date().toISOString()
+            });
+          }
+        }
+      } catch (whatsappError) {
+        console.error('📱 Error sending WhatsApp welcome message:', whatsappError);
+        // Broadcast WhatsApp error to WebSocket clients
+        this.broadcastToWebSocketClients({
+          type: 'whatsapp_welcome_error',
+          memberId: memberId,
+          success: false,
+          error: whatsappError.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
       console.log(`💾 Biometric enrollment saved for member ${memberId}`);
       return true;
     } catch (error) {
@@ -869,12 +918,33 @@ class BiometricIntegration {
   async startRemoteEnrollment(deviceId, memberId) {
     console.log(`👆 Remote enrollment started for member ${memberId} on device ${deviceId}`);
     
+    // Get member name for better user experience
+    let memberName = `Member ${memberId}`;
+    try {
+      const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [memberId]);
+      if (memberResult.rows && memberResult.rows.length > 0) {
+        memberName = memberResult.rows[0].name;
+      }
+    } catch (nameError) {
+      console.warn('Could not fetch member name:', nameError.message);
+    }
+    
     // Pass the member ID as the userId to the ESP32 device
     // This creates a direct 1:1 mapping between ESP32 userId and member ID
     await this.sendESP32Command(deviceId, 'start_enrollment', {
       memberId: memberId,
       userId: memberId, // Use member ID as the ESP32 userId
       enrollmentId: memberId
+    });
+
+    // Send WebSocket event to notify frontend that enrollment has started
+    this.sendToWebSocketClients({
+      type: 'enrollment_started',
+      status: 'active',
+      memberId: memberId,
+      memberName: memberName,
+      deviceId: deviceId,
+      message: `Remote enrollment started for ${memberName} on device ${deviceId}`
     });
 
     return { success: true, message: 'Remote enrollment started' };

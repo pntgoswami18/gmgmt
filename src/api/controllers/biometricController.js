@@ -1,4 +1,5 @@
 const { pool } = require('../../config/sqlite');
+const whatsappService = require('../../services/whatsappService');
 
 // Get reference to biometric integration instance
 let biometricIntegration = null;
@@ -821,6 +822,23 @@ const manualEnrollment = async (req, res) => {
       };
 
       await biometricIntegration.logBiometricEvent(enrollmentEvent);
+    }
+
+    // Send WhatsApp welcome message for manual enrollment
+    try {
+      const whatsappResult = await whatsappService.sendWelcomeMessage(
+        memberId, 
+        member.name, 
+        member.phone
+      );
+      
+      if (whatsappResult.success) {
+        console.log(`📱 WhatsApp welcome message prepared for ${member.name} (manual enrollment)`);
+      } else {
+        console.log(`📱 WhatsApp welcome message failed for ${member.name}: ${whatsappResult.error}`);
+      }
+    } catch (whatsappError) {
+      console.error('📱 Error sending WhatsApp welcome message (manual enrollment):', whatsappError);
     }
     
     res.json({ 
