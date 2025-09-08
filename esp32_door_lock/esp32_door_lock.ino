@@ -873,7 +873,8 @@ void handleEnrollment() {
     delay(2000);
     setStatusLED("ready");
     
-    sendEnrollmentProgress("enrollment_failed");
+    // Send enrollment failure status instead of just progress
+    sendEnrollmentData(enrollmentID, "enrollment_failed");
     
     // Reset enrollmentID for next enrollment
     enrollmentID = 0;
