@@ -39,20 +39,30 @@ const performCheckIn = async (resolvedMemberId, res) => {
         return res.status(400).json({ message: `Check-in allowed only during Morning (${settingsMap.morning_session_start || '05:00'}-${settingsMap.morning_session_end || '11:00'}) or Evening (${settingsMap.evening_session_start || '16:00'}-${settingsMap.evening_session_end || '22:00'}) sessions.` });
     }
 
-    // Only one check-in per day (unless admin)
+    // Only one check-in per session per day (unless admin)
     const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = $1', [resolvedMemberId]);
     const isAdmin = memberCheck.rows[0]?.is_admin === 1;
     
     if (!isAdmin) {
-        const alreadyCheckedInToday = await pool.query(
+        // Check if member has already checked in during the current session today
+        const currentSession = isInMorningSession ? 'morning' : 'evening';
+        const sessionStartTime = isInMorningSession ? settingsMap.morning_session_start || '05:00' : settingsMap.evening_session_start || '16:00';
+        const sessionEndTime = isInMorningSession ? settingsMap.morning_session_end || '11:00' : settingsMap.evening_session_end || '22:00';
+        
+        const alreadyCheckedInThisSession = await pool.query(
             `SELECT 1 FROM attendance 
-             WHERE member_id = $1 AND DATE(check_in_time) = DATE('now') 
+             WHERE member_id = $1 
+             AND DATE(check_in_time) = DATE('now')
+             AND TIME(check_in_time) >= $2 
+             AND TIME(check_in_time) <= $3
              LIMIT 1`,
-            [resolvedMemberId]
+            [resolvedMemberId, sessionStartTime, sessionEndTime]
         );
 
-        if (alreadyCheckedInToday.rowCount > 0) {
-            return res.status(409).json({ message: 'Member has already checked in today.' });
+        if (alreadyCheckedInThisSession.rowCount > 0) {
+            return res.status(409).json({ 
+                message: `Member has already checked in during the ${currentSession} session today.` 
+            });
         }
     }
 
