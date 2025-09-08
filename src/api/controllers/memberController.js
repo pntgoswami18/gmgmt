@@ -44,15 +44,21 @@ exports.getAllMembers = async (req, res) => {
         // Build filter condition
         let filterCondition = '';
         let filterParams = [];
-        if (filter === 'admins') {
-            filterCondition = `AND is_admin = 1`;
+        if (filter === 'all') {
+            // Default: show only active members
+            filterCondition = `AND is_active = 1`;
+        } else if (filter === 'deactivated') {
+            // Show only deactivated members
+            filterCondition = `AND is_active = 0`;
+        } else if (filter === 'admins') {
+            filterCondition = `AND is_admin = 1 AND is_active = 1`;
         } else if (filter === 'members') {
-            filterCondition = `AND is_admin != 1`;
+            filterCondition = `AND is_admin != 1 AND is_active = 1`;
         } else if (filter === 'new-this-month') {
-            filterCondition = `AND date(join_date) >= date('now','start of month')`;
+            filterCondition = `AND date(join_date) >= date('now','start of month') AND is_active = 1`;
         } else if (filter === 'unpaid-this-month') {
             // This will be handled separately as it requires a complex query
-            filterCondition = `AND is_admin != 1 AND NOT EXISTS (
+            filterCondition = `AND is_admin != 1 AND is_active = 1 AND NOT EXISTS (
                 SELECT 1 FROM payments p 
                 JOIN invoices i ON p.invoice_id = i.id 
                 WHERE i.member_id = members.id 
