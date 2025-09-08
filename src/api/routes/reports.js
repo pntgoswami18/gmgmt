@@ -11,6 +11,5 @@ router.get('/financial-summary', reportController.getFinancialSummary);
 router.get('/unpaid-members-this-month', reportController.getUnpaidMembersThisMonth);
 router.get('/birthdays-today', reportController.getBirthdaysToday);
 router.get('/payment-reminders', reportController.getPaymentReminders);
-router.get('/upcoming-renewals', reportController.getUpcomingRenewals);
 
 module.exports = router;
