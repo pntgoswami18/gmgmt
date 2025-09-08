@@ -113,19 +113,76 @@ const stopEnrollment = async (req, res) => {
       });
     }
 
-    const result = biometricIntegration.stopEnrollmentMode('manual');
-    
-    if (!result) {
+    // Get the current enrollment session details
+    const enrollmentSession = biometricIntegration.enrollmentMode;
+    if (!enrollmentSession || !enrollmentSession.active) {
       return res.status(400).json({ 
         success: false, 
         message: 'No active enrollment session' 
       });
     }
 
+    const { memberId, memberName } = enrollmentSession;
+
+    // Send cancel command to all online ESP32 devices
+    const devicesQuery = `
+      SELECT DISTINCT device_id 
+      FROM biometric_events 
+      WHERE device_id IS NOT NULL 
+        AND timestamp > datetime('now', '-5 minutes')
+      GROUP BY device_id
+    `;
+    
+    const devicesResult = await pool.query(devicesQuery);
+    const devices = devicesResult.rows || [];
+    
+    let cancelsSent = 0;
+    const results = [];
+
+    for (const device of devices) {
+      try {
+        await biometricIntegration.sendESP32Command(device.device_id, 'cancel_enrollment', {
+          memberId: memberId,
+          reason: 'user_cancelled'
+        });
+        cancelsSent++;
+        results.push({ deviceId: device.device_id, status: 'sent' });
+      } catch (error) {
+        console.error(`Failed to send cancel to ${device.device_id}:`, error.message);
+        results.push({ deviceId: device.device_id, status: 'failed', error: error.message });
+      }
+    }
+
+    // Stop the enrollment mode in the backend
+    const result = biometricIntegration.stopEnrollmentMode('manual');
+    
+    // Log cancellation event
+    await biometricIntegration.logBiometricEvent({
+      member_id: memberId,
+      biometric_id: null,
+      event_type: 'enrollment_cancelled',
+      device_id: 'system',
+      timestamp: new Date().toISOString(),
+      success: true,
+      raw_data: JSON.stringify({ 
+        reason: 'user_cancelled',
+        memberName,
+        devicesCancelled: cancelsSent,
+        results
+      })
+    });
+
     res.json({ 
       success: true, 
-      message: 'Enrollment stopped',
-      data: result 
+      message: `Enrollment stopped for ${memberName}. Cancel commands sent to ${cancelsSent} device(s).`,
+      data: {
+        ...result,
+        memberId,
+        memberName,
+        cancelsSent,
+        totalDevices: devices.length,
+        results
+      }
     });
   } catch (error) {
     console.error('Error stopping enrollment:', error);
