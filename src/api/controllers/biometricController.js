@@ -1508,6 +1508,62 @@ const updateMemberCache = async (req, res) => {
   }
 };
 
+// Cache invalidation function to trigger immediate ESP32 cache updates
+const invalidateESP32Cache = async () => {
+  try {
+    console.log('🔄 Triggering immediate ESP32 cache invalidation...');
+    
+    // Get all registered ESP32 devices
+    const devicesQuery = `
+      SELECT device_id, device_name, last_heartbeat 
+      FROM devices 
+      WHERE device_type = 'esp32_door_lock'
+      AND status = 'online'
+      AND last_heartbeat > datetime('now', '-1 hour')
+    `;
+    
+    const devices = await pool.query(devicesQuery);
+    
+    if (devices.rows.length === 0) {
+      console.log('⚠️ No active ESP32 devices found for cache invalidation');
+      return;
+    }
+    
+    console.log(`📡 Found ${devices.rows.length} active ESP32 devices for cache invalidation`);
+    
+    // For each device, we'll send a cache invalidation signal
+    // The ESP32 devices will detect this and refresh their cache immediately
+    for (const device of devices.rows) {
+      try {
+        console.log(`🔄 Invalidating cache for device: ${device.device_name} (${device.device_id})`);
+        
+        // Send cache invalidation request to ESP32 device
+        const axios = require('axios');
+        const deviceUrl = `http://${device.device_id}/api/cache/invalidate`;
+        
+        await axios.post(deviceUrl, {
+          reason: 'member_status_change',
+          timestamp: new Date().toISOString()
+        }, {
+          timeout: 5000 // 5 second timeout
+        });
+        
+        console.log(`✅ Cache invalidation sent to device: ${device.device_name}`);
+        
+      } catch (deviceError) {
+        console.error(`❌ Failed to invalidate cache for device ${device.device_name}:`, deviceError.message);
+        // Continue with other devices even if one fails
+      }
+    }
+    
+    console.log('✅ ESP32 cache invalidation process completed');
+    
+  } catch (error) {
+    console.error('❌ Error during ESP32 cache invalidation:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   setBiometricIntegration,
   getMemberBiometricStatus,
@@ -1531,5 +1587,7 @@ module.exports = {
   esp32Webhook,
   // Hybrid cache endpoints
   validateBiometricId,
-  updateMemberCache
+  updateMemberCache,
+  // Cache invalidation
+  invalidateESP32Cache
 };

@@ -298,12 +298,14 @@ The system implements a sophisticated hybrid caching strategy that dramatically 
 - **Cache Expiry**: Local cache entries expire after 5 minutes to prevent stale data
 - **Audit Trail**: All access attempts are logged regardless of cache hit/miss
 - **Real-time Updates**: Member status changes are reflected within 5 minutes
+- **Immediate Cache Invalidation**: When members are deactivated, ESP32 cache is immediately cleared to prevent unauthorized access
 
 #### Technical Implementation
 - **ESP32 Cache**: Local storage of member biometric IDs and authorization status
 - **Server Endpoints**: Dedicated `/api/biometric/validate` and `/api/biometric/cache-update` endpoints
 - **Database Optimization**: Performance indexes for fast member lookups
 - **Automatic Migration**: Existing installations automatically get cache optimization
+- **Cache Invalidation**: Server triggers immediate ESP32 cache refresh when member status changes via `/api/cache/invalidate` endpoint
 
 ### What We Store
 

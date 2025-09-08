@@ -1349,6 +1349,9 @@ void initializeWebServer() {
   webServer.on("/api/config", HTTP_GET, handleApiConfig);
   webServer.on("/api/config", HTTP_POST, handleApiConfigSave);
   
+  // Cache invalidation endpoint
+  webServer.on("/api/cache/invalidate", HTTP_POST, handleCacheInvalidation);
+  
   webServer.begin();
   Serial.println("Web server started on port 80");
 }
@@ -1719,6 +1722,51 @@ void handleApiConfigSave() {
   } else {
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"No changes detected\"}");
   }
+}
+
+void handleCacheInvalidation() {
+  Serial.println("🔄 Cache invalidation requested from server");
+  
+  if (!webServer.hasArg("plain")) {
+    webServer.send(400, "application/json", "{\"error\":\"No JSON body provided\"}");
+    return;
+  }
+  
+  String body = webServer.arg("plain");
+  StaticJsonDocument<200> doc;
+  
+  if (deserializeJson(doc, body)) {
+    webServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+  
+  String reason = doc["reason"] | "unknown";
+  String timestamp = doc["timestamp"] | "";
+  
+  Serial.printf("📋 Cache invalidation reason: %s\n", reason.c_str());
+  Serial.printf("📋 Timestamp: %s\n", timestamp.c_str());
+  
+  // Clear the current cache
+  clearCache();
+  
+  // Immediately request fresh cache from server
+  Serial.println("🔄 Requesting fresh cache from server...");
+  updateMemberCache();
+  
+  // Send success response
+  StaticJsonDocument<200> response;
+  response["success"] = true;
+  response["message"] = "Cache invalidated and refreshed";
+  response["reason"] = reason;
+  response["timestamp"] = timestamp;
+  response["cache_size"] = cacheSize;
+  
+  String responseString;
+  serializeJson(response, responseString);
+  
+  webServer.send(200, "application/json", responseString);
+  
+  Serial.println("✅ Cache invalidation completed successfully");
 }
 
 // ==================== CACHE MANAGEMENT FUNCTIONS ====================

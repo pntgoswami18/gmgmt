@@ -295,6 +295,19 @@ exports.setActiveStatus = async (req, res) => {
         const val = String(is_active) === '0' || is_active === false ? 0 : 1;
         await pool.query('UPDATE members SET is_active = $1 WHERE id = $2', [val, id]);
         const updated = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
+        
+        // Trigger immediate cache invalidation for ESP32 devices when member status changes
+        try {
+            const { invalidateESP32Cache } = require('../controllers/biometricController');
+            if (invalidateESP32Cache) {
+                console.log(`🔄 Member ${id} status changed to ${val === 1 ? 'active' : 'inactive'} - invalidating ESP32 cache`);
+                await invalidateESP32Cache();
+            }
+        } catch (cacheError) {
+            console.error('❌ Error invalidating ESP32 cache:', cacheError);
+            // Don't fail the main operation if cache invalidation fails
+        }
+        
         res.json(updated.rows[0]);
     } catch (err) {
         res.status(400).json({ message: err.message });
