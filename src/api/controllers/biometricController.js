@@ -1412,7 +1412,10 @@ const validateBiometricId = async (req, res) => {
       });
     }
 
-    // Single optimized query for fast response
+    // Import payment validation utilities
+    const { checkMemberPaymentStatus, getGracePeriodSetting } = require('../../utils/dateUtils');
+
+    // Single optimized query for fast response with payment status
     const query = `
       SELECT 
         m.id as member_id,
@@ -1420,8 +1423,13 @@ const validateBiometricId = async (req, res) => {
         m.biometric_id,
         m.is_active,
         m.membership_plan_id,
+        m.join_date,
         mp.name as plan_name,
-        mp.duration_days
+        mp.duration_days,
+        (SELECT MAX(p.payment_date) 
+         FROM payments p 
+         JOIN invoices i ON p.invoice_id = i.id 
+         WHERE i.member_id = m.id) as last_payment_date
       FROM members m
       LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
       WHERE m.biometric_id = ?
@@ -1439,6 +1447,68 @@ const validateBiometricId = async (req, res) => {
       });
     }
     
+    // Check if member is active
+    if (member.is_active !== 1) {
+      console.log(`❌ Member ${member.member_id} is inactive`);
+      return res.json({ 
+        authorized: false,
+        memberId: member.member_id,
+        reason: 'member_inactive'
+      });
+    }
+
+    // Check payment status if member has a plan
+    let paymentStatus = null;
+    if (member.membership_plan_id && member.duration_days) {
+      try {
+        const gracePeriodDays = await getGracePeriodSetting(pool);
+        paymentStatus = checkMemberPaymentStatus(
+          {
+            join_date: member.join_date,
+            membership_plan_id: member.membership_plan_id
+          },
+          {
+            duration_days: member.duration_days
+          },
+          member.last_payment_date,
+          gracePeriodDays
+        );
+
+        // If grace period has expired, deny access
+        if (paymentStatus.gracePeriodExpired) {
+          console.log(`❌ Member ${member.member_id} payment grace period expired (${paymentStatus.daysOverdue} days overdue)`);
+          
+          // Automatically deactivate the member
+          try {
+            await pool.query('UPDATE members SET is_active = 0 WHERE id = ?', [member.member_id]);
+            console.log(`🔄 Automatically deactivated member ${member.member_id} due to expired grace period`);
+            
+            // Trigger ESP32 cache invalidation
+            try {
+              if (invalidateESP32Cache) {
+                await invalidateESP32Cache();
+              }
+            } catch (cacheError) {
+              console.error('❌ Error invalidating ESP32 cache:', cacheError);
+            }
+          } catch (deactivationError) {
+            console.error('❌ Error deactivating member:', deactivationError);
+          }
+          
+          return res.json({ 
+            authorized: false,
+            memberId: member.member_id,
+            reason: 'payment_overdue_grace_expired',
+            daysOverdue: paymentStatus.daysOverdue,
+            gracePeriodExpired: true
+          });
+        }
+      } catch (paymentError) {
+        console.error('❌ Error checking payment status:', paymentError);
+        // Continue with authorization if payment check fails
+      }
+    }
+    
     const isAuthorized = member.is_active === 1;
     
     console.log(`✅ Validation result: memberId=${member.member_id}, authorized=${isAuthorized}`);
@@ -1448,7 +1518,8 @@ const validateBiometricId = async (req, res) => {
       authorized: isAuthorized,
       memberId: member.member_id,
       isActive: member.is_active,
-      planName: member.plan_name
+      planName: member.plan_name,
+      paymentStatus: paymentStatus
     });
     
   } catch (error) {

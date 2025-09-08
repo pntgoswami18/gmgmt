@@ -170,6 +170,7 @@ function initializeDatabase() {
     ['primary_color_gradient', ''],
     ['secondary_color_gradient', ''],
     ['payment_reminder_days_after_due', '7'],
+    ['payment_grace_period_days', '3'],
     ['morning_session_start', '05:00'],
     ['morning_session_end', '11:00'],
     ['evening_session_start', '16:00'],

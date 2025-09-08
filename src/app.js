@@ -18,6 +18,7 @@ const scheduleRoutes = require('./api/routes/schedules');
 const settingsRoutes = require('./api/routes/settings');
 const biometricRoutes = require('./api/routes/biometric');
 const referralRoutes = require('./api/routes/referrals');
+const paymentDeactivationRoutes = require('./api/routes/paymentDeactivation');
 
 app.use(cors());
 app.use(express.json());

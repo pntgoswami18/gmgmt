@@ -271,18 +271,66 @@ class BiometricIntegration {
 
   async hasActivePlan(member) {
     try {
+      // Import payment validation utilities
+      const { checkMemberPaymentStatus, getGracePeriodSetting } = require('../utils/dateUtils');
+      
       // Check if member has an active plan
-      // This logic depends on your plan/subscription structure
       const query = `
-        SELECT * FROM member_plans 
-        WHERE member_id = ? 
-        AND start_date <= date('now') 
-        AND end_date >= date('now')
-        AND status = 'active'
+        SELECT 
+          mp.*,
+          (SELECT MAX(p.payment_date) 
+           FROM payments p 
+           JOIN invoices i ON p.invoice_id = i.id 
+           WHERE i.member_id = ?) as last_payment_date
+        FROM membership_plans mp
+        WHERE mp.id = ?
       `;
       
-      const result = await pool.query(query, [member.id]);
-      return !!(result.rows && result.rows[0]);
+      const result = await pool.query(query, [member.id, member.membership_plan_id]);
+      const plan = result.rows[0];
+      
+      if (!plan) {
+        console.log(`❌ No plan found for member ${member.id}`);
+        return false;
+      }
+
+      // Check payment status if plan has duration
+      if (plan.duration_days) {
+        try {
+          const gracePeriodDays = await getGracePeriodSetting(pool);
+          const paymentStatus = checkMemberPaymentStatus(
+            member,
+            plan,
+            plan.last_payment_date,
+            gracePeriodDays
+          );
+
+          // If grace period has expired, member should be deactivated
+          if (paymentStatus.gracePeriodExpired) {
+            console.log(`❌ Member ${member.id} payment grace period expired (${paymentStatus.daysOverdue} days overdue)`);
+            
+            // Automatically deactivate the member
+            try {
+              await pool.query('UPDATE members SET is_active = 0 WHERE id = ?', [member.id]);
+              console.log(`🔄 Automatically deactivated member ${member.id} due to expired grace period`);
+            } catch (deactivationError) {
+              console.error('❌ Error deactivating member:', deactivationError);
+            }
+            
+            return false;
+          }
+
+          // If overdue but within grace period, allow access but log warning
+          if (paymentStatus.isOverdue) {
+            console.log(`⚠️ Member ${member.id} is overdue but within grace period (${paymentStatus.daysOverdue} days overdue)`);
+          }
+        } catch (paymentError) {
+          console.error('❌ Error checking payment status:', paymentError);
+          // Continue with plan check if payment validation fails
+        }
+      }
+      
+      return true; // Plan exists and payment status is valid
     } catch (error) {
       console.error('Error checking active plan:', error);
       return false;
