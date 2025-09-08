@@ -157,6 +157,44 @@ function initializeDatabase() {
        ip_address TEXT,
        created_at TEXT DEFAULT (datetime('now'))
      );`,
+    `CREATE TABLE IF NOT EXISTS devices (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT UNIQUE NOT NULL,
+       device_type TEXT NOT NULL DEFAULT 'esp32_door_lock',
+       device_name TEXT,
+       location TEXT,
+       ip_address TEXT,
+       mac_address TEXT,
+       firmware_version TEXT,
+       status TEXT DEFAULT 'offline',
+       last_heartbeat TEXT,
+       created_at TEXT DEFAULT (datetime('now')),
+       updated_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS device_commands (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT NOT NULL,
+       command TEXT NOT NULL,
+       parameters TEXT,
+       sent_at TEXT DEFAULT (datetime('now')),
+       executed_at TEXT,
+       status TEXT DEFAULT 'pending',
+       response TEXT,
+       FOREIGN KEY (device_id) REFERENCES devices(device_id)
+     );`,
+    `CREATE TABLE IF NOT EXISTS access_logs (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT NOT NULL,
+       member_id INTEGER,
+       access_type TEXT NOT NULL,
+       access_result TEXT NOT NULL,
+       fingerprint_id INTEGER,
+       reason TEXT,
+       timestamp TEXT DEFAULT (datetime('now')),
+       additional_data TEXT,
+       FOREIGN KEY (device_id) REFERENCES devices(device_id),
+       FOREIGN KEY (member_id) REFERENCES members(id)
+     );`,
   ];
 
   const insertDefaultSettings = [
@@ -189,6 +227,9 @@ function initializeDatabase() {
     ['local_listen_host', '0.0.0.0'],
     ['local_listen_port', '5005'],
     ['membership_types', '["standard","premium","vip"]'],
+    ['cross_session_checkin_restriction', 'true'],
+    ['whatsapp_welcome_enabled', 'false'],
+    ['whatsapp_welcome_message', 'Welcome to our gym! Your biometric enrollment is complete. You can now access the gym using your fingerprint. Enjoy your workouts!'],
   ];
 
   const trx = db.transaction(() => {
@@ -212,6 +253,18 @@ function initializeDatabase() {
     db.exec("CREATE INDEX IF NOT EXISTS idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;");
     db.exec("CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active, membership_plan_id);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_member_date ON attendance(member_id, date, check_in_time);");
+    
+    // ESP32 device management indexes
+    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_device_type ON devices(device_type);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_device_id ON device_commands(device_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_status ON device_commands(status);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_sent_at ON device_commands(sent_at);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_device_id ON access_logs(device_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_member_id ON access_logs(member_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_timestamp ON access_logs(timestamp);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_access_type ON access_logs(access_type);");
     
     // Insert default settings
     for (const [k, v] of insertDefaultSettings) {

@@ -17,10 +17,13 @@ const performCheckIn = async (resolvedMemberId, res) => {
     // Enforce configured session windows
     const settingsRes = await pool.query(`
         SELECT key, value FROM settings WHERE key IN (
-            'morning_session_start','morning_session_end','evening_session_start','evening_session_end'
+            'morning_session_start','morning_session_end','evening_session_start','evening_session_end','cross_session_checkin_restriction'
         )
     `);
     const settingsMap = Object.fromEntries(settingsRes.rows.map(r => [r.key, r.value]));
+    
+    // Check if cross-session restriction is enabled
+    const crossSessionRestrictionEnabled = settingsMap.cross_session_checkin_restriction === 'true' || settingsMap.cross_session_checkin_restriction === true;
     const parseTimeToMinutes = (hhmm) => {
         const [h, m] = String(hhmm || '00:00').split(':').map(Number);
         return (h * 60) + (m || 0);
@@ -39,30 +42,39 @@ const performCheckIn = async (resolvedMemberId, res) => {
         return res.status(400).json({ message: `Check-in allowed only during Morning (${settingsMap.morning_session_start || '05:00'}-${settingsMap.morning_session_end || '11:00'}) or Evening (${settingsMap.evening_session_start || '16:00'}-${settingsMap.evening_session_end || '22:00'}) sessions.` });
     }
 
-    // Only one check-in per session per day (unless admin)
+    // Prevent cross-session check-ins (unless admin and restriction is enabled)
     const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = $1', [resolvedMemberId]);
     const isAdmin = memberCheck.rows[0]?.is_admin === 1;
     
-    if (!isAdmin) {
-        // Check if member has already checked in during the current session today
-        const currentSession = isInMorningSession ? 'morning' : 'evening';
-        const sessionStartTime = isInMorningSession ? settingsMap.morning_session_start || '05:00' : settingsMap.evening_session_start || '16:00';
-        const sessionEndTime = isInMorningSession ? settingsMap.morning_session_end || '11:00' : settingsMap.evening_session_end || '22:00';
-        
-        const alreadyCheckedInThisSession = await pool.query(
-            `SELECT 1 FROM attendance 
-             WHERE member_id = $1 
-             AND DATE(check_in_time) = DATE('now')
-             AND TIME(check_in_time) >= $2 
-             AND TIME(check_in_time) <= $3
-             LIMIT 1`,
-            [resolvedMemberId, sessionStartTime, sessionEndTime]
+    if (!isAdmin && crossSessionRestrictionEnabled) {
+        // Check if member has already checked in during any session today
+        const todayCheckIns = await pool.query(
+            `SELECT check_in_time FROM attendance 
+             WHERE member_id = $1 AND DATE(check_in_time) = DATE('now') 
+             ORDER BY check_in_time DESC`,
+            [resolvedMemberId]
         );
 
-        if (alreadyCheckedInThisSession.rowCount > 0) {
-            return res.status(409).json({ 
-                message: `Member has already checked in during the ${currentSession} session today.` 
-            });
+        if (todayCheckIns.rowCount > 0) {
+            // Check which session the existing check-in was in
+            const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
+            const existingMinutesSinceMidnight = existingCheckInTime.getHours() * 60 + existingCheckInTime.getMinutes();
+            
+            const existingWasMorning = existingMinutesSinceMidnight >= MORNING_START_MINUTES && existingMinutesSinceMidnight <= MORNING_END_MINUTES;
+            const existingWasEvening = existingMinutesSinceMidnight >= EVENING_START_MINUTES && existingMinutesSinceMidnight <= EVENING_END_MINUTES;
+            
+            // Determine current session
+            const currentIsMorning = isInMorningSession;
+            const currentIsEvening = isInEveningSession;
+            
+            // Prevent cross-session check-ins
+            if ((existingWasMorning && currentIsEvening) || (existingWasEvening && currentIsMorning)) {
+                const existingSession = existingWasMorning ? 'morning' : 'evening';
+                const currentSession = currentIsMorning ? 'morning' : 'evening';
+                return res.status(409).json({ 
+                    message: `Member has already checked in during the ${existingSession} session today. Cannot check in during ${currentSession} session.` 
+                });
+            }
         }
     }
 

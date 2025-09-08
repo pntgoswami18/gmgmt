@@ -1532,6 +1532,86 @@ const validateBiometricId = async (req, res) => {
       });
     }
 
+    // Check cross-session restriction if enabled (unless admin)
+    const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = ?', [member.member_id]);
+    const isAdmin = memberCheck.rows[0]?.is_admin === 1;
+    
+    if (!isAdmin) {
+      // Get cross-session restriction setting
+      const restrictionSetting = await pool.query('SELECT value FROM settings WHERE key = ?', ['cross_session_checkin_restriction']);
+      const crossSessionRestrictionEnabled = restrictionSetting.rows[0]?.value === 'true';
+      
+      if (crossSessionRestrictionEnabled) {
+        // Get session settings
+        const settingsRes = await pool.query(`
+          SELECT key, value FROM settings WHERE key IN (
+            'morning_session_start','morning_session_end','evening_session_start','evening_session_end'
+          )
+        `);
+        const settingsMap = Object.fromEntries(settingsRes.rows.map(r => [r.key, r.value]));
+        
+        const parseTimeToMinutes = (hhmm) => {
+          const [h, m] = String(hhmm || '00:00').split(':').map(Number);
+          return (h * 60) + (m || 0);
+        };
+        
+        const MORNING_START_MINUTES = parseTimeToMinutes(settingsMap.morning_session_start || '05:00');
+        const MORNING_END_MINUTES = parseTimeToMinutes(settingsMap.morning_session_end || '11:00');
+        const EVENING_START_MINUTES = parseTimeToMinutes(settingsMap.evening_session_start || '16:00');
+        const EVENING_END_MINUTES = parseTimeToMinutes(settingsMap.evening_session_end || '22:00');
+
+        const now = new Date();
+        const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
+        const isInMorningSession = minutesSinceMidnight >= MORNING_START_MINUTES && minutesSinceMidnight <= MORNING_END_MINUTES;
+        const isInEveningSession = minutesSinceMidnight >= EVENING_START_MINUTES && minutesSinceMidnight <= EVENING_END_MINUTES;
+
+        // Check if current time is within allowed session windows
+        if (!isInMorningSession && !isInEveningSession) {
+          console.log(`❌ Member ${member.member_id} attempted access outside session windows`);
+          return res.json({ 
+            authorized: false,
+            memberId: member.member_id,
+            reason: 'outside_session_windows'
+          });
+        }
+
+        // Check for cross-session violations
+        const todayCheckIns = await pool.query(
+          `SELECT check_in_time FROM attendance 
+           WHERE member_id = ? AND DATE(check_in_time) = DATE('now') 
+           ORDER BY check_in_time DESC`,
+          [member.member_id]
+        );
+
+        if (todayCheckIns.rowCount > 0) {
+          // Check which session the existing check-in was in
+          const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
+          const existingMinutesSinceMidnight = existingCheckInTime.getHours() * 60 + existingCheckInTime.getMinutes();
+          
+          const existingWasMorning = existingMinutesSinceMidnight >= MORNING_START_MINUTES && existingMinutesSinceMidnight <= MORNING_END_MINUTES;
+          const existingWasEvening = existingMinutesSinceMidnight >= EVENING_START_MINUTES && existingMinutesSinceMidnight <= EVENING_END_MINUTES;
+          
+          // Determine current session
+          const currentIsMorning = isInMorningSession;
+          const currentIsEvening = isInEveningSession;
+          
+          // Prevent cross-session check-ins
+          if ((existingWasMorning && currentIsEvening) || (existingWasEvening && currentIsMorning)) {
+            const existingSession = existingWasMorning ? 'morning' : 'evening';
+            const currentSession = currentIsMorning ? 'morning' : 'evening';
+            
+            console.log(`❌ Member ${member.member_id} cross-session access blocked: ${existingSession} → ${currentSession}`);
+            return res.json({ 
+              authorized: false,
+              memberId: member.member_id,
+              reason: 'cross_session_violation',
+              details: `Already checked in during ${existingSession} session`
+            });
+          }
+        }
+      }
+    }
+
     // Check payment status if member has a plan
     let paymentStatus = null;
     if (member.membership_plan_id && member.duration_days) {

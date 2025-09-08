@@ -7,6 +7,7 @@ router.post('/:id/photo', memberController.uploadMemberPhoto);
 router.post('/photo/:id', memberController.uploadMemberPhoto); // alias
 
 router.get('/', memberController.getAllMembers);
+router.get('/:id/details', memberController.getMemberDetails);
 router.get('/:id', memberController.getMemberById);
 router.post('/', memberController.createMember);
 router.put('/:id', memberController.updateMember);
