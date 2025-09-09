@@ -1147,6 +1147,19 @@ const esp32Webhook = async (req, res) => {
       // Process heartbeat asynchronously to avoid blocking response
       setImmediate(async () => {
         try {
+          const deviceIP = ip_address || req.ip;
+          
+          // Update device status and IP address in devices table
+          await pool.query(`
+            INSERT OR REPLACE INTO devices (device_id, device_type, device_name, ip_address, status, last_heartbeat, updated_at)
+            VALUES (?, ?, ?, ?, 'online', datetime('now'), datetime('now'))
+          `, [
+            deviceId || 'unknown',
+            deviceType || 'esp32_door_lock',
+            eventData.device_name || `ESP32 Device ${deviceId}`,
+            deviceIP
+          ]);
+          
           const biometricEvent = {
             member_id: null,
             biometric_id: null,
@@ -1156,13 +1169,13 @@ const esp32Webhook = async (req, res) => {
             success: true,
             raw_data: JSON.stringify({
               ...eventData,
-              ip_address: ip_address || req.ip,
+              ip_address: deviceIP,
               user_agent: req.get('User-Agent')
             })
           };
           
           await biometricIntegration.logBiometricEvent(biometricEvent);
-          console.log(`✅ ESP32 heartbeat logged from device ${deviceId}`);
+          console.log(`✅ ESP32 heartbeat logged from device ${deviceId} (IP: ${deviceIP})`);
         } catch (error) {
           console.error(`❌ Error logging heartbeat from ${deviceId}:`, error);
         }
@@ -1435,6 +1448,22 @@ const esp32Webhook = async (req, res) => {
       }
     }
 
+    // Update device status and IP address in devices table for non-heartbeat events
+    const deviceIP = ip_address || req.ip;
+    try {
+      await pool.query(`
+        INSERT OR REPLACE INTO devices (device_id, device_type, device_name, ip_address, status, last_heartbeat, updated_at)
+        VALUES (?, ?, ?, ?, 'online', datetime('now'), datetime('now'))
+      `, [
+        deviceId || 'unknown',
+        deviceType || 'esp32_door_lock',
+        eventData.device_name || `ESP32 Device ${deviceId}`,
+        deviceIP
+      ]);
+    } catch (deviceUpdateError) {
+      console.error(`❌ Error updating device ${deviceId}:`, deviceUpdateError);
+    }
+
     // Log the biometric event
     const biometricEvent = {
       member_id: memberIdToUse,
@@ -1445,7 +1474,7 @@ const esp32Webhook = async (req, res) => {
       success: success,
       raw_data: JSON.stringify({
         ...eventData,
-        ip_address: ip_address || req.ip,
+        ip_address: deviceIP,
         user_agent: req.get('User-Agent'),
         reason: eventData.reason || null
       })
@@ -1747,11 +1776,13 @@ const invalidateESP32Cache = async () => {
     
     // Get all registered ESP32 devices
     const devicesQuery = `
-      SELECT device_id, device_name, last_heartbeat 
+      SELECT device_id, device_name, ip_address, last_heartbeat 
       FROM devices 
       WHERE device_type = 'esp32_door_lock'
       AND status = 'online'
       AND last_heartbeat > datetime('now', '-1 hour')
+      AND ip_address IS NOT NULL
+      AND ip_address != ''
     `;
     
     const devices = await pool.query(devicesQuery);
@@ -1767,11 +1798,13 @@ const invalidateESP32Cache = async () => {
     // The ESP32 devices will detect this and refresh their cache immediately
     for (const device of devices.rows) {
       try {
-        console.log(`🔄 Invalidating cache for device: ${device.device_name} (${device.device_id})`);
+        console.log(`🔄 Invalidating cache for device: ${device.device_name} (${device.device_id}) at IP: ${device.ip_address}`);
         
         // Send cache invalidation request to ESP32 device
         const axios = require('axios');
-        const deviceUrl = `http://${device.device_id}/api/cache/invalidate`;
+        const deviceUrl = `http://${device.ip_address}/api/cache/invalidate`;
+        
+        console.log(`📡 Sending cache invalidation to: ${deviceUrl}`);
         
         await axios.post(deviceUrl, {
           reason: 'member_status_change',
@@ -1784,6 +1817,8 @@ const invalidateESP32Cache = async () => {
         
       } catch (deviceError) {
         console.error(`❌ Failed to invalidate cache for device ${device.device_name}:`, deviceError.message);
+        console.error(`❌ Device URL was: http://${device.ip_address}/api/cache/invalidate`);
+        console.error(`❌ Error details:`, deviceError);
         // Continue with other devices even if one fails
       }
     }
