@@ -1032,7 +1032,7 @@ int getNextAvailableID() {
 }
 
 // ==================== COMMUNICATION FUNCTIONS ====================
-void sendBiometricData(int memberID, String status, String reason = "") {
+void sendBiometricData(int memberID, String status, String reason) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected - data not sent");
     return;
@@ -1961,9 +1961,22 @@ void updateMemberCache() {
 }
 
 void handleCacheUpdate(String jsonResponse) {
-  StaticJsonDocument<1000> doc;
+  // Optimized JSON document size for streamlined response (only essential fields)
+  StaticJsonDocument<2000> doc;
   
-  if (deserializeJson(doc, jsonResponse)) {
+  Serial.printf("📋 Received cache response: %d bytes\n", jsonResponse.length());
+  Serial.printf("📋 Response preview: %.100s...\n", jsonResponse.c_str());
+  
+  DeserializationError error = deserializeJson(doc, jsonResponse);
+  
+  if (error) {
+    Serial.printf("❌ Failed to parse cache update response: %s\n", error.c_str());
+    Serial.printf("📋 Response length: %d bytes\n", jsonResponse.length());
+    Serial.printf("📋 Response content: %s\n", jsonResponse.c_str());
+    return;
+  }
+  
+  if (doc.is<JsonObject>()) {
     // Clear existing cache
     clearCache();
     
@@ -1971,22 +1984,38 @@ void handleCacheUpdate(String jsonResponse) {
     if (doc.containsKey("members") && doc["members"].is<JsonArray>()) {
       JsonArray members = doc["members"];
       
+      Serial.printf("📋 Processing %d members from server\n", members.size());
+      
       for (JsonObject member : members) {
         if (cacheSize < MAX_CACHED_MEMBERS) {
+          // Only essential fields: biometricId, authorized, memberId
           memberCache[cacheSize].biometricId = member["biometricId"];
           memberCache[cacheSize].isAuthorized = member["authorized"];
           memberCache[cacheSize].lastUpdate = millis();
           memberCache[cacheSize].expiryTime = millis() + CACHE_VALIDITY_TIME;
           memberCache[cacheSize].memberId = member["memberId"];
           cacheSize++;
+          
+          Serial.printf("📝 Cached member: ID %d, Authorized: %s\n", 
+                       member["biometricId"].as<int>(), 
+                       member["authorized"].as<bool>() ? "YES" : "NO");
+        } else {
+          Serial.println("⚠️ Cache full, cannot add more members");
+          break;
         }
       }
       
       Serial.printf("✅ Cache updated with %d members from server\n", cacheSize);
     } else {
       Serial.println("⚠️ No member data received in cache update");
+      if (doc.containsKey("success")) {
+        Serial.printf("📋 Server response success: %s\n", doc["success"].as<bool>() ? "true" : "false");
+      }
+      if (doc.containsKey("error")) {
+        Serial.printf("📋 Server error: %s\n", doc["error"].as<String>().c_str());
+      }
     }
   } else {
-    Serial.println("❌ Failed to parse cache update response");
+    Serial.println("❌ Response is not a valid JSON object");
   }
 }
