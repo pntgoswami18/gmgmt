@@ -1700,16 +1700,13 @@ const updateMemberCache = async (req, res) => {
       });
     }
 
-    // Get all members with biometric IDs
+    // Get only essential fields for biometric authentication
     const query = `
       SELECT 
         m.id as member_id,
         m.biometric_id,
-        m.is_active,
-        m.membership_plan_id,
-        mp.name as plan_name
+        m.is_active
       FROM members m
-      LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
       WHERE m.biometric_id IS NOT NULL 
         AND m.biometric_id != ''
         AND m.biometric_id != '0'
@@ -1718,13 +1715,11 @@ const updateMemberCache = async (req, res) => {
     const result = await pool.query(query);
     const members = result.rows;
     
-    // Format members for ESP32 cache
+    // Format members for ESP32 cache - only essential fields for biometric authentication
     const cacheMembers = members.map(member => ({
       biometricId: parseInt(member.biometric_id),
       memberId: member.member_id,
-      authorized: member.is_active === 1,
-      planName: member.plan_name,
-      membershipPlanId: member.membership_plan_id
+      authorized: member.is_active === 1
     }));
     
     console.log(`✅ Sending cache update: ${cacheMembers.length} members to device ${deviceId}`);
