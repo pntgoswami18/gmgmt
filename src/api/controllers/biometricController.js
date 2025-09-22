@@ -1,4 +1,5 @@
 const { pool } = require('../../config/sqlite');
+const whatsappService = require('../../services/whatsappService');
 
 // Get reference to biometric integration instance
 let biometricIntegration = null;
@@ -113,19 +114,76 @@ const stopEnrollment = async (req, res) => {
       });
     }
 
-    const result = biometricIntegration.stopEnrollmentMode('manual');
-    
-    if (!result) {
+    // Get the current enrollment session details
+    const enrollmentSession = biometricIntegration.enrollmentMode;
+    if (!enrollmentSession || !enrollmentSession.active) {
       return res.status(400).json({ 
         success: false, 
         message: 'No active enrollment session' 
       });
     }
 
+    const { memberId, memberName } = enrollmentSession;
+
+    // Send cancel command to all online ESP32 devices
+    const devicesQuery = `
+      SELECT DISTINCT device_id 
+      FROM biometric_events 
+      WHERE device_id IS NOT NULL 
+        AND timestamp > datetime('now', '-5 minutes')
+      GROUP BY device_id
+    `;
+    
+    const devicesResult = await pool.query(devicesQuery);
+    const devices = devicesResult.rows || [];
+    
+    let cancelsSent = 0;
+    const results = [];
+
+    for (const device of devices) {
+      try {
+        await biometricIntegration.sendESP32Command(device.device_id, 'cancel_enrollment', {
+          memberId: memberId,
+          reason: 'user_cancelled'
+        });
+        cancelsSent++;
+        results.push({ deviceId: device.device_id, status: 'sent' });
+      } catch (error) {
+        console.error(`Failed to send cancel to ${device.device_id}:`, error.message);
+        results.push({ deviceId: device.device_id, status: 'failed', error: error.message });
+      }
+    }
+
+    // Stop the enrollment mode in the backend
+    const result = biometricIntegration.stopEnrollmentMode('manual');
+    
+    // Log cancellation event
+    await biometricIntegration.logBiometricEvent({
+      member_id: memberId,
+      biometric_id: null,
+      event_type: 'enrollment_cancelled',
+      device_id: 'system',
+      timestamp: new Date().toISOString(),
+      success: true,
+      raw_data: JSON.stringify({ 
+        reason: 'user_cancelled',
+        memberName,
+        devicesCancelled: cancelsSent,
+        results
+      })
+    });
+
     res.json({ 
       success: true, 
-      message: 'Enrollment stopped',
-      data: result 
+      message: `Enrollment stopped for ${memberName}. Cancel commands sent to ${cancelsSent} device(s).`,
+      data: {
+        ...result,
+        memberId,
+        memberName,
+        cancelsSent,
+        totalDevices: devices.length,
+        results
+      }
     });
   } catch (error) {
     console.error('Error stopping enrollment:', error);
@@ -765,6 +823,23 @@ const manualEnrollment = async (req, res) => {
 
       await biometricIntegration.logBiometricEvent(enrollmentEvent);
     }
+
+    // Send WhatsApp welcome message for manual enrollment
+    try {
+      const whatsappResult = await whatsappService.sendWelcomeMessage(
+        memberId, 
+        member.name, 
+        member.phone
+      );
+      
+      if (whatsappResult.success) {
+        console.log(`📱 WhatsApp welcome message prepared for ${member.name} (manual enrollment)`);
+      } else {
+        console.log(`📱 WhatsApp welcome message failed for ${member.name}: ${whatsappResult.error}`);
+      }
+    } catch (whatsappError) {
+      console.error('📱 Error sending WhatsApp welcome message (manual enrollment):', whatsappError);
+    }
     
     res.json({ 
       success: true, 
@@ -1072,6 +1147,19 @@ const esp32Webhook = async (req, res) => {
       // Process heartbeat asynchronously to avoid blocking response
       setImmediate(async () => {
         try {
+          const deviceIP = ip_address || req.ip;
+          
+          // Update device status and IP address in devices table
+          await pool.query(`
+            INSERT OR REPLACE INTO devices (device_id, device_type, device_name, ip_address, status, last_heartbeat, updated_at)
+            VALUES (?, ?, ?, ?, 'online', datetime('now'), datetime('now'))
+          `, [
+            deviceId || 'unknown',
+            deviceType || 'esp32_door_lock',
+            eventData.device_name || `ESP32 Device ${deviceId}`,
+            deviceIP
+          ]);
+          
           const biometricEvent = {
             member_id: null,
             biometric_id: null,
@@ -1081,13 +1169,13 @@ const esp32Webhook = async (req, res) => {
             success: true,
             raw_data: JSON.stringify({
               ...eventData,
-              ip_address: ip_address || req.ip,
+              ip_address: deviceIP,
               user_agent: req.get('User-Agent')
             })
           };
           
           await biometricIntegration.logBiometricEvent(biometricEvent);
-          console.log(`✅ ESP32 heartbeat logged from device ${deviceId}`);
+          console.log(`✅ ESP32 heartbeat logged from device ${deviceId} (IP: ${deviceIP})`);
         } catch (error) {
           console.error(`❌ Error logging heartbeat from ${deviceId}:`, error);
         }
@@ -1111,6 +1199,16 @@ const esp32Webhook = async (req, res) => {
       } else if (status === 'unauthorized') {
         eventType = 'access_denied';
         success = false;
+      } else if (status === 'button_override') {
+        eventType = 'button_override';
+        memberIdToUse = null;
+        biometricId = null;
+        success = true;
+      } else if (status === 'remote_unlock') {
+        eventType = 'remote_unlock';
+        memberIdToUse = null;
+        biometricId = null;
+        success = true;
       }
     } else if (event === 'Enroll') {
       console.log(`🎯 Processing enrollment event: status=${status}, userId=${userId}, deviceId=${deviceId}`);
@@ -1121,7 +1219,7 @@ const esp32Webhook = async (req, res) => {
         success = false; // Progress events should not mark as successful completion
         
         // Extract enrollment step from the message
-        const enrollmentStep = eventData.enrollmentStep;
+        const { enrollmentStep } = eventData;
         console.log(`🔄 Processing enrollment progress: ${enrollmentStep} for user ${userId}`);
         
         // Since we now pass memberId as userId to ESP32, userId IS the member ID
@@ -1350,6 +1448,22 @@ const esp32Webhook = async (req, res) => {
       }
     }
 
+    // Update device status and IP address in devices table for non-heartbeat events
+    const deviceIP = ip_address || req.ip;
+    try {
+      await pool.query(`
+        INSERT OR REPLACE INTO devices (device_id, device_type, device_name, ip_address, status, last_heartbeat, updated_at)
+        VALUES (?, ?, ?, ?, 'online', datetime('now'), datetime('now'))
+      `, [
+        deviceId || 'unknown',
+        deviceType || 'esp32_door_lock',
+        eventData.device_name || `ESP32 Device ${deviceId}`,
+        deviceIP
+      ]);
+    } catch (deviceUpdateError) {
+      console.error(`❌ Error updating device ${deviceId}:`, deviceUpdateError);
+    }
+
     // Log the biometric event
     const biometricEvent = {
       member_id: memberIdToUse,
@@ -1360,8 +1474,9 @@ const esp32Webhook = async (req, res) => {
       success: success,
       raw_data: JSON.stringify({
         ...eventData,
-        ip_address: ip_address || req.ip,
-        user_agent: req.get('User-Agent')
+        ip_address: deviceIP,
+        user_agent: req.get('User-Agent'),
+        reason: eventData.reason || null
       })
     };
 
@@ -1387,6 +1502,335 @@ const esp32Webhook = async (req, res) => {
   }
 };
 
+// Fast validation endpoint for ESP32 devices
+const validateBiometricId = async (req, res) => {
+  try {
+    const { biometricId, deviceId, timestamp } = req.body;
+    
+    console.log(`🔍 Validation request: biometricId=${biometricId}, deviceId=${deviceId}`);
+    
+    if (!biometricId) {
+      return res.status(400).json({ 
+        authorized: false,
+        error: 'biometricId is required' 
+      });
+    }
+
+    // Import payment validation utilities
+    const { checkMemberPaymentStatus, getGracePeriodSetting } = require('../../utils/dateUtils');
+
+    // Single optimized query for fast response with payment status
+    const query = `
+      SELECT 
+        m.id as member_id,
+        m.name,
+        m.biometric_id,
+        m.is_active,
+        m.membership_plan_id,
+        m.join_date,
+        mp.name as plan_name,
+        mp.duration_days,
+        (SELECT MAX(p.payment_date) 
+         FROM payments p 
+         JOIN invoices i ON p.invoice_id = i.id 
+         WHERE i.member_id = m.id) as last_payment_date
+      FROM members m
+      LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
+      WHERE m.biometric_id = ?
+    `;
+    
+    const result = await pool.query(query, [biometricId]);
+    const member = result.rows[0];
+    
+    if (!member) {
+      console.log(`❌ Member not found for biometric ID: ${biometricId}`);
+      return res.json({ 
+        authorized: false,
+        memberId: null,
+        reason: 'member_not_found'
+      });
+    }
+    
+    // Check if member is active
+    if (member.is_active !== 1) {
+      console.log(`❌ Member ${member.member_id} is inactive`);
+      return res.json({ 
+        authorized: false,
+        memberId: member.member_id,
+        reason: 'member_inactive'
+      });
+    }
+
+    // Check cross-session restriction if enabled (unless admin)
+    const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = ?', [member.member_id]);
+    const isAdmin = memberCheck.rows[0]?.is_admin === 1;
+    
+    if (!isAdmin) {
+      // Get cross-session restriction setting
+      const restrictionSetting = await pool.query('SELECT value FROM settings WHERE key = ?', ['cross_session_checkin_restriction']);
+      const crossSessionRestrictionEnabled = restrictionSetting.rows[0]?.value === 'true';
+      
+      if (crossSessionRestrictionEnabled) {
+        // Get session settings
+        const settingsRes = await pool.query(`
+          SELECT key, value FROM settings WHERE key IN (
+            'morning_session_start','morning_session_end','evening_session_start','evening_session_end'
+          )
+        `);
+        const settingsMap = Object.fromEntries(settingsRes.rows.map(r => [r.key, r.value]));
+        
+        const parseTimeToMinutes = (hhmm) => {
+          const [h, m] = String(hhmm || '00:00').split(':').map(Number);
+          return (h * 60) + (m || 0);
+        };
+        
+        const MORNING_START_MINUTES = parseTimeToMinutes(settingsMap.morning_session_start || '05:00');
+        const MORNING_END_MINUTES = parseTimeToMinutes(settingsMap.morning_session_end || '11:00');
+        const EVENING_START_MINUTES = parseTimeToMinutes(settingsMap.evening_session_start || '16:00');
+        const EVENING_END_MINUTES = parseTimeToMinutes(settingsMap.evening_session_end || '22:00');
+
+        const now = new Date();
+        const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
+        const isInMorningSession = minutesSinceMidnight >= MORNING_START_MINUTES && minutesSinceMidnight <= MORNING_END_MINUTES;
+        const isInEveningSession = minutesSinceMidnight >= EVENING_START_MINUTES && minutesSinceMidnight <= EVENING_END_MINUTES;
+
+        // Check if current time is within allowed session windows
+        if (!isInMorningSession && !isInEveningSession) {
+          console.log(`❌ Member ${member.member_id} attempted access outside session windows`);
+          return res.json({ 
+            authorized: false,
+            memberId: member.member_id,
+            reason: 'outside_session_windows'
+          });
+        }
+
+        // Check for cross-session violations
+        const todayCheckIns = await pool.query(
+          `SELECT check_in_time FROM attendance 
+           WHERE member_id = ? AND DATE(check_in_time) = DATE('now') 
+           ORDER BY check_in_time DESC`,
+          [member.member_id]
+        );
+
+        if (todayCheckIns.rowCount > 0) {
+          // Check which session the existing check-in was in
+          const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
+          const existingMinutesSinceMidnight = existingCheckInTime.getHours() * 60 + existingCheckInTime.getMinutes();
+          
+          const existingWasMorning = existingMinutesSinceMidnight >= MORNING_START_MINUTES && existingMinutesSinceMidnight <= MORNING_END_MINUTES;
+          const existingWasEvening = existingMinutesSinceMidnight >= EVENING_START_MINUTES && existingMinutesSinceMidnight <= EVENING_END_MINUTES;
+          
+          // Determine current session
+          const currentIsMorning = isInMorningSession;
+          const currentIsEvening = isInEveningSession;
+          
+          // Prevent cross-session check-ins
+          if ((existingWasMorning && currentIsEvening) || (existingWasEvening && currentIsMorning)) {
+            const existingSession = existingWasMorning ? 'morning' : 'evening';
+            const currentSession = currentIsMorning ? 'morning' : 'evening';
+            
+            console.log(`❌ Member ${member.member_id} cross-session access blocked: ${existingSession} → ${currentSession}`);
+            return res.json({ 
+              authorized: false,
+              memberId: member.member_id,
+              reason: 'cross_session_violation',
+              details: `Already checked in during ${existingSession} session`
+            });
+          }
+        }
+      }
+    }
+
+    // Check payment status if member has a plan
+    let paymentStatus = null;
+    if (member.membership_plan_id && member.duration_days) {
+      try {
+        const gracePeriodDays = await getGracePeriodSetting(pool);
+        paymentStatus = checkMemberPaymentStatus(
+          {
+            join_date: member.join_date,
+            membership_plan_id: member.membership_plan_id
+          },
+          {
+            duration_days: member.duration_days
+          },
+          member.last_payment_date,
+          gracePeriodDays
+        );
+
+        // If grace period has expired, deny access
+        if (paymentStatus.gracePeriodExpired) {
+          console.log(`❌ Member ${member.member_id} payment grace period expired (${paymentStatus.daysOverdue} days overdue)`);
+          
+          // Automatically deactivate the member
+          try {
+            await pool.query('UPDATE members SET is_active = 0 WHERE id = ?', [member.member_id]);
+            console.log(`🔄 Automatically deactivated member ${member.member_id} due to expired grace period`);
+            
+            // Trigger ESP32 cache invalidation
+            try {
+              if (invalidateESP32Cache) {
+                await invalidateESP32Cache();
+              }
+            } catch (cacheError) {
+              console.error('❌ Error invalidating ESP32 cache:', cacheError);
+            }
+          } catch (deactivationError) {
+            console.error('❌ Error deactivating member:', deactivationError);
+          }
+          
+          return res.json({ 
+            authorized: false,
+            memberId: member.member_id,
+            reason: 'payment_overdue_grace_expired',
+            daysOverdue: paymentStatus.daysOverdue,
+            gracePeriodExpired: true
+          });
+        }
+      } catch (paymentError) {
+        console.error('❌ Error checking payment status:', paymentError);
+        // Continue with authorization if payment check fails
+      }
+    }
+    
+    const isAuthorized = member.is_active === 1;
+    
+    console.log(`✅ Validation result: memberId=${member.member_id}, authorized=${isAuthorized}`);
+    
+    // Send minimal response for speed
+    res.json({ 
+      authorized: isAuthorized,
+      memberId: member.member_id,
+      isActive: member.is_active,
+      planName: member.plan_name,
+      paymentStatus: paymentStatus
+    });
+    
+  } catch (error) {
+    console.error('❌ Error validating biometric ID:', error);
+    res.status(500).json({ 
+      authorized: false,
+      error: 'validation_failed'
+    });
+  }
+};
+
+// Cache update endpoint for ESP32 devices
+const updateMemberCache = async (req, res) => {
+  try {
+    const { deviceId, event, timestamp } = req.body;
+    
+    console.log(`🔄 Cache update request from device: ${deviceId}`);
+    
+    if (!deviceId) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'deviceId is required' 
+      });
+    }
+
+    // Get only essential fields for biometric authentication
+    const query = `
+      SELECT 
+        m.id as member_id,
+        m.biometric_id,
+        m.is_active
+      FROM members m
+      WHERE m.biometric_id IS NOT NULL 
+        AND m.biometric_id != ''
+        AND m.biometric_id != '0'
+    `;
+    
+    const result = await pool.query(query);
+    const members = result.rows;
+    
+    // Format members for ESP32 cache - only essential fields for biometric authentication
+    const cacheMembers = members.map(member => ({
+      biometricId: parseInt(member.biometric_id),
+      memberId: member.member_id,
+      authorized: member.is_active === 1
+    }));
+    
+    console.log(`✅ Sending cache update: ${cacheMembers.length} members to device ${deviceId}`);
+    
+    res.json({ 
+      success: true,
+      members: cacheMembers,
+      totalMembers: cacheMembers.length,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Error updating member cache:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'cache_update_failed'
+    });
+  }
+};
+
+// Cache invalidation function to trigger immediate ESP32 cache updates
+const invalidateESP32Cache = async () => {
+  try {
+    console.log('🔄 Triggering immediate ESP32 cache invalidation...');
+    
+    // Get all registered ESP32 devices
+    const devicesQuery = `
+      SELECT device_id, device_name, ip_address, last_heartbeat 
+      FROM devices 
+      WHERE device_type = 'esp32_door_lock'
+      AND status = 'online'
+      AND last_heartbeat > datetime('now', '-1 hour')
+      AND ip_address IS NOT NULL
+      AND ip_address != ''
+    `;
+    
+    const devices = await pool.query(devicesQuery);
+    
+    if (devices.rows.length === 0) {
+      console.log('⚠️ No active ESP32 devices found for cache invalidation');
+      return;
+    }
+    
+    console.log(`📡 Found ${devices.rows.length} active ESP32 devices for cache invalidation`);
+    
+    // For each device, we'll send a cache invalidation signal
+    // The ESP32 devices will detect this and refresh their cache immediately
+    for (const device of devices.rows) {
+      try {
+        console.log(`🔄 Invalidating cache for device: ${device.device_name} (${device.device_id}) at IP: ${device.ip_address}`);
+        
+        // Send cache invalidation request to ESP32 device
+        const axios = require('axios');
+        const deviceUrl = `http://${device.ip_address}/api/cache/invalidate`;
+        
+        console.log(`📡 Sending cache invalidation to: ${deviceUrl}`);
+        
+        await axios.post(deviceUrl, {
+          reason: 'member_status_change',
+          timestamp: new Date().toISOString()
+        }, {
+          timeout: 5000 // 5 second timeout
+        });
+        
+        console.log(`✅ Cache invalidation sent to device: ${device.device_name}`);
+        
+      } catch (deviceError) {
+        console.error(`❌ Failed to invalidate cache for device ${device.device_name}:`, deviceError.message);
+        console.error(`❌ Device URL was: http://${device.ip_address}/api/cache/invalidate`);
+        console.error(`❌ Error details:`, deviceError);
+        // Continue with other devices even if one fails
+      }
+    }
+    
+    console.log('✅ ESP32 cache invalidation process completed');
+    
+  } catch (error) {
+    console.error('❌ Error during ESP32 cache invalidation:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   setBiometricIntegration,
   getMemberBiometricStatus,
@@ -1407,5 +1851,10 @@ module.exports = {
   startRemoteEnrollment,
   getDeviceStatus,
   getAllDevices,
-  esp32Webhook
+  esp32Webhook,
+  // Hybrid cache endpoints
+  validateBiometricId,
+  updateMemberCache,
+  // Cache invalidation
+  invalidateESP32Cache
 };

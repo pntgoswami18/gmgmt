@@ -27,7 +27,7 @@ INSERT INTO settings VALUES('primary_color_mode','solid');
 INSERT INTO settings VALUES('secondary_color_mode','gradient');
 INSERT INTO settings VALUES('primary_color_gradient','radial-gradient(circle, #19b849 8%, #96eea4 50%, #d8f58a 100%)');
 INSERT INTO settings VALUES('secondary_color_gradient','linear-gradient(90deg, #00fffb 0%, #19b849 50%, #d25228 100%)');
-INSERT INTO settings VALUES('payment_reminder_days','7');
+INSERT INTO settings VALUES('payment_reminder_days_after_due','7');
 INSERT INTO settings VALUES('morning_session_start','05:00');
 INSERT INTO settings VALUES('morning_session_end','11:00');
 INSERT INTO settings VALUES('evening_session_start','16:00');

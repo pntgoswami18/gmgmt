@@ -2,6 +2,7 @@ const BiometricListener = require('./biometricListener');
 const { pool } = require('../config/sqlite');
 const path = require('path');
 const os = require('os');
+const whatsappService = require('./whatsappService');
 
 class BiometricIntegration {
   constructor(port = 8080) {
@@ -152,7 +153,121 @@ class BiometricIntegration {
       // Enhanced logging
       const deviceUserId = biometricData?.userId || 'N/A';
 
-      // Check if member already checked in today
+      // Check if member is admin (admins can check in multiple times across sessions)
+      const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = ?', [member.id]);
+      const isAdmin = memberCheck.rows[0]?.is_admin === 1;
+
+      // Enforce session windows and cross-session restrictions (unless admin)
+      if (!isAdmin) {
+        // Get session settings
+        const settingsRes = await pool.query(`
+          SELECT key, value FROM settings WHERE key IN (
+            'morning_session_start','morning_session_end','evening_session_start','evening_session_end','cross_session_checkin_restriction'
+          )
+        `);
+        const settingsMap = Object.fromEntries(settingsRes.rows.map(r => [r.key, r.value]));
+        
+        // Check if cross-session restriction is enabled
+        const crossSessionRestrictionEnabled = settingsMap.cross_session_checkin_restriction === 'true' || settingsMap.cross_session_checkin_restriction === true;
+        
+        const parseTimeToMinutes = (hhmm) => {
+          const [h, m] = String(hhmm || '00:00').split(':').map(Number);
+          return (h * 60) + (m || 0);
+        };
+        
+        const MORNING_START_MINUTES = parseTimeToMinutes(settingsMap.morning_session_start || '05:00');
+        const MORNING_END_MINUTES = parseTimeToMinutes(settingsMap.morning_session_end || '11:00');
+        const EVENING_START_MINUTES = parseTimeToMinutes(settingsMap.evening_session_start || '16:00');
+        const EVENING_END_MINUTES = parseTimeToMinutes(settingsMap.evening_session_end || '22:00');
+
+        const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
+        const isInMorningSession = minutesSinceMidnight >= MORNING_START_MINUTES && minutesSinceMidnight <= MORNING_END_MINUTES;
+        const isInEveningSession = minutesSinceMidnight >= EVENING_START_MINUTES && minutesSinceMidnight <= EVENING_END_MINUTES;
+
+        // Check if current time is within allowed session windows
+        if (!isInMorningSession && !isInEveningSession) {
+          console.log(`❌ ${member.name} attempted check-in outside session windows`);
+          console.log(`   Current time: ${now.toLocaleTimeString()}`);
+          console.log(`   Allowed: Morning (${settingsMap.morning_session_start || '05:00'}-${settingsMap.morning_session_end || '11:00'}) or Evening (${settingsMap.evening_session_start || '16:00'}-${settingsMap.evening_session_end || '22:00'})`);
+          
+          // Log biometric event for session violation
+          if (biometricData) {
+            await this.logBiometricEvent({
+              member_id: member.id,
+              biometric_id: biometricData.userId,
+              event_type: 'session_violation',
+              device_id: biometricData.deviceId || 'unknown',
+              timestamp: timeStr,
+              success: false,
+              error_message: 'Check-in outside session windows',
+              raw_data: JSON.stringify({ 
+                ...biometricData, 
+                action: 'session_violation',
+                current_time: now.toLocaleTimeString(),
+                session_windows: settingsMap
+              })
+            });
+          }
+          return; // Exit without processing check-in
+        }
+
+        // Check for cross-session violations (only if restriction is enabled)
+        if (crossSessionRestrictionEnabled) {
+          const todayCheckIns = await pool.query(
+            `SELECT check_in_time FROM attendance 
+             WHERE member_id = ? AND DATE(check_in_time) = DATE(?) 
+             ORDER BY check_in_time DESC`,
+            [member.id, dateStr]
+          );
+
+          if (todayCheckIns.rowCount > 0) {
+            // Check which session the existing check-in was in
+            const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
+            const existingMinutesSinceMidnight = existingCheckInTime.getHours() * 60 + existingCheckInTime.getMinutes();
+            
+            const existingWasMorning = existingMinutesSinceMidnight >= MORNING_START_MINUTES && existingMinutesSinceMidnight <= MORNING_END_MINUTES;
+            const existingWasEvening = existingMinutesSinceMidnight >= EVENING_START_MINUTES && existingMinutesSinceMidnight <= EVENING_END_MINUTES;
+            
+            // Determine current session
+            const currentIsMorning = isInMorningSession;
+            const currentIsEvening = isInEveningSession;
+            
+            // Prevent cross-session check-ins
+            if ((existingWasMorning && currentIsEvening) || (existingWasEvening && currentIsMorning)) {
+              const existingSession = existingWasMorning ? 'morning' : 'evening';
+              const currentSession = currentIsMorning ? 'morning' : 'evening';
+              
+              console.log(`❌ ${member.name} attempted cross-session check-in: ${existingSession} → ${currentSession}`);
+              console.log(`   Existing check-in: ${existingCheckInTime.toLocaleTimeString()}`);
+              console.log(`   Current attempt: ${now.toLocaleTimeString()}`);
+              
+              // Log biometric event for cross-session violation
+              if (biometricData) {
+                await this.logBiometricEvent({
+                  member_id: member.id,
+                  biometric_id: biometricData.userId,
+                  event_type: 'cross_session_violation',
+                  device_id: biometricData.deviceId || 'unknown',
+                  timestamp: timeStr,
+                  success: false,
+                  error_message: `Cross-session check-in blocked: ${existingSession} → ${currentSession}`,
+                  raw_data: JSON.stringify({ 
+                    ...biometricData, 
+                    action: 'cross_session_violation',
+                    existing_session: existingSession,
+                    current_session: currentSession,
+                    existing_time: existingCheckInTime.toLocaleTimeString(),
+                    current_time: now.toLocaleTimeString()
+                  })
+                });
+              }
+              return; // Exit without processing check-in
+            }
+          }
+        }
+      }
+
+      // Check if member already checked in today (for checkout logic)
       const existingCheckIn = await this.getTodayCheckIn(member.id, dateStr);
       
       if (existingCheckIn && !existingCheckIn.check_out_time) {
@@ -271,18 +386,66 @@ class BiometricIntegration {
 
   async hasActivePlan(member) {
     try {
+      // Import payment validation utilities
+      const { checkMemberPaymentStatus, getGracePeriodSetting } = require('../utils/dateUtils');
+      
       // Check if member has an active plan
-      // This logic depends on your plan/subscription structure
       const query = `
-        SELECT * FROM member_plans 
-        WHERE member_id = ? 
-        AND start_date <= date('now') 
-        AND end_date >= date('now')
-        AND status = 'active'
+        SELECT 
+          mp.*,
+          (SELECT MAX(p.payment_date) 
+           FROM payments p 
+           JOIN invoices i ON p.invoice_id = i.id 
+           WHERE i.member_id = ?) as last_payment_date
+        FROM membership_plans mp
+        WHERE mp.id = ?
       `;
       
-      const result = await pool.query(query, [member.id]);
-      return !!(result.rows && result.rows[0]);
+      const result = await pool.query(query, [member.id, member.membership_plan_id]);
+      const plan = result.rows[0];
+      
+      if (!plan) {
+        console.log(`❌ No plan found for member ${member.id}`);
+        return false;
+      }
+
+      // Check payment status if plan has duration
+      if (plan.duration_days) {
+        try {
+          const gracePeriodDays = await getGracePeriodSetting(pool);
+          const paymentStatus = checkMemberPaymentStatus(
+            member,
+            plan,
+            plan.last_payment_date,
+            gracePeriodDays
+          );
+
+          // If grace period has expired, member should be deactivated
+          if (paymentStatus.gracePeriodExpired) {
+            console.log(`❌ Member ${member.id} payment grace period expired (${paymentStatus.daysOverdue} days overdue)`);
+            
+            // Automatically deactivate the member
+            try {
+              await pool.query('UPDATE members SET is_active = 0 WHERE id = ?', [member.id]);
+              console.log(`🔄 Automatically deactivated member ${member.id} due to expired grace period`);
+            } catch (deactivationError) {
+              console.error('❌ Error deactivating member:', deactivationError);
+            }
+            
+            return false;
+          }
+
+          // If overdue but within grace period, allow access but log warning
+          if (paymentStatus.isOverdue) {
+            console.log(`⚠️ Member ${member.id} is overdue but within grace period (${paymentStatus.daysOverdue} days overdue)`);
+          }
+        } catch (paymentError) {
+          console.error('❌ Error checking payment status:', paymentError);
+          // Continue with plan check if payment validation fails
+        }
+      }
+      
+      return true; // Plan exists and payment status is valid
     } catch (error) {
       console.error('Error checking active plan:', error);
       return false;
@@ -572,6 +735,54 @@ class BiometricIntegration {
 
       await this.logBiometricEvent(enrollmentEvent);
       
+      // Send WhatsApp welcome message for first-time enrollment
+      try {
+        const memberResult = await pool.query('SELECT name, phone FROM members WHERE id = ?', [memberId]);
+        if (memberResult.rows.length > 0) {
+          const member = memberResult.rows[0];
+          const whatsappResult = await whatsappService.sendWelcomeMessage(
+            memberId, 
+            member.name, 
+            member.phone
+          );
+          
+          if (whatsappResult.success) {
+            console.log(`📱 WhatsApp welcome message prepared for ${member.name}`);
+            // Broadcast WhatsApp message status to WebSocket clients
+            this.broadcastToWebSocketClients({
+              type: 'whatsapp_welcome_sent',
+              memberId: memberId,
+              memberName: member.name,
+              success: true,
+              message: 'WhatsApp welcome message prepared successfully',
+              whatsappUrl: whatsappResult.whatsappUrl,
+              timestamp: new Date().toISOString()
+            });
+          } else {
+            console.log(`📱 WhatsApp welcome message failed for ${member.name}: ${whatsappResult.error}`);
+            // Broadcast WhatsApp message failure to WebSocket clients
+            this.broadcastToWebSocketClients({
+              type: 'whatsapp_welcome_failed',
+              memberId: memberId,
+              memberName: member.name,
+              success: false,
+              error: whatsappResult.error,
+              timestamp: new Date().toISOString()
+            });
+          }
+        }
+      } catch (whatsappError) {
+        console.error('📱 Error sending WhatsApp welcome message:', whatsappError);
+        // Broadcast WhatsApp error to WebSocket clients
+        this.broadcastToWebSocketClients({
+          type: 'whatsapp_welcome_error',
+          memberId: memberId,
+          success: false,
+          error: whatsappError.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
       console.log(`💾 Biometric enrollment saved for member ${memberId}`);
       return true;
     } catch (error) {
@@ -821,12 +1032,33 @@ class BiometricIntegration {
   async startRemoteEnrollment(deviceId, memberId) {
     console.log(`👆 Remote enrollment started for member ${memberId} on device ${deviceId}`);
     
+    // Get member name for better user experience
+    let memberName = `Member ${memberId}`;
+    try {
+      const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [memberId]);
+      if (memberResult.rows && memberResult.rows.length > 0) {
+        memberName = memberResult.rows[0].name;
+      }
+    } catch (nameError) {
+      console.warn('Could not fetch member name:', nameError.message);
+    }
+    
     // Pass the member ID as the userId to the ESP32 device
     // This creates a direct 1:1 mapping between ESP32 userId and member ID
     await this.sendESP32Command(deviceId, 'start_enrollment', {
       memberId: memberId,
       userId: memberId, // Use member ID as the ESP32 userId
       enrollmentId: memberId
+    });
+
+    // Send WebSocket event to notify frontend that enrollment has started
+    this.sendToWebSocketClients({
+      type: 'enrollment_started',
+      status: 'active',
+      memberId: memberId,
+      memberName: memberName,
+      deviceId: deviceId,
+      message: `Remote enrollment started for ${memberName} on device ${deviceId}`
     });
 
     return { success: true, message: 'Remote enrollment started' };

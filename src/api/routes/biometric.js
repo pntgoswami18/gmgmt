@@ -19,7 +19,10 @@ const {
   startRemoteEnrollment,
   getDeviceStatus,
   getAllDevices,
-  esp32Webhook
+  esp32Webhook,
+  // Hybrid cache endpoints
+  validateBiometricId,
+  updateMemberCache
 } = require('../controllers/biometricController');
 
 // System status and info
@@ -51,5 +54,9 @@ router.get('/devices', getAllDevices);
 
 // ESP32 Webhook - receives data from ESP32 devices
 router.post('/esp32-webhook', esp32Webhook);
+
+// Hybrid cache endpoints for fast validation
+router.post('/validate', validateBiometricId);
+router.post('/cache-update', updateMemberCache);
 
 module.exports = router;

@@ -36,7 +36,7 @@ exports.getAllMembers = async (req, res) => {
         let searchCondition = '';
         let searchParams = [];
         if (search.trim()) {
-            searchCondition = `AND (name ILIKE $${searchParams.length + 1} OR phone ILIKE $${searchParams.length + 2} OR email ILIKE $${searchParams.length + 3})`;
+            searchCondition = `AND (name LIKE ? OR phone LIKE ? OR email LIKE ?)`;
             const searchTerm = `%${search.trim()}%`;
             searchParams.push(searchTerm, searchTerm, searchTerm);
         }
@@ -44,15 +44,21 @@ exports.getAllMembers = async (req, res) => {
         // Build filter condition
         let filterCondition = '';
         let filterParams = [];
-        if (filter === 'admins') {
-            filterCondition = `AND is_admin = 1`;
+        if (filter === 'all') {
+            // Default: show only active members
+            filterCondition = `AND is_active = 1`;
+        } else if (filter === 'deactivated') {
+            // Show only deactivated members
+            filterCondition = `AND is_active = 0`;
+        } else if (filter === 'admins') {
+            filterCondition = `AND is_admin = 1 AND is_active = 1`;
         } else if (filter === 'members') {
-            filterCondition = `AND is_admin != 1`;
+            filterCondition = `AND is_admin != 1 AND is_active = 1`;
         } else if (filter === 'new-this-month') {
-            filterCondition = `AND date(join_date) >= date('now','start of month')`;
+            filterCondition = `AND date(join_date) >= date('now','start of month') AND is_active = 1`;
         } else if (filter === 'unpaid-this-month') {
             // This will be handled separately as it requires a complex query
-            filterCondition = `AND is_admin != 1 AND NOT EXISTS (
+            filterCondition = `AND is_admin != 1 AND is_active = 1 AND NOT EXISTS (
                 SELECT 1 FROM payments p 
                 JOIN invoices i ON p.invoice_id = i.id 
                 WHERE i.member_id = members.id 
@@ -82,7 +88,7 @@ exports.getAllMembers = async (req, res) => {
             FROM members m
             WHERE 1=1 ${searchCondition} ${filterCondition}
             ORDER BY m.id ASC 
-            LIMIT $${searchParams.length + filterParams.length + 1} OFFSET $${searchParams.length + filterParams.length + 2}
+            LIMIT ? OFFSET ?
         `;
         const members = await pool.query(query, [...searchParams, ...filterParams, limitNum, offset]);
 
@@ -110,6 +116,114 @@ exports.getMemberById = async (req, res) => {
         }
         res.json(member.rows[0]);
     } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
+// Get detailed member information including payment history and referral discounts
+exports.getMemberDetails = async (req, res) => {
+    const { id } = req.params;
+    try {
+        // Get basic member information with plan details
+        const memberQuery = `
+            SELECT 
+                m.*,
+                mp.name as plan_name,
+                mp.price as plan_price,
+                mp.duration_days as plan_duration_days,
+                CASE 
+                    WHEN m.is_admin = 1 THEN 0
+                    WHEN EXISTS (
+                        SELECT 1 FROM invoices i 
+                        WHERE i.member_id = m.id 
+                        AND i.status = 'unpaid' 
+                        AND julianday('now') > julianday(i.due_date)
+                    ) THEN 1
+                    ELSE 0
+                END as has_overdue_payments
+            FROM members m
+            LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
+            WHERE m.id = ?
+        `;
+        const memberResult = await pool.query(memberQuery, [id]);
+        
+        if (memberResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Member not found' });
+        }
+
+        const member = memberResult.rows[0];
+
+        // Get latest payment history (last 5 payments)
+        const paymentHistoryQuery = `
+            SELECT 
+                p.id,
+                p.amount,
+                p.payment_date,
+                p.payment_method,
+                p.transaction_id,
+                i.due_date,
+                i.status as invoice_status,
+                mp.name as plan_name
+            FROM payments p
+            JOIN invoices i ON p.invoice_id = i.id
+            LEFT JOIN membership_plans mp ON i.plan_id = mp.id
+            WHERE i.member_id = ?
+            ORDER BY p.payment_date DESC
+            LIMIT 5
+        `;
+        const paymentHistory = await pool.query(paymentHistoryQuery, [id]);
+
+        // Get latest invoice status
+        const latestInvoiceQuery = `
+            SELECT 
+                i.id,
+                i.amount,
+                i.due_date,
+                i.status,
+                i.created_at,
+                mp.name as plan_name
+            FROM invoices i
+            LEFT JOIN membership_plans mp ON i.plan_id = mp.id
+            WHERE i.member_id = ?
+            ORDER BY i.due_date DESC
+            LIMIT 1
+        `;
+        const latestInvoice = await pool.query(latestInvoiceQuery, [id]);
+
+        // Get unused referral discount if referral system is enabled
+        let unusedReferralDiscount = null;
+        const referralSystemQuery = await pool.query('SELECT value FROM settings WHERE key = ?', ['referral_system_enabled']);
+        const referralSystemEnabled = referralSystemQuery.rows[0]?.value === 'true';
+        
+        if (referralSystemEnabled) {
+            const referralDiscountQuery = `
+                SELECT 
+                    r.id,
+                    r.discount_amount,
+                    r.status,
+                    r.created_at,
+                    referrer.name as referrer_name
+                FROM referrals r
+                JOIN members referrer ON r.referrer_id = referrer.id
+                WHERE r.referred_id = ? AND r.status = 'pending'
+                ORDER BY r.created_at DESC
+                LIMIT 1
+            `;
+            const referralDiscount = await pool.query(referralDiscountQuery, [id]);
+            if (referralDiscount.rows.length > 0) {
+                unusedReferralDiscount = referralDiscount.rows[0];
+            }
+        }
+
+        res.json({
+            member,
+            paymentHistory: paymentHistory.rows,
+            latestInvoice: latestInvoice.rows[0] || null,
+            unusedReferralDiscount,
+            referralSystemEnabled
+        });
+    } catch (err) {
+        console.error('Error fetching member details:', err);
         res.status(500).json({ message: err.message });
     }
 };
@@ -295,6 +409,19 @@ exports.setActiveStatus = async (req, res) => {
         const val = String(is_active) === '0' || is_active === false ? 0 : 1;
         await pool.query('UPDATE members SET is_active = $1 WHERE id = $2', [val, id]);
         const updated = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
+        
+        // Trigger immediate cache invalidation for ESP32 devices when member status changes
+        try {
+            const { invalidateESP32Cache } = require('../controllers/biometricController');
+            if (invalidateESP32Cache) {
+                console.log(`🔄 Member ${id} status changed to ${val === 1 ? 'active' : 'inactive'} - invalidating ESP32 cache`);
+                await invalidateESP32Cache();
+            }
+        } catch (cacheError) {
+            console.error('❌ Error invalidating ESP32 cache:', cacheError);
+            // Don't fail the main operation if cache invalidation fails
+        }
+        
         res.json(updated.rows[0]);
     } catch (err) {
         res.status(400).json({ message: err.message });

@@ -69,7 +69,8 @@ function initializeDatabase() {
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
        check_in_time TEXT NOT NULL,
-       check_out_time TEXT
+       check_out_time TEXT,
+       date TEXT DEFAULT (date('now'))
      );`,
     `CREATE TABLE IF NOT EXISTS classes (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,6 +157,44 @@ function initializeDatabase() {
        ip_address TEXT,
        created_at TEXT DEFAULT (datetime('now'))
      );`,
+    `CREATE TABLE IF NOT EXISTS devices (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT UNIQUE NOT NULL,
+       device_type TEXT NOT NULL DEFAULT 'esp32_door_lock',
+       device_name TEXT,
+       location TEXT,
+       ip_address TEXT,
+       mac_address TEXT,
+       firmware_version TEXT,
+       status TEXT DEFAULT 'offline',
+       last_heartbeat TEXT,
+       created_at TEXT DEFAULT (datetime('now')),
+       updated_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS device_commands (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT NOT NULL,
+       command TEXT NOT NULL,
+       parameters TEXT,
+       sent_at TEXT DEFAULT (datetime('now')),
+       executed_at TEXT,
+       status TEXT DEFAULT 'pending',
+       response TEXT,
+       FOREIGN KEY (device_id) REFERENCES devices(device_id)
+     );`,
+    `CREATE TABLE IF NOT EXISTS access_logs (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT NOT NULL,
+       member_id INTEGER,
+       access_type TEXT NOT NULL,
+       access_result TEXT NOT NULL,
+       fingerprint_id INTEGER,
+       reason TEXT,
+       timestamp TEXT DEFAULT (datetime('now')),
+       additional_data TEXT,
+       FOREIGN KEY (device_id) REFERENCES devices(device_id),
+       FOREIGN KEY (member_id) REFERENCES members(id)
+     );`,
   ];
 
   const insertDefaultSettings = [
@@ -168,7 +207,8 @@ function initializeDatabase() {
     ['secondary_color_mode', 'solid'],
     ['primary_color_gradient', ''],
     ['secondary_color_gradient', ''],
-    ['payment_reminder_days', '7'],
+    ['payment_reminder_days_after_due', '7'],
+    ['payment_grace_period_days', '3'],
     ['morning_session_start', '05:00'],
     ['morning_session_end', '11:00'],
     ['evening_session_start', '16:00'],
@@ -187,17 +227,46 @@ function initializeDatabase() {
     ['local_listen_host', '0.0.0.0'],
     ['local_listen_port', '5005'],
     ['membership_types', '["standard","premium","vip"]'],
+    ['cross_session_checkin_restriction', 'true'],
+    ['whatsapp_welcome_enabled', 'false'],
+    ['whatsapp_welcome_message', 'Welcome to our gym! Your biometric enrollment is complete. You can now access the gym using your fingerprint. Enjoy your workouts!'],
   ];
 
   const trx = db.transaction(() => {
     for (const s of statements) db.prepare(s).run();
+    
+    // Core indexes
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_members_phone ON members(phone) WHERE phone IS NOT NULL;");
+    
+    // Biometric events indexes
     db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_timestamp ON biometric_events(timestamp);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_member_id ON biometric_events(member_id);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_biometric_id ON biometric_events(biometric_id);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_sensor_member_id ON biometric_events(sensor_member_id) WHERE sensor_member_id IS NOT NULL;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_member_timestamp ON biometric_events(member_id, timestamp, event_type);");
+    
+    // Security logs indexes
     db.exec("CREATE INDEX IF NOT EXISTS idx_security_logs_timestamp ON security_logs(timestamp);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_security_logs_event_type ON security_logs(event_type);");
+    
+    // Hybrid cache optimization indexes
+    db.exec("CREATE INDEX IF NOT EXISTS idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active, membership_plan_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_member_date ON attendance(member_id, date, check_in_time);");
+    
+    // ESP32 device management indexes
+    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_device_type ON devices(device_type);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_device_id ON device_commands(device_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_status ON device_commands(status);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_sent_at ON device_commands(sent_at);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_device_id ON access_logs(device_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_member_id ON access_logs(member_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_timestamp ON access_logs(timestamp);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_access_type ON access_logs(access_type);");
+    
+    // Insert default settings
     for (const [k, v] of insertDefaultSettings) {
       db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)').run(k, v);
     }
@@ -237,6 +306,15 @@ function initializeDatabase() {
     if (!colNames.includes('biometric_sensor_member_id')) {
       db.prepare("ALTER TABLE members ADD COLUMN biometric_sensor_member_id TEXT DEFAULT ''").run();
       db.prepare("UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL").run();
+    }
+    
+    // Ensure attendance table has date column
+    const attendanceCols = db.prepare("PRAGMA table_info(attendance)").all();
+    const attendanceColNames = attendanceCols.map(c => String(c.name).toLowerCase());
+    
+    if (!attendanceColNames.includes('date')) {
+      db.prepare("ALTER TABLE attendance ADD COLUMN date TEXT DEFAULT (date('now'))").run();
+      db.prepare("UPDATE attendance SET date = date(check_in_time) WHERE date IS NULL").run();
     }
     
     // Update existing NULL values to empty strings for text fields

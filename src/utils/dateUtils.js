@@ -75,7 +75,91 @@ function calculateDueDateForPlan(joinDate, plan) {
     return calculateNormalizedDueDate(joinDate, plan.duration_days);
 }
 
+/**
+ * Check if a member is overdue considering grace period
+ * 
+ * @param {Object} member - Member object with join_date and membership_plan_id
+ * @param {Object} plan - Membership plan object with duration_days
+ * @param {string} lastPaymentDate - Last payment date in YYYY-MM-DD format (optional)
+ * @param {number} gracePeriodDays - Grace period in days (default: 3)
+ * @returns {Object} Object with isOverdue, daysOverdue, and gracePeriodExpired properties
+ */
+function checkMemberPaymentStatus(member, plan, lastPaymentDate = null, gracePeriodDays = 3) {
+    if (!member || !plan || !plan.duration_days) {
+        return {
+            isOverdue: false,
+            daysOverdue: 0,
+            gracePeriodExpired: false,
+            error: 'Invalid member or plan data'
+        };
+    }
+
+    try {
+        let referenceDate;
+        
+        if (lastPaymentDate) {
+            // Use last payment date as reference
+            referenceDate = new Date(lastPaymentDate);
+        } else {
+            // Use join date as reference
+            referenceDate = new Date(member.join_date);
+        }
+        
+        if (isNaN(referenceDate.getTime())) {
+            return {
+                isOverdue: false,
+                daysOverdue: 0,
+                gracePeriodExpired: false,
+                error: 'Invalid date format'
+            };
+        }
+
+        // Calculate due date based on reference date and plan duration
+        const dueDate = new Date(referenceDate);
+        dueDate.setDate(dueDate.getDate() + plan.duration_days);
+        
+        const today = new Date();
+        const daysSinceDue = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
+        
+        const isOverdue = daysSinceDue > 0;
+        const gracePeriodExpired = daysSinceDue > gracePeriodDays;
+        
+        return {
+            isOverdue,
+            daysOverdue: Math.max(0, daysSinceDue),
+            gracePeriodExpired,
+            dueDate: dueDate.toISOString().split('T')[0],
+            referenceDate: referenceDate.toISOString().split('T')[0]
+        };
+    } catch (error) {
+        return {
+            isOverdue: false,
+            daysOverdue: 0,
+            gracePeriodExpired: false,
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Get grace period setting from database
+ * 
+ * @param {Object} pool - Database connection pool
+ * @returns {Promise<number>} Grace period in days
+ */
+async function getGracePeriodSetting(pool) {
+    try {
+        const result = await pool.query('SELECT value FROM settings WHERE key = ?', ['payment_grace_period_days']);
+        return parseInt(result.rows[0]?.value || '3', 10);
+    } catch (error) {
+        console.error('Error getting grace period setting:', error);
+        return 3; // Default grace period
+    }
+}
+
 module.exports = {
     calculateNormalizedDueDate,
-    calculateDueDateForPlan
+    calculateDueDateForPlan,
+    checkMemberPaymentStatus,
+    getGracePeriodSetting
 };
