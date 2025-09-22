@@ -22,7 +22,15 @@
     "esp32:setup:manual": "sqlite3 data/gmgmt.sqlite < tools/setup_esp32_devices.sql",
     "esp32:help": "node -e \"console.log('\\n🔐 ESP32 Door Lock Commands:\\n  npm run esp32:setup     - Setup ESP32 database tables\\n  npm run esp32:test      - Run all ESP32 integration tests\\n  npm run esp32:test:tcp  - Test TCP connectivity\\n  npm run esp32:test:api  - Test REST API endpoints\\n  npm run esp32:test:network - Test network connectivity\\n  npm run esp32:test:system  - Check system requirements\\n  npm run esp32:test:webhook - Test ESP32 webhook endpoint\\n\\nWindows-specific:\\n  npm run esp32:test:windows - Windows diagnostics\\n\\nDocumentation:\\n  ESP32_DEPLOYMENT_GUIDE.md     - Full deployment guide\\n  tools/WINDOWS_TESTING_GUIDE.md - Windows-specific guide\\n  tools/esp32_testing_guide.md   - Comprehensive testing\\n')\"",
     "windows:help": "node -e \"console.log('\\n🪟 Windows-Specific Commands:\\n  npm run esp32:test:windows - Windows diagnostic info\\n  npm run esp32:test:system  - System requirements check\\n  npm run esp32:setup        - Auto-setup (Windows compatible)\\n\\n📚 Windows Documentation:\\n  tools/WINDOWS_TESTING_GUIDE.md - Complete Windows guide\\n  ESP32_DEPLOYMENT_GUIDE.md      - Deployment with Windows sections\\n\\n💡 Windows Tips:\\n  - Run PowerShell as Administrator for firewall setup\\n  - Ensure Windows Defender allows Node.js\\n  - Use better-sqlite3 if SQLite tools not installed\\n')\"",
-    "start:with-biometric": "cross-env ENABLE_BIOMETRIC=true node src/app.js"
+    "start:with-biometric": "cross-env ENABLE_BIOMETRIC=true node src/app.js",
+    "service:install": "node scripts/service-install.js",
+    "service:uninstall": "node scripts/service-uninstall.js",
+    "service:manage": "node scripts/service-manage.js",
+    "service:start": "node scripts/service-manage.js start",
+    "service:stop": "node scripts/service-manage.js stop",
+    "service:restart": "node scripts/service-manage.js restart",
+    "service:status": "node scripts/service-manage.js status",
+    "service:help": "node -e \"console.log('\\n🔧 Windows Service Management Commands:\\n  npm run service:install   - Install GMgmt as Windows Service\\n  npm run service:uninstall - Uninstall Windows Service\\n  npm run service:start     - Start the service\\n  npm run service:stop      - Stop the service\\n  npm run service:restart   - Restart the service\\n  npm run service:status    - Check service status\\n  npm run service:manage    - Interactive service manager\\n\\n📚 Documentation:\\n  docs/windows-service-management.md - Complete service guide\\n\\n💡 Requirements:\\n  - Windows operating system\\n  - Administrator privileges (for install/uninstall)\\n  - node-windows package installed\\n')\""
   },
   "keywords": [],
   "author": "",
@@ -36,6 +44,7 @@
     "jsonwebtoken": "^9.0.0",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
+    "node-windows": "^1.0.0-beta.8",
     "nodemailer": "^6.9.14",
     "recharts": "^3.1.2",
     "ws": "^8.18.3"
