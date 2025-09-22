@@ -1671,26 +1671,112 @@ The following scripts are available in the `scripts/` directory:
 
 ### 5) Build the Installer (NSIS)
 
-Your installer should:
+Create Windows installers using NSIS (Nullsoft Scriptable Install System) for both x64 and x86 architectures.
 
-- Copy app files to `C:\\Program Files\\gmgmt` (x64) or `C:\\Program Files (x86)\\gmgmt` (x86)
-- Copy the correct Node runtime (`vendor/node-win-<arch>/node.exe`)
-- Create `%ProgramData%\\gmgmt\\{data,logs}`
-- Write `%ProgramData%\\gmgmt\\.env`
-- Install and start the Windows Service (via script or NSSM)
-- Add a firewall rule for TCP 3001
-- Create Start Menu shortcuts (e.g., open `http://localhost:3001` in default browser)
-- Uninstaller should stop/remove the service and optionally preserve `%ProgramData%\\gmgmt` data
+#### Prerequisites
 
-Example NSIS snippet:
+- **NSIS**: Download and install from https://nsis.sourceforge.io/
+- **Windows Operating System**: Required for NSIS compilation
+- **Node.js Runtimes**: Must be downloaded to `vendor/` directory
+- **Built Frontend**: React build must exist in `client/build/`
 
-```nsis
-Section
-  CreateDirectory "$%ProgramData%\gmgmt\data"
-  CreateDirectory "$%ProgramData%\gmgmt\logs"
-  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="GMgmt API" dir=in action=allow protocol=TCP localport=3001'
-SectionEnd
+#### Automated Installer Build
+
+**Build for both architectures:**
+```bash
+npm run build:installer
 ```
+
+**Build for specific architecture:**
+```bash
+npm run build:installer:x64    # 64-bit only
+npm run build:installer:x86    # 32-bit only
+npm run build:installer:both   # Both architectures
+```
+
+**Clean build:**
+```bash
+npm run build:installer:clean  # Clean dist/ directory first
+```
+
+#### Manual Build Process
+
+1. **Install NSIS**: Download from https://nsis.sourceforge.io/
+2. **Prepare Files**: Ensure all requirements are met
+3. **Run Build Script**: `node scripts/build-installer.js --arch both`
+4. **Find Installers**: Check `dist/x64/` and `dist/x86/` directories
+
+#### Installer Features
+
+**What the installer includes:**
+- Complete GMgmt application files
+- Node.js runtime (architecture-specific)
+- Windows Service installation
+- Firewall rule configuration
+- Start Menu shortcuts
+- Uninstaller with data preservation option
+
+**Installation locations:**
+- **Application**: `C:\Program Files\gmgmt\` (x64) or `C:\Program Files (x86)\gmgmt\` (x86)
+- **Data**: `%ProgramData%\gmgmt\data\gmgmt.sqlite`
+- **Logs**: `%ProgramData%\gmgmt\logs\`
+- **Configuration**: `%ProgramData%\gmgmt\.env`
+
+**Service Configuration:**
+- **Service Name**: `GMgmt`
+- **Startup Type**: Automatic
+- **Port**: 3001 (with firewall rule)
+- **Recovery**: Automatic restart on failure
+
+#### Installer Script Details
+
+The installer script (`installer/gmgmt-installer.nsi`) includes:
+
+- **Modern UI**: Professional installation interface
+- **Architecture Detection**: Automatic x64/x86 detection
+- **Component Selection**: Optional service and firewall installation
+- **Service Management**: Automatic Windows Service installation
+- **Firewall Configuration**: TCP port 3001 rule
+- **Start Menu Integration**: Application shortcuts
+- **Uninstaller**: Complete removal with data preservation option
+
+#### Build Output
+
+After successful build, you'll find:
+```
+dist/
+├── x64/
+│   └── GMgmt-Setup-x64.exe    # 64-bit installer
+└── x86/
+    └── GMgmt-Setup-x86.exe    # 32-bit installer
+```
+
+#### Testing Installers
+
+1. **Test on Clean System**: Use Windows VM or clean installation
+2. **Verify Service Installation**: Check Windows Services Manager
+3. **Test Application**: Access http://localhost:3001
+4. **Test Uninstaller**: Verify complete removal
+
+#### Troubleshooting
+
+**Build Fails:**
+1. Check NSIS installation: `makensis /VERSION`
+2. Verify Node.js runtimes exist in `vendor/`
+3. Ensure frontend is built: `cd client && npm run build`
+4. Check file permissions
+
+**Installer Issues:**
+1. Run installer as Administrator
+2. Check Windows Event Logs
+3. Verify firewall settings
+4. Test manual service installation
+
+**Service Won't Start:**
+1. Check Event Logs: `eventvwr.msc`
+2. Verify file paths and permissions
+3. Test manual startup: `npm start`
+4. Check port availability
 
 ### 6) 32-bit vs 64-bit builds
 

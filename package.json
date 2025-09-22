@@ -30,7 +30,13 @@
     "service:stop": "node scripts/service-manage.js stop",
     "service:restart": "node scripts/service-manage.js restart",
     "service:status": "node scripts/service-manage.js status",
-    "service:help": "node -e \"console.log('\\n🔧 Windows Service Management Commands:\\n  npm run service:install   - Install GMgmt as Windows Service\\n  npm run service:uninstall - Uninstall Windows Service\\n  npm run service:start     - Start the service\\n  npm run service:stop      - Stop the service\\n  npm run service:restart   - Restart the service\\n  npm run service:status    - Check service status\\n  npm run service:manage    - Interactive service manager\\n\\n📚 Documentation:\\n  docs/windows-service-management.md - Complete service guide\\n\\n💡 Requirements:\\n  - Windows operating system\\n  - Administrator privileges (for install/uninstall)\\n  - node-windows package installed\\n')\""
+    "service:help": "node -e \"console.log('\\n🔧 Windows Service Management Commands:\\n  npm run service:install   - Install GMgmt as Windows Service\\n  npm run service:uninstall - Uninstall Windows Service\\n  npm run service:start     - Start the service\\n  npm run service:stop      - Stop the service\\n  npm run service:restart   - Restart the service\\n  npm run service:status    - Check service status\\n  npm run service:manage    - Interactive service manager\\n\\n📚 Documentation:\\n  docs/windows-service-management.md - Complete service guide\\n\\n💡 Requirements:\\n  - Windows operating system\\n  - Administrator privileges (for install/uninstall)\\n  - node-windows package installed\\n')\"",
+    "build:installer": "node scripts/build-installer.js",
+    "build:installer:x64": "node scripts/build-installer.js --arch x64",
+    "build:installer:x86": "node scripts/build-installer.js --arch x86",
+    "build:installer:both": "node scripts/build-installer.js --arch both",
+    "build:installer:clean": "node scripts/build-installer.js --clean",
+    "installer:help": "node -e \"console.log('\\n🔨 Windows Installer Build Commands:\\n  npm run build:installer      - Build installer for both architectures\\n  npm run build:installer:x64  - Build installer for x64 only\\n  npm run build:installer:x86  - Build installer for x86 only\\n  npm run build:installer:both  - Build installer for both architectures\\n  npm run build:installer:clean - Clean build directory before building\\n\\n📚 Requirements:\\n  - NSIS (Nullsoft Scriptable Install System)\\n  - Windows operating system\\n  - Node.js runtimes in vendor/ directory\\n  - Built frontend in client/build/\\n\\n💡 Examples:\\n  npm run build:installer:x64 --clean\\n  npm run build:installer:both\\n')\""
   },
   "keywords": [],
   "author": "",
