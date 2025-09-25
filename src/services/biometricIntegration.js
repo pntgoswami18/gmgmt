@@ -911,23 +911,41 @@ class BiometricIntegration {
 
   async getDeviceIPAddress(deviceId) {
     try {
-      const query = `
+      // First try to get IP from devices table (most current)
+      const devicesQuery = `
+        SELECT ip_address FROM devices 
+        WHERE device_id = ? AND status = 'online' 
+        ORDER BY updated_at DESC 
+        LIMIT 1
+      `;
+      
+      const devicesResult = await pool.query(devicesQuery, [deviceId]);
+      
+      if (devicesResult.rows.length > 0 && devicesResult.rows[0].ip_address) {
+        console.log(`📍 Found device IP in devices table: ${devicesResult.rows[0].ip_address}`);
+        return devicesResult.rows[0].ip_address;
+      }
+      
+      // Fallback to biometric_events table for older data
+      const eventsQuery = `
         SELECT raw_data FROM biometric_events 
         WHERE device_id = ? AND event_type = 'heartbeat' 
         ORDER BY timestamp DESC 
         LIMIT 1
       `;
       
-      const result = await pool.query(query, [deviceId]);
+      const eventsResult = await pool.query(eventsQuery, [deviceId]);
       
-      if (result.rows.length === 0) {
+      if (eventsResult.rows.length === 0) {
+        console.log(`❌ No IP address found for device ${deviceId}`);
         return null;
       }
 
-      const rawData = result.rows[0].raw_data;
+      const rawData = eventsResult.rows[0].raw_data;
       if (rawData) {
         try {
           const data = JSON.parse(rawData);
+          console.log(`📍 Found device IP in biometric_events: ${data.ip_address}`);
           return data.ip_address;
         } catch (parseError) {
           console.error('Error parsing heartbeat data:', parseError);
@@ -958,7 +976,7 @@ class BiometricIntegration {
           'Content-Length': Buffer.byteLength(postData),
           'User-Agent': 'GymManagementSystem/1.0'
         },
-        timeout: 5000  // Shorter timeout since we don't wait for completion
+        timeout: 10000  // Increased timeout to allow ESP32 processing time
       };
 
       return new Promise((resolve, reject) => {
@@ -994,9 +1012,10 @@ class BiometricIntegration {
         });
 
         req.on('timeout', () => {
-          console.log('⚠️ HTTP timeout - ESP32 may still process command via webhook');
+          console.error(`⏰ HTTP request timeout after ${options.timeout}ms`);
           req.destroy();
-          resolve({ success: true, message: 'Command sent - ESP32 will respond via webhook' });
+          console.log('⚠️ HTTP timeout - ESP32 may still process command via webhook');
+          resolve({ success: true, message: 'Command sent despite timeout', error: 'timeout' });
         });
 
         req.write(postData);
