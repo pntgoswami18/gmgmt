@@ -61,13 +61,13 @@ exports.getAllMembers = async (req, res) => {
             filterCondition = `AND is_admin != 1 AND is_active = 1 AND NOT EXISTS (
                 SELECT 1 FROM payments p 
                 JOIN invoices i ON p.invoice_id = i.id 
-                WHERE i.member_id = members.id 
+                WHERE i.member_id = m.id 
                 AND date(p.payment_date) >= date('now','start of month')
             )`;
         }
 
         // Get total count
-        const countQuery = `SELECT COUNT(*) as total FROM members WHERE 1=1 ${searchCondition} ${filterCondition}`;
+        const countQuery = `SELECT COUNT(*) as total FROM members m WHERE 1=1 ${searchCondition} ${filterCondition}`;
         const countResult = await pool.query(countQuery, [...searchParams, ...filterParams]);
         const total = parseInt(countResult.rows[0].total, 10);
 

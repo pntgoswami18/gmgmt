@@ -98,11 +98,12 @@ exports.getSummaryStats = async (req, res) => {
               AND date(join_date) < date('now','localtime','start of month','+1 month')
         `);
 
-        // Members who have NOT made a payment in the current month (excluding admin users)
+        // Members who have NOT made a payment in the current month (excluding admin users and inactive members)
         const unpaidMembersThisMonth = await pool.query(`
             SELECT COUNT(*) as count
             FROM members m
             WHERE m.is_admin = 0
+              AND m.is_active = 1
               AND NOT EXISTS (
                 SELECT 1
                 FROM payments p
@@ -143,7 +144,8 @@ exports.getFinancialSummary = async (req, res) => {
         const offset = (pageNum - 1) * limitNum;
 
         // Build date filter condition for payment history
-        const dateFilter = startDate && endDate ? `AND p.payment_date >= '${startDate}' AND p.payment_date <= '${endDate}'` : '';
+        // Use date() function to compare only date portions, ensuring current day's payments are included
+        const dateFilter = startDate && endDate ? `AND date(p.payment_date) >= '${startDate}' AND date(p.payment_date) <= '${endDate}'` : '';
 
         const result = {};
 
@@ -273,13 +275,14 @@ exports.getFinancialSummary = async (req, res) => {
     }
 };
 
-// Get members who have no payments in the current month
+// Get members who have no payments in the current month (active members only)
 exports.getUnpaidMembersThisMonth = async (_req, res) => {
     try {
         const result = await pool.query(`
             SELECT m.id, m.name, m.email
             FROM members m
             WHERE m.is_admin = 0
+              AND m.is_active = 1
               AND NOT EXISTS (
                 SELECT 1
                 FROM payments p
