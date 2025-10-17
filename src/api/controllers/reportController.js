@@ -178,7 +178,13 @@ exports.getFinancialSummary = async (req, res) => {
         // Get payment history with pagination
         if (table === 'all' || table === 'payments') {
             const paymentHistory = await pool.query(`
-                SELECT p.id, m.name as member_name, p.amount, p.payment_date
+                SELECT 
+                    p.id, 
+                    m.name as member_name, 
+                    p.amount, 
+                    p.payment_date,
+                    i.id as invoice_id,
+                    i.created_at as invoice_date
                 FROM payments p
                 JOIN invoices i ON p.invoice_id = i.id
                 JOIN members m ON i.member_id = m.id

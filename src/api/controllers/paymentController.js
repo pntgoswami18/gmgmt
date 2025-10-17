@@ -94,6 +94,14 @@ exports.recordManualPayment = async (req, res) => {
             }
         }
 
+        // Check if a payment already exists for this invoice
+        const existingPayment = await pool.query('SELECT id FROM payments WHERE invoice_id = $1', [ensuredInvoiceId]);
+        if (existingPayment.rows.length > 0) {
+            return res.status(400).json({ 
+                message: `Invoice #${ensuredInvoiceId} already has a payment recorded (Payment ID: ${existingPayment.rows[0].id}). Cannot record multiple payments for the same invoice. Please delete the existing payment first if you need to record a new one.` 
+            });
+        }
+
         await pool.query('INSERT INTO payments (invoice_id, amount, payment_method, transaction_id) VALUES ($1, $2, $3, $4)', [ensuredInvoiceId, normalizedAmount, method || 'manual', transaction_id || null]);
         const payment = await pool.query('SELECT * FROM payments ORDER BY id DESC LIMIT 1');
 
