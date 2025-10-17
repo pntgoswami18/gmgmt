@@ -139,6 +139,7 @@ void updateMemberCache();
 void handleCacheUpdate(String jsonResponse);
 void initializeCache();
 void clearCache();
+void updateCacheEntry(int biometricId, bool isAuthorized, int memberId);
 
 // ==================== TIME FUNCTIONS ====================
 void waitForNTPTime() {
@@ -652,10 +653,11 @@ void checkFingerprint() {
     bool isAuthorized = checkLocalAuthorization(fingerprintID);
     
     if (isAuthorized) {
-      // Fast path - unlock immediately using cache
-      Serial.printf("✅ Cache hit - Authorized member ID %d\n", fingerprintID);
+      // OPTIMIZED: Fast path - unlock immediately using cache, send data async
+      Serial.printf("✅ Cache hit - Authorized member ID %d (INSTANT UNLOCK)\n", fingerprintID);
       startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
-      sendBiometricData(fingerprintID, "authorized");
+      // Send attendance data asynchronously to avoid any blocking
+      sendBiometricDataAsync(fingerprintID, "authorized");
     } else {
       // Slow path - validate with server first
       Serial.printf("⏳ Cache miss - Validating member ID %d with server\n", fingerprintID);
@@ -664,11 +666,13 @@ void checkFingerprint() {
       if (serverAuth) {
         Serial.printf("✅ Server validation - Authorized member ID %d\n", fingerprintID);
         startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
-        sendBiometricData(fingerprintID, "authorized");
+        // Use async version for faster response
+        sendBiometricDataAsync(fingerprintID, "authorized");
       } else {
         Serial.printf("❌ Server validation - Unauthorized member ID %d\n", fingerprintID);
         accessDenied();
-        sendBiometricData(fingerprintID, "unauthorized");
+        // Use async version even for denied access
+        sendBiometricDataAsync(fingerprintID, "unauthorized");
       }
     }
     
@@ -2026,6 +2030,37 @@ void updateMemberCache() {
   http.end();
 }
 
+void updateCacheEntry(int biometricId, bool isAuthorized, int memberId) {
+  // Find existing entry or create new one
+  int index = -1;
+  for (int i = 0; i < cacheSize; i++) {
+    if (memberCache[i].biometricId == biometricId) {
+      index = i;
+      break;
+    }
+  }
+  
+  // If not found and cache not full, add new entry
+  if (index == -1 && cacheSize < MAX_CACHED_MEMBERS) {
+    index = cacheSize;
+    cacheSize++;
+  }
+  
+  // Update cache entry
+  if (index != -1) {
+    memberCache[index].biometricId = biometricId;
+    memberCache[index].isAuthorized = isAuthorized;
+    memberCache[index].lastUpdate = millis();
+    memberCache[index].expiryTime = millis() + CACHE_VALIDITY_TIME;
+    memberCache[index].memberId = memberId;
+    
+    Serial.printf("📝 Cache entry updated: Biometric ID %d, Authorized: %s, Member ID: %d\n", 
+                 biometricId, isAuthorized ? "YES" : "NO", memberId);
+  } else {
+    Serial.println("⚠️ Cache full, cannot add new entry");
+  }
+}
+
 void handleCacheUpdate(String jsonResponse) {
   // Optimized JSON document size for streamlined response (only essential fields)
   StaticJsonDocument<2000> doc;
@@ -2062,16 +2097,19 @@ void handleCacheUpdate(String jsonResponse) {
           memberCache[cacheSize].memberId = member["memberId"];
           cacheSize++;
           
-          Serial.printf("📝 Cached member: ID %d, Authorized: %s\n", 
+          Serial.printf("📝 Cached member: Biometric ID %d, Authorized: %s, Member ID: %d\n", 
                        member["biometricId"].as<int>(), 
-                       member["authorized"].as<bool>() ? "YES" : "NO");
+                       member["authorized"].as<bool>() ? "YES" : "NO",
+                       member["memberId"].as<int>());
         } else {
           Serial.println("⚠️ Cache full, cannot add more members");
           break;
         }
       }
       
-      Serial.printf("✅ Cache updated with %d members from server\n", cacheSize);
+      Serial.printf("✅ Cache updated successfully - %d members cached\n", cacheSize);
+      Serial.printf("💾 Cache validity: %d minutes\n", CACHE_VALIDITY_TIME / 60000);
+      Serial.printf("🔄 Next auto-update in: %d minutes\n", CACHE_UPDATE_INTERVAL / 60000);
     } else {
       Serial.println("⚠️ No member data received in cache update");
       if (doc.containsKey("success")) {

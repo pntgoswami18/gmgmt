@@ -266,12 +266,28 @@ function initializeDatabase() {
     db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_timestamp ON access_logs(timestamp);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_access_type ON access_logs(access_type);");
     
+    // Performance optimization indexes (added for biometric validation speed)
+    db.exec("CREATE INDEX IF NOT EXISTS idx_members_biometric_lookup ON members(biometric_id, is_active, is_admin) WHERE biometric_id IS NOT NULL AND biometric_id != '' AND biometric_id != '0';");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_invoices_member_lookup ON invoices(member_id, status);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_payments_invoice_date ON payments(invoice_id, payment_date DESC);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_member_today ON attendance(member_id, date, check_out_time);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_settings_key_lookup ON settings(key);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_members_active_admin ON members(is_active, is_admin);");
+    
     // Insert default settings
     for (const [k, v] of insertDefaultSettings) {
       db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)').run(k, v);
     }
   });
   trx();
+
+  // Run ANALYZE to update query planner statistics for optimal index usage
+  try {
+    db.exec('ANALYZE;');
+    console.log('✅ Database query planner statistics updated (ANALYZE completed)');
+  } catch (analyzeError) {
+    console.error('⚠️  ANALYZE failed:', analyzeError.message);
+  }
 
   // Ensure legacy databases have required columns with defaults
   try {
