@@ -1628,29 +1628,30 @@ const validateBiometricId = async (req, res) => {
           );
 
           if (todayCheckIns.rowCount > 0) {
-          // Check which session the existing check-in was in
-          const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
-          const existingMinutesSinceMidnight = existingCheckInTime.getHours() * 60 + existingCheckInTime.getMinutes();
-          
-          const existingWasMorning = existingMinutesSinceMidnight >= MORNING_START_MINUTES && existingMinutesSinceMidnight <= MORNING_END_MINUTES;
-          const existingWasEvening = existingMinutesSinceMidnight >= EVENING_START_MINUTES && existingMinutesSinceMidnight <= EVENING_END_MINUTES;
-          
-          // Determine current session
-          const currentIsMorning = isInMorningSession;
-          const currentIsEvening = isInEveningSession;
-          
-          // Prevent cross-session check-ins
-          if ((existingWasMorning && currentIsEvening) || (existingWasEvening && currentIsMorning)) {
-            const existingSession = existingWasMorning ? 'morning' : 'evening';
-            const currentSession = currentIsMorning ? 'morning' : 'evening';
+            // Check which session the existing check-in was in
+            const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
+            const existingMinutesSinceMidnight = existingCheckInTime.getHours() * 60 + existingCheckInTime.getMinutes();
             
-            console.log(`❌ Member ${member.member_id} cross-session access blocked: ${existingSession} → ${currentSession}`);
-            return res.json({ 
-              authorized: false,
-              memberId: member.member_id,
-              reason: 'cross_session_violation',
-              details: `Already checked in during ${existingSession} session`
-            });
+            const existingWasMorning = existingMinutesSinceMidnight >= MORNING_START_MINUTES && existingMinutesSinceMidnight <= MORNING_END_MINUTES;
+            const existingWasEvening = existingMinutesSinceMidnight >= EVENING_START_MINUTES && existingMinutesSinceMidnight <= EVENING_END_MINUTES;
+            
+            // Determine current session
+            const currentIsMorning = isInMorningSession;
+            const currentIsEvening = isInEveningSession;
+            
+            // Prevent cross-session check-ins
+            if ((existingWasMorning && currentIsEvening) || (existingWasEvening && currentIsMorning)) {
+              const existingSession = existingWasMorning ? 'morning' : 'evening';
+              const currentSession = currentIsMorning ? 'morning' : 'evening';
+              
+              console.log(`❌ Member ${member.member_id} cross-session access blocked: ${existingSession} → ${currentSession}`);
+              return res.json({ 
+                authorized: false,
+                memberId: member.member_id,
+                reason: 'cross_session_violation',
+                details: `Already checked in during ${existingSession} session`
+              });
+            }
           }
         }
       }
