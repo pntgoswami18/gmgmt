@@ -105,6 +105,11 @@ const startServer = async () => {
         await initializeDatabase();
         console.log('Database initialized successfully');
         
+        // Initialize settings cache for performance optimization
+        const settingsCache = require('./services/settingsCache');
+        await settingsCache.initialize();
+        console.log('✅ Settings cache initialized');
+        
         server.listen(PORT, '0.0.0.0', () => {
             console.log(`Server running on port ${PORT} and accessible from all interfaces`);
             console.log(`🔌 WebSocket server ready for real-time enrollment updates`);

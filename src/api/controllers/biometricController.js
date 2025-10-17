@@ -1,5 +1,6 @@
 const { pool } = require('../../config/sqlite');
 const whatsappService = require('../../services/whatsappService');
+const settingsCache = require('../../services/settingsCache');
 
 // Get reference to biometric integration instance
 let biometricIntegration = null;
@@ -1188,12 +1189,19 @@ const esp32Webhook = async (req, res) => {
         memberIdToUse = userId || memberId;
         biometricId = userId;
         
-        // Find member by biometric ID for attendance logging
+        // Find member by biometric ID for attendance logging (async - non-blocking)
         if (biometricId) {
           const member = await biometricIntegration.findMemberByBiometricId(biometricId);
           if (member) {
             memberIdToUse = member.id;
-            await biometricIntegration.logMemberAttendance(member, timestamp, eventData);
+            // Log attendance asynchronously to avoid blocking door unlock
+            process.nextTick(async () => {
+              try {
+                await biometricIntegration.logMemberAttendance(member, timestamp, eventData);
+              } catch (logError) {
+                console.error('❌ Error logging attendance (async):', logError);
+              }
+            });
           }
         }
       } else if (status === 'unauthorized') {
@@ -1517,15 +1525,16 @@ const validateBiometricId = async (req, res) => {
     }
 
     // Import payment validation utilities
-    const { checkMemberPaymentStatus, getGracePeriodSetting } = require('../../utils/dateUtils');
+    const { checkMemberPaymentStatus } = require('../../utils/dateUtils');
 
-    // Single optimized query for fast response with payment status
+    // OPTIMIZED: Single query with all necessary data including admin status and attendance
     const query = `
       SELECT 
         m.id as member_id,
         m.name,
         m.biometric_id,
         m.is_active,
+        m.is_admin,
         m.membership_plan_id,
         m.join_date,
         mp.name as plan_name,
@@ -1533,7 +1542,12 @@ const validateBiometricId = async (req, res) => {
         (SELECT MAX(p.payment_date) 
          FROM payments p 
          JOIN invoices i ON p.invoice_id = i.id 
-         WHERE i.member_id = m.id) as last_payment_date
+         WHERE i.member_id = m.id) as last_payment_date,
+        (SELECT COUNT(*) 
+         FROM attendance a 
+         WHERE a.member_id = m.id 
+         AND a.date = date('now') 
+         AND a.check_out_time IS NULL) as today_active_sessions
       FROM members m
       LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
       WHERE m.biometric_id = ?
@@ -1561,14 +1575,12 @@ const validateBiometricId = async (req, res) => {
       });
     }
 
-    // Check cross-session restriction if enabled (unless admin)
-    const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = ?', [member.member_id]);
-    const isAdmin = memberCheck.rows[0]?.is_admin === 1;
+    // Check if member is admin (no additional query needed - already in result)
+    const isAdmin = member.is_admin === 1;
     
     if (!isAdmin) {
-      // Get cross-session restriction setting
-      const restrictionSetting = await pool.query('SELECT value FROM settings WHERE key = ?', ['cross_session_checkin_restriction']);
-      const crossSessionRestrictionEnabled = restrictionSetting.rows[0]?.value === 'true';
+      // Use cached cross-session restriction setting instead of database query
+      const crossSessionRestrictionEnabled = settingsCache.getCrossSessionEnabled();
       
       if (crossSessionRestrictionEnabled) {
         // Get session settings
@@ -1604,15 +1616,18 @@ const validateBiometricId = async (req, res) => {
           });
         }
 
-        // Check for cross-session violations
-        const todayCheckIns = await pool.query(
-          `SELECT check_in_time FROM attendance 
-           WHERE member_id = ? AND DATE(check_in_time) = DATE('now') 
-           ORDER BY check_in_time DESC`,
-          [member.member_id]
-        );
+        // Check for cross-session violations using already-fetched data
+        // today_active_sessions from the main query tells us if there's an active session
+        if (member.today_active_sessions > 0) {
+          // Need to fetch check-in time details for session comparison
+          const todayCheckIns = await pool.query(
+            `SELECT check_in_time FROM attendance 
+             WHERE member_id = ? AND DATE(check_in_time) = DATE('now') 
+             ORDER BY check_in_time DESC LIMIT 1`,
+            [member.member_id]
+          );
 
-        if (todayCheckIns.rowCount > 0) {
+          if (todayCheckIns.rowCount > 0) {
           // Check which session the existing check-in was in
           const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
           const existingMinutesSinceMidnight = existingCheckInTime.getHours() * 60 + existingCheckInTime.getMinutes();
@@ -1645,7 +1660,8 @@ const validateBiometricId = async (req, res) => {
     let paymentStatus = null;
     if (member.membership_plan_id && member.duration_days) {
       try {
-        const gracePeriodDays = await getGracePeriodSetting(pool);
+        // Use cached grace period setting instead of database query
+        const gracePeriodDays = settingsCache.getGracePeriodDays();
         paymentStatus = checkMemberPaymentStatus(
           {
             join_date: member.join_date,
