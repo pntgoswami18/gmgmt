@@ -1989,8 +1989,10 @@ void updateCacheEntry(int biometricId, bool isAuthorized, int memberId) {
     memberCache[index].expiryTime = millis() + CACHE_VALIDITY_TIME;
     memberCache[index].memberId = memberId;
     
-    Serial.printf("📝 Cache updated: ID %d, Authorized: %s\n", 
-                 biometricId, isAuthorized ? "YES" : "NO");
+    Serial.printf("📝 Cache entry updated: Biometric ID %d, Authorized: %s, Member ID: %d\n", 
+                 biometricId, isAuthorized ? "YES" : "NO", memberId);
+  } else {
+    Serial.println("⚠️ Cache full, cannot add new entry");
   }
 }
 
@@ -2028,37 +2030,6 @@ void updateMemberCache() {
   }
   
   http.end();
-}
-
-void updateCacheEntry(int biometricId, bool isAuthorized, int memberId) {
-  // Find existing entry or create new one
-  int index = -1;
-  for (int i = 0; i < cacheSize; i++) {
-    if (memberCache[i].biometricId == biometricId) {
-      index = i;
-      break;
-    }
-  }
-  
-  // If not found and cache not full, add new entry
-  if (index == -1 && cacheSize < MAX_CACHED_MEMBERS) {
-    index = cacheSize;
-    cacheSize++;
-  }
-  
-  // Update cache entry
-  if (index != -1) {
-    memberCache[index].biometricId = biometricId;
-    memberCache[index].isAuthorized = isAuthorized;
-    memberCache[index].lastUpdate = millis();
-    memberCache[index].expiryTime = millis() + CACHE_VALIDITY_TIME;
-    memberCache[index].memberId = memberId;
-    
-    Serial.printf("📝 Cache entry updated: Biometric ID %d, Authorized: %s, Member ID: %d\n", 
-                 biometricId, isAuthorized ? "YES" : "NO", memberId);
-  } else {
-    Serial.println("⚠️ Cache full, cannot add new entry");
-  }
 }
 
 void handleCacheUpdate(String jsonResponse) {
