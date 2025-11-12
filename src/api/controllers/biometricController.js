@@ -935,13 +935,17 @@ const unlockDoorRemotely = async (req, res) => {
       });
     }
 
-    await biometricIntegration.unlockDoorRemotely(deviceId, reason);
+    const commandResult = await biometricIntegration.unlockDoorRemotely(deviceId, reason);
+    const acknowledged = !commandResult || !commandResult.error;
     
     res.json({ 
-      success: true, 
-      message: `Remote unlock command sent to device ${deviceId}`,
-      deviceId: deviceId,
-      reason: reason
+      success: acknowledged, 
+      message: acknowledged
+        ? `Remote unlock command sent to device ${deviceId}`
+        : `Remote unlock command queued for device ${deviceId}, awaiting ESP32 confirmation`,
+      deviceId,
+      reason,
+      commandResult
     });
   } catch (error) {
     console.error('Error unlocking door remotely:', error);

@@ -1031,21 +1031,19 @@ class BiometricIntegration {
   async unlockDoorRemotely(deviceId, reason = 'admin_unlock') {
     console.log(`🔓 Remote unlock requested for device: ${deviceId}`);
     
-    await this.sendESP32Command(deviceId, 'unlock_door', {
-      reason: reason,
+    const commandResult = await this.sendESP32Command(deviceId, 'unlock_door', {
+      reason,
       duration: 5000 // 5 seconds
     });
 
-    // Log the remote unlock
-    await this.logBiometricEvent({
-      member_id: null,
-      biometric_id: null,
-      event_type: 'remote_unlock',
-      device_id: deviceId,
-      timestamp: new Date().toISOString(),
-      success: true,
-      raw_data: JSON.stringify({ reason, action: 'remote_unlock' })
-    });
+    if (commandResult?.error) {
+      console.warn(`⚠️ Remote unlock command reported issues: ${commandResult.error}`);
+    }
+
+    // The actual unlock acknowledgement is emitted by the ESP32 webhook.
+    // We intentionally avoid logging a "remote_unlock" success here to prevent
+    // false positives when the device fails to actuate the relay.
+    return commandResult;
   }
 
   async startRemoteEnrollment(deviceId, memberId) {
