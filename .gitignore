@@ -20,3 +20,4 @@ public/uploads/*
 esp32_door_lock/config.h
 data/*
 .DS_Store
+data/data/gmgmt.sqlite
