@@ -19,3 +19,4 @@ public/uploads/*
 .vscode/settings.json
 esp32_door_lock/config.h
 .DS_Store
+data/data/gmgmt.sqlite
