@@ -15,14 +15,14 @@ exports.createInvoice = async (req, res) => {
         // If no plan_id provided, try to get member's current plan
         let finalPlanId = plan_id;
         let finalDueDate = due_date;
-        
+
         if (!finalPlanId && member_id) {
             const memberPlan = await pool.query('SELECT membership_plan_id FROM members WHERE id = $1', [member_id]);
             if (memberPlan.rows.length > 0) {
                 finalPlanId = memberPlan.rows[0].membership_plan_id;
             }
         }
-        
+
         // If no due_date provided but we have a plan and join_date, calculate it
         if (!finalDueDate && finalPlanId && join_date) {
             const plan = await pool.query('SELECT * FROM membership_plans WHERE id = $1', [finalPlanId]);
@@ -30,7 +30,7 @@ exports.createInvoice = async (req, res) => {
                 finalDueDate = calculateDueDateForPlan(join_date, plan.rows[0]);
             }
         }
-        
+
         await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id, finalPlanId || null, amount, finalDueDate, 'unpaid']);
         const newInvoice = await pool.query('SELECT * FROM invoices ORDER BY id DESC LIMIT 1');
         res.status(201).json(newInvoice.rows[0]);
@@ -42,22 +42,25 @@ exports.createInvoice = async (req, res) => {
 // Record a manual payment (cash/bank/etc.)
 // If invoice_id is missing or invalid, create an invoice automatically
 exports.recordManualPayment = async (req, res) => {
-    let { invoice_id, amount, method, transaction_id, member_id, plan_id, due_date } = req.body;
-    try {
+    const { db } = require('../../config/sqlite'); // Import db for transactions
+
+    const paymentTransaction = db.transaction(async (data) => {
+        let { invoice_id, amount, method, transaction_id, member_id, plan_id, due_date } = data;
+
         const normalizedAmount = parseFloat(amount);
         if (Number.isNaN(normalizedAmount) || normalizedAmount <= 0) {
-            return res.status(400).json({ message: 'Invalid amount' });
+            throw new Error('Invalid amount');
         }
 
-        // If member_id is provided, check if member is an admin user - admins are exempt from payments
+        // If member_id is provided, check if member is an admin user
         if (member_id) {
             const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = $1', [member_id]);
             if (memberCheck.rows.length === 0) {
-                return res.status(404).json({ message: 'Member not found' });
+                throw new Error('Member not found');
             }
-            
+
             if (memberCheck.rows[0].is_admin === 1) {
-                return res.status(400).json({ message: 'Admin users are exempt from payments and cannot have payments recorded against them' });
+                throw new Error('Admin users are exempt from payments and cannot have payments recorded against them');
             }
         }
 
@@ -72,14 +75,13 @@ exports.recordManualPayment = async (req, res) => {
                     finalPlanId = memberPlan.rows[0].membership_plan_id;
                 }
             }
-            
+
             await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id || null, finalPlanId || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']);
             const inv = await pool.query('SELECT id FROM invoices ORDER BY id DESC LIMIT 1');
             ensuredInvoiceId = inv.rows[0].id;
         } else {
             const existing = await pool.query('SELECT id FROM invoices WHERE id = $1', [ensuredInvoiceId]);
             if (existing.rowCount === 0) {
-                // If no plan_id provided, try to get member's current plan
                 let finalPlanId = plan_id;
                 if (!finalPlanId && member_id) {
                     const memberPlan = await pool.query('SELECT membership_plan_id FROM members WHERE id = $1', [member_id]);
@@ -87,7 +89,7 @@ exports.recordManualPayment = async (req, res) => {
                         finalPlanId = memberPlan.rows[0].membership_plan_id;
                     }
                 }
-                
+
                 await pool.query('INSERT INTO invoices (member_id, plan_id, amount, due_date, status) VALUES ($1, $2, $3, $4, $5)', [member_id || null, finalPlanId || null, normalizedAmount, due_date || new Date().toISOString().slice(0, 10), 'unpaid']);
                 const inv = await pool.query('SELECT id FROM invoices ORDER BY id DESC LIMIT 1');
                 ensuredInvoiceId = inv.rows[0].id;
@@ -97,9 +99,7 @@ exports.recordManualPayment = async (req, res) => {
         // Check if a payment already exists for this invoice
         const existingPayment = await pool.query('SELECT id FROM payments WHERE invoice_id = $1', [ensuredInvoiceId]);
         if (existingPayment.rows.length > 0) {
-            return res.status(400).json({ 
-                message: `Invoice #${ensuredInvoiceId} already has a payment recorded (Payment ID: ${existingPayment.rows[0].id}). Cannot record multiple payments for the same invoice. Please delete the existing payment first if you need to record a new one.` 
-            });
+            throw new Error(`Invoice #${ensuredInvoiceId} already has a payment recorded (Payment ID: ${existingPayment.rows[0].id}). Cannot record multiple payments for the same invoice.`);
         }
 
         await pool.query('INSERT INTO payments (invoice_id, amount, payment_method, transaction_id) VALUES ($1, $2, $3, $4)', [ensuredInvoiceId, normalizedAmount, method || 'manual', transaction_id || null]);
@@ -121,7 +121,7 @@ exports.recordManualPayment = async (req, res) => {
 
             if (referralResult.rows.length > 0) {
                 const referral = referralResult.rows[0];
-                
+
                 // Get referrer's next unpaid invoice
                 const nextInvoiceResult = await pool.query(`
                     SELECT i.id, i.amount
@@ -147,10 +147,15 @@ exports.recordManualPayment = async (req, res) => {
             }
         } catch (referralError) {
             console.error('Error applying referral discount:', referralError);
-            // Don't fail the payment if referral discount fails
+            // Don't fail the payment if referral discount fails, but log it
         }
 
-        res.status(201).json({ message: 'Manual payment recorded', payment: payment.rows[0], invoice_id: ensuredInvoiceId });
+        return { payment: payment.rows[0], invoice_id: ensuredInvoiceId };
+    });
+
+    try {
+        const result = await paymentTransaction(req.body);
+        res.status(201).json({ message: 'Manual payment recorded', payment: result.payment, invoice_id: result.invoice_id });
     } catch (err) {
         res.status(400).json({ message: err.message });
     }
@@ -184,8 +189,8 @@ exports.deletePayment = async (req, res) => {
         const newStatus = hasRemainingPayments ? 'paid' : 'unpaid';
         await pool.query('UPDATE invoices SET status = $1 WHERE id = $2', [newStatus, invoice_id]);
 
-        res.json({ 
-            message: 'Payment deleted successfully', 
+        res.json({
+            message: 'Payment deleted successfully',
             invoice_id: invoice_id,
             new_invoice_status: newStatus
         });
@@ -332,7 +337,7 @@ exports.updateInvoice = async (req, res) => {
         // Check if invoice has payments - if paid, don't allow editing
         const payments = await pool.query('SELECT COUNT(*) as count FROM payments WHERE invoice_id = $1', [invoiceId]);
         const hasPayments = parseInt(payments.rows[0].count, 10) > 0;
-        
+
         if (hasPayments) {
             return res.status(400).json({ message: 'Cannot edit invoice that has payments. Delete payments first.' });
         }
@@ -377,14 +382,14 @@ exports.deleteInvoice = async (req, res) => {
         // Check if invoice has payments - if paid, don't allow deletion
         const payments = await pool.query('SELECT COUNT(*) as count FROM payments WHERE invoice_id = $1', [invoiceId]);
         const hasPayments = parseInt(payments.rows[0].count, 10) > 0;
-        
+
         if (hasPayments) {
             return res.status(400).json({ message: 'Cannot delete invoice that has payments. Delete payments first.' });
         }
 
         // Delete the invoice
         await pool.query('DELETE FROM invoices WHERE id = $1', [invoiceId]);
-        
+
         res.json({ message: 'Invoice deleted successfully', invoice_id: invoiceId });
     } catch (err) {
         res.status(500).json({ message: err.message });
