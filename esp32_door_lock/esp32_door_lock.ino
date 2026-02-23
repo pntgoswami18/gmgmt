@@ -4,12 +4,26 @@
  * 
  * Hardware:
  * - ESP32-WROOM-32 Development Board
- * - AS608 Optical Fingerprint Sensor
+ * - R307 Optical Fingerprint Sensor
  * - 12V Electromagnetic Door Lock
  * - 5V Relay Module
  * - Status LEDs and Buzzer
  * 
  * Compatible with existing biometric integration system
+ * 
+ * ==================== Arduino IDE Board Settings ====================
+ * Board:            ESP32 Dev Module
+ * Partition Scheme: "Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)"
+ * 
+ * The OTA partition scheme is REQUIRED for over-the-air firmware updates.
+ * The initial flash must be done over USB with this partition scheme
+ * selected.  Subsequent updates can be pushed from the gym management
+ * server via the Firmware Updates tab.
+ * 
+ * Data safety:
+ *   - Fingerprints reside on the R307 sensor module (unaffected by OTA).
+ *   - Configuration lives in NVS/Preferences (separate partition, safe).
+ *   - Member cache is rebuilt automatically from the server after reboot.
  */
 
 #include <WiFi.h>
@@ -19,6 +33,7 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <HTTPUpdate.h>
 #include <time.h>
 
 // Include configuration file (comment out if config.h doesn't exist)
@@ -72,7 +87,7 @@ String device_id = "";
 #define EMERGENCY_UNLOCK_TIME 5000    // 5 seconds for emergency unlock (longer than normal)
 
 // Cache Configuration
-#define MAX_CACHED_MEMBERS    100     // Maximum number of members to cache
+#define MAX_CACHED_MEMBERS    500     // Maximum number of members to cache
 #define CACHE_VALIDITY_TIME   300000  // 5 minutes cache validity
 #define CACHE_UPDATE_INTERVAL 300000  // 5 minutes between cache updates
 
@@ -119,6 +134,43 @@ bool isEmergencyUnlock = false;
 unsigned long lastOverridePress = 0;
 const unsigned long MIN_BUTTON_INTERVAL = 1000;  // Minimum 1 second between override presses
 
+// OTA update state
+bool otaPending = false;
+String otaFirmwareUrl = "";
+
+// FreeRTOS async HTTP queue
+#define HTTP_QUEUE_SIZE 10
+#define HTTP_MSG_MAX_LEN 512
+QueueHandle_t httpQueue = NULL;
+TaskHandle_t httpTaskHandle = NULL;
+
+struct HttpMessage {
+  char jsonData[HTTP_MSG_MAX_LEN];
+};
+
+// Non-blocking tone queue
+#define MAX_TONE_QUEUE 8
+struct ToneEntry {
+  int frequency;        // 0 = silence (gap)
+  unsigned long duration;
+};
+ToneEntry toneQueue[MAX_TONE_QUEUE];
+int toneQueueHead = 0;
+int toneQueueTail = 0;
+int toneQueueCount = 0;
+bool toneActive = false;
+unsigned long toneStartTime = 0;
+unsigned long toneDuration = 0;
+
+// Non-blocking scan cooldown
+unsigned long lastScanTime = 0;
+#define SCAN_COOLDOWN 500  // 500ms between scans
+
+// Non-blocking access denied state
+bool accessDeniedActive = false;
+unsigned long accessDeniedStartTime = 0;
+#define ACCESS_DENIED_DISPLAY_TIME 2000  // 2s LED display for denied access
+
 // ==================== FUNCTION DECLARATIONS ====================
 void sendEnrollmentProgress(String progressStep);
 void sendEnrollmentData(int memberID, String status);
@@ -137,9 +189,26 @@ bool checkLocalAuthorization(int biometricId);
 bool validateWithServer(int biometricId);
 void updateMemberCache();
 void handleCacheUpdate(String jsonResponse);
+int handleCacheUpdatePage(String jsonResponse);
 void initializeCache();
 void clearCache();
 void updateCacheEntry(int biometricId, bool isAuthorized, int memberId);
+
+// OTA update functions
+void performOTAUpdate();
+void sendOTAStatusToServer(String status, String errorMsg = "");
+
+// Non-blocking tone functions
+void queueTone(int frequency, unsigned long duration);
+void updateToneState();
+void clearToneQueue();
+
+// Non-blocking access denied
+void updateAccessDeniedState();
+
+// FreeRTOS async HTTP task
+void httpSendTask(void *parameter);
+bool enqueueHttpMessage(const String &jsonData);
 
 // ==================== TIME FUNCTIONS ====================
 void waitForNTPTime() {
@@ -412,6 +481,15 @@ void setup() {
   // Initialize member cache
   initializeCache();
   
+  // Initialize FreeRTOS async HTTP queue and task on Core 0
+  httpQueue = xQueueCreate(HTTP_QUEUE_SIZE, sizeof(HttpMessage));
+  if (httpQueue != NULL) {
+    xTaskCreatePinnedToCore(httpSendTask, "httpSend", 4096, NULL, 1, &httpTaskHandle, 0);
+    Serial.println("✅ Async HTTP task started on Core 0");
+  } else {
+    Serial.println("⚠️ Failed to create HTTP queue - async sends will fall back to blocking");
+  }
+  
   // System ready
   systemReady = true;
   setStatusLED("ready");
@@ -480,9 +558,23 @@ void loop() {
   // Update door unlock state (non-blocking)
   updateDoorUnlockState();
   
-  // Main fingerprint checking logic
+  // Update non-blocking tone playback
+  updateToneState();
+  
+  // Update non-blocking access denied LED reset
+  updateAccessDeniedState();
+  
+  // Handle pending OTA update (deferred from web handler to avoid timeout)
+  if (otaPending) {
+    otaPending = false;
+    performOTAUpdate();
+  }
+  
+  // Main fingerprint checking logic (with scan cooldown)
   if (!enrollmentMode) {
-    checkFingerprint();
+    if (millis() - lastScanTime >= SCAN_COOLDOWN) {
+      checkFingerprint();
+    }
   } else {
     handleEnrollment();
   }
@@ -676,16 +768,15 @@ void checkFingerprint() {
       }
     }
     
-    // Wait a moment before checking again
-    delay(2000);
+    lastScanTime = millis();
   } else if (fingerprintID == -2) {
     // Fingerprint detected but not matched
     Serial.println("Fingerprint not recognized");
     
     accessDenied();
-    sendBiometricData(-1, "unauthorized");
+    sendBiometricDataAsync(-1, "unauthorized");
     
-    delay(1000);
+    lastScanTime = millis();
   }
   // fingerprintID == -1 means no finger detected, continue normally
 }
@@ -765,11 +856,11 @@ void startNonBlockingUnlock(unsigned long duration, bool emergency) {
   doorUnlockDuration = duration;
   isEmergencyUnlock = emergency;
   
-  // Visual and audio feedback (non-blocking)
+  // Visual and audio feedback (truly non-blocking via tone queue)
   setStatusLED("granted");
-  playTone(1000, 200);
-  delay(100);  // Minimal delay for tone
-  playTone(1200, 200);
+  queueTone(1000, 200);
+  queueTone(0, 100);
+  queueTone(1200, 200);
   
   Serial.printf("⏱️  Door will remain unlocked for %d seconds (non-blocking)\n", duration / 1000);
 }
@@ -799,14 +890,14 @@ void updateDoorUnlockState() {
 void accessDenied() {
   Serial.println("Access denied!");
   
-  // Visual and audio feedback
   setStatusLED("denied");
-  playTone(500, 500);
-  delay(100);
-  playTone(300, 500);
+  queueTone(500, 500);
+  queueTone(0, 100);
+  queueTone(300, 500);
   
-  delay(2000);
-  setStatusLED("ready");
+  // LED reset handled by updateAccessDeniedState() in main loop
+  accessDeniedActive = true;
+  accessDeniedStartTime = millis();
 }
 
 void emergencyUnlock() {
@@ -831,13 +922,18 @@ void emergencyUnlockWithReason(String reason) {
 
 // ==================== ENROLLMENT FUNCTIONS ====================
 void startEnrollmentMode() {
-  enrollmentMode = true;
-  
   // Only set enrollmentID if it hasn't been set by remote command
   if (enrollmentID == 0) {
     enrollmentID = getNextAvailableID();
+    if (enrollmentID < 0) {
+      Serial.println("❌ Cannot start enrollment - no available fingerprint slots");
+      sendEnrollmentData(0, "enrollment_failed");
+      enrollmentID = 0;
+      return;
+    }
   }
   
+  enrollmentMode = true;
   Serial.printf("Enrollment mode started for ID: %d\n", enrollmentID);
   Serial.println("Please place finger on sensor...");
   
@@ -854,12 +950,12 @@ void handleEnrollment() {
     enrollmentMode = false;
     setStatusLED("ready");
     
-    // Success feedback
-    playTone(1000, 200);
-    delay(100);
-    playTone(1200, 200);
-    delay(100);
-    playTone(1400, 200);
+    // Success feedback (non-blocking)
+    queueTone(1000, 200);
+    queueTone(0, 100);
+    queueTone(1200, 200);
+    queueTone(0, 100);
+    queueTone(1400, 200);
     
     // Send enrollment data to server
     sendEnrollmentData(enrollmentID, "enrollment_success");
@@ -874,10 +970,10 @@ void handleEnrollment() {
     enrollmentMode = false;
     setStatusLED("error");
     
-    // Error feedback
-    playTone(300, 1000);
-    delay(2000);
-    setStatusLED("ready");
+    // Error feedback (non-blocking -- LED reset via accessDenied state)
+    queueTone(300, 1000);
+    accessDeniedActive = true;
+    accessDeniedStartTime = millis();
     
     // Send enrollment failure status instead of just progress
     sendEnrollmentData(enrollmentID, "enrollment_failed");
@@ -890,16 +986,16 @@ void handleEnrollment() {
 
 int enrollFingerprint() {
   int p = -1;
+  const int MAX_RETRIES = 3;
+  int retries = 0;
   
   Serial.println("Place finger on sensor...");
   unsigned long startTime = millis();
-  const unsigned long ENROLLMENT_TIMEOUT = 30000; // 30 seconds timeout
+  const unsigned long ENROLLMENT_TIMEOUT = 30000;
   
-  // Send enrollment progress update
   sendEnrollmentProgress("scanning_first_finger");
   
   while (p != FINGERPRINT_OK) {
-    // Check for timeout
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - no finger detected");
       sendEnrollmentProgress("timeout_first_finger");
@@ -911,18 +1007,21 @@ int enrollFingerprint() {
       case FINGERPRINT_OK:
         Serial.println("Image taken");
         sendEnrollmentProgress("first_finger_captured");
+        retries = 0;
         break;
       case FINGERPRINT_NOFINGER:
-        delay(50); // Small delay to prevent overwhelming the sensor
+        delay(50);
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
-        Serial.println("Communication error");
-        sendEnrollmentProgress("communication_error");
-        return -1;
       case FINGERPRINT_IMAGEFAIL:
-        Serial.println("Imaging error");
-        sendEnrollmentProgress("imaging_error");
-        return -1;
+        retries++;
+        Serial.printf("Transient sensor error (attempt %d/%d)\n", retries, MAX_RETRIES);
+        if (retries >= MAX_RETRIES) {
+          sendEnrollmentProgress(p == FINGERPRINT_PACKETRECIEVEERR ? "communication_error" : "imaging_error");
+          return -1;
+        }
+        delay(200);
+        continue;
       default:
         Serial.println("Unknown error");
         sendEnrollmentProgress("unknown_error");
@@ -930,8 +1029,15 @@ int enrollFingerprint() {
     }
   }
   
-  // Convert image to template
+  // Convert image to template (with retry)
+  retries = 0;
   p = finger.image2Tz(1);
+  while (p != FINGERPRINT_OK && retries < MAX_RETRIES) {
+    retries++;
+    Serial.printf("Template creation retry %d/%d\n", retries, MAX_RETRIES);
+    delay(100);
+    p = finger.image2Tz(1);
+  }
   if (p != FINGERPRINT_OK) {
     Serial.println("Template creation failed");
     sendEnrollmentProgress("template_creation_failed");
@@ -943,9 +1049,8 @@ int enrollFingerprint() {
   delay(2000);
   
   p = 0;
-  startTime = millis(); // Reset timeout for finger removal
+  startTime = millis();
   while (p != FINGERPRINT_NOFINGER) {
-    // Check for timeout on finger removal
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - finger not removed");
       sendEnrollmentProgress("timeout_finger_removal");
@@ -953,15 +1058,15 @@ int enrollFingerprint() {
     }
     
     p = finger.getImage();
-    delay(50); // Small delay to prevent overwhelming the sensor
+    delay(50);
   }
   
   Serial.println("Place same finger again...");
   sendEnrollmentProgress("scanning_second_finger");
-  startTime = millis(); // Reset timeout for second finger placement
+  startTime = millis();
+  retries = 0;
   
   while (p != FINGERPRINT_OK) {
-    // Check for timeout on second finger placement
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - second finger placement failed");
       sendEnrollmentProgress("timeout_second_finger");
@@ -973,18 +1078,21 @@ int enrollFingerprint() {
       case FINGERPRINT_OK:
         Serial.println("Image taken");
         sendEnrollmentProgress("second_finger_captured");
+        retries = 0;
         break;
       case FINGERPRINT_NOFINGER:
-        delay(50); // Small delay to prevent overwhelming the sensor
+        delay(50);
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
-        Serial.println("Communication error");
-        sendEnrollmentProgress("communication_error");
-        return -1;
       case FINGERPRINT_IMAGEFAIL:
-        Serial.println("Imaging error");
-        sendEnrollmentProgress("imaging_error");
-        return -1;
+        retries++;
+        Serial.printf("Transient sensor error (attempt %d/%d)\n", retries, MAX_RETRIES);
+        if (retries >= MAX_RETRIES) {
+          sendEnrollmentProgress(p == FINGERPRINT_PACKETRECIEVEERR ? "communication_error" : "imaging_error");
+          return -1;
+        }
+        delay(200);
+        continue;
       default:
         Serial.println("Unknown error");
         sendEnrollmentProgress("unknown_error");
@@ -992,8 +1100,15 @@ int enrollFingerprint() {
     }
   }
   
-  // Convert second image
+  // Convert second image (with retry)
+  retries = 0;
   p = finger.image2Tz(2);
+  while (p != FINGERPRINT_OK && retries < MAX_RETRIES) {
+    retries++;
+    Serial.printf("Second template creation retry %d/%d\n", retries, MAX_RETRIES);
+    delay(100);
+    p = finger.image2Tz(2);
+  }
   if (p != FINGERPRINT_OK) {
     Serial.println("Second template creation failed");
     sendEnrollmentProgress("second_template_failed");
@@ -1018,7 +1133,7 @@ int enrollFingerprint() {
   if (p == FINGERPRINT_OK) {
     Serial.println("Stored!");
     sendEnrollmentProgress("model_stored");
-    return 1;  // Success
+    return 1;
   } else {
     Serial.println("Storage failed");
     sendEnrollmentProgress("storage_failed");
@@ -1027,14 +1142,14 @@ int enrollFingerprint() {
 }
 
 int getNextAvailableID() {
-  // Find next available fingerprint ID
   for (int i = 1; i < finger.capacity; i++) {
     uint8_t p = finger.loadModel(i);
-    if (p == FINGERPRINT_BADLOCATION) {
-      return i;  // This slot is empty
+    if (p != FINGERPRINT_OK) {
+      return i;  // Slot is not occupied
     }
   }
-  return 1;  // Fallback to ID 1
+  Serial.println("⚠️ No available fingerprint slots!");
+  return -1;
 }
 
 // ==================== COMMUNICATION FUNCTIONS ====================
@@ -1143,7 +1258,74 @@ void sendEnrollmentProgress(String progressStep) {
   serializeJson(doc, jsonString);
   
   Serial.printf("📤 Sending enrollment progress: %s\n", progressStep.c_str());
+  sendToServerAsync(jsonString);
+}
+
+// ==================== OTA UPDATE FUNCTIONS ====================
+void sendOTAStatusToServer(String status, String errorMsg) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  
+  StaticJsonDocument<300> doc;
+  doc["deviceId"] = device_id;
+  doc["deviceType"] = "esp32_door_lock";
+  doc["event"] = "ota_update";
+  doc["status"] = status;
+  doc["timestamp"] = getISO8601Time();
+  doc["firmware_version"] = FIRMWARE_VERSION;
+  if (errorMsg.length() > 0) {
+    doc["error"] = errorMsg;
+  }
+  
+  String jsonString;
+  serializeJson(doc, jsonString);
   sendToServer(jsonString);
+}
+
+void performOTAUpdate() {
+  Serial.println("========================================");
+  Serial.println("📦 Starting OTA firmware update...");
+  Serial.printf("   URL: %s\n", otaFirmwareUrl.c_str());
+  Serial.printf("   Current version: %s\n", FIRMWARE_VERSION);
+  Serial.println("========================================");
+  
+  sendOTAStatusToServer("ota_started");
+  
+  setStatusLED("enrollment");
+  
+  WiFiClient wifiClient;
+  httpUpdate.setLedPin(BLUE_LED_PIN, LOW);
+  httpUpdate.rebootOnUpdate(false);
+  
+  t_httpUpdate_return result = httpUpdate.update(wifiClient, otaFirmwareUrl);
+  
+  switch (result) {
+    case HTTP_UPDATE_FAILED:
+      Serial.printf("❌ OTA failed: (%d) %s\n",
+                    httpUpdate.getLastError(),
+                    httpUpdate.getLastErrorString().c_str());
+      sendOTAStatusToServer("ota_failed", httpUpdate.getLastErrorString().c_str());
+      setStatusLED("error");
+      delay(3000);
+      setStatusLED("ready");
+      break;
+      
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("ℹ️ OTA: No update available (binary identical)");
+      sendOTAStatusToServer("ota_no_update");
+      setStatusLED("ready");
+      break;
+      
+    case HTTP_UPDATE_OK:
+      Serial.println("✅ OTA update successful! Rebooting...");
+      sendOTAStatusToServer("ota_success");
+      delay(1000);
+      ESP.restart();
+      break;
+  }
+  
+  otaFirmwareUrl = "";
 }
 
 void sendHeartbeat() {
@@ -1160,7 +1342,7 @@ void sendHeartbeat() {
     return;
   }
   
-  StaticJsonDocument<250> doc;
+  StaticJsonDocument<300> doc;
   doc["deviceId"] = device_id;
   doc["deviceType"] = "esp32_door_lock";
   doc["status"] = deviceStatus;
@@ -1172,6 +1354,7 @@ void sendHeartbeat() {
   doc["free_heap"] = ESP.getFreeHeap();
   doc["enrolled_prints"] = finger.templateCount;
   doc["ip_address"] = WiFi.localIP().toString();
+  doc["firmware_version"] = FIRMWARE_VERSION;
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -1207,32 +1390,120 @@ void sendToServer(String jsonData) {
   http.end();
 }
 
-// Non-blocking version of sendToServer for immediate response scenarios
+// Truly non-blocking: enqueue message for the FreeRTOS HTTP task on Core 0
 void sendToServerAsync(String jsonData) {
-  // Send to the ESP32 webhook endpoint
-  String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/esp32-webhook";
+  if (!enqueueHttpMessage(jsonData)) {
+    Serial.println("⚠️ Async HTTP queue full or unavailable, sending synchronously");
+    sendToServer(jsonData);
+  }
+}
+
+bool enqueueHttpMessage(const String &jsonData) {
+  if (httpQueue == NULL) return false;
   
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+  HttpMessage msg;
+  int len = jsonData.length();
+  if (len >= HTTP_MSG_MAX_LEN) {
+    Serial.printf("⚠️ HTTP message too long (%d bytes), truncated\n", len);
+    len = HTTP_MSG_MAX_LEN - 1;
+  }
+  memcpy(msg.jsonData, jsonData.c_str(), len);
+  msg.jsonData[len] = '\0';
   
-  // Use shorter timeout for async requests to avoid blocking
-  http.setTimeout(3000);  // 3 second timeout for async requests
+  return xQueueSend(httpQueue, &msg, 0) == pdTRUE;
+}
+
+// FreeRTOS task running on Core 0 -- processes queued HTTP messages
+void httpSendTask(void *parameter) {
+  HttpMessage msg;
+  HTTPClient asyncHttp;
   
-  int httpResponseCode = http.POST(jsonData);
-  
-  if (httpResponseCode > 0) {
-    String response = http.getString();
-    Serial.printf("Async data sent successfully (HTTP %d) to %s\n", httpResponseCode, url.c_str());
-    
-    if (httpResponseCode != 200) {
-      Serial.printf("Async server response: %s\n", response.c_str());
+  for (;;) {
+    if (xQueueReceive(httpQueue, &msg, portMAX_DELAY) == pdTRUE) {
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("⚠️ WiFi not connected - async data dropped");
+        continue;
+      }
+      
+      String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/esp32-webhook";
+      
+      asyncHttp.begin(url);
+      asyncHttp.addHeader("Content-Type", "application/json");
+      asyncHttp.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+      asyncHttp.setTimeout(3000);
+      
+      int httpResponseCode = asyncHttp.POST(String(msg.jsonData));
+      
+      if (httpResponseCode > 0) {
+        asyncHttp.getString();
+        if (httpResponseCode != 200) {
+          Serial.printf("Async HTTP response: %d\n", httpResponseCode);
+        }
+      } else {
+        Serial.printf("Async HTTP failed: %s\n", asyncHttp.errorToString(httpResponseCode).c_str());
+      }
+      
+      asyncHttp.end();
     }
-  } else {
-    Serial.printf("Async HTTP POST failed to %s: %s\n", url.c_str(), http.errorToString(httpResponseCode).c_str());
+  }
+}
+
+// ==================== NON-BLOCKING TONE SYSTEM ====================
+void queueTone(int frequency, unsigned long duration) {
+  if (toneQueueCount >= MAX_TONE_QUEUE) return;
+  toneQueue[toneQueueTail] = {frequency, duration};
+  toneQueueTail = (toneQueueTail + 1) % MAX_TONE_QUEUE;
+  toneQueueCount++;
+}
+
+void clearToneQueue() {
+  if (toneActive) {
+    ledcWriteTone(BUZZER_PIN, 0);
+    ledcDetach(BUZZER_PIN);
+    toneActive = false;
+  }
+  toneQueueHead = 0;
+  toneQueueTail = 0;
+  toneQueueCount = 0;
+}
+
+void updateToneState() {
+  if (toneActive) {
+    if (millis() - toneStartTime >= toneDuration) {
+      ledcWriteTone(BUZZER_PIN, 0);
+      ledcDetach(BUZZER_PIN);
+      toneActive = false;
+    } else {
+      return;
+    }
   }
   
-  http.end();
+  if (toneQueueCount > 0) {
+    ToneEntry entry = toneQueue[toneQueueHead];
+    toneQueueHead = (toneQueueHead + 1) % MAX_TONE_QUEUE;
+    toneQueueCount--;
+    
+    if (entry.frequency > 0) {
+      #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+        ledcAttach(BUZZER_PIN, entry.frequency, 8);
+        ledcWriteTone(BUZZER_PIN, entry.frequency);
+      #else
+        ledcSetup(0, entry.frequency, 8);
+        ledcAttachPin(BUZZER_PIN, 0);
+        ledcWrite(0, 128);
+      #endif
+    }
+    toneActive = true;
+    toneStartTime = millis();
+    toneDuration = entry.duration;
+  }
+}
+
+void updateAccessDeniedState() {
+  if (accessDeniedActive && millis() - accessDeniedStartTime >= ACCESS_DENIED_DISPLAY_TIME) {
+    setStatusLED("ready");
+    accessDeniedActive = false;
+  }
 }
 
 // ==================== UTILITY FUNCTIONS ====================
@@ -1479,6 +1750,7 @@ void handleStatus() {
   doc["free_heap"] = ESP.getFreeHeap();
   doc["uptime"] = millis();
   doc["enrollment_mode"] = enrollmentMode;
+  doc["firmware_version"] = FIRMWARE_VERSION;
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -1608,6 +1880,22 @@ void handleRemoteCommand() {
     } else {
       webServer.send(200, "application/json", "{\"success\":true,\"message\":\"No enrollment to cancel\"}");
     }
+    
+  } else if (command == "ota_update") {
+    String firmwareUrl = doc["data"]["url"].as<String>();
+    
+    if (firmwareUrl.length() == 0 || firmwareUrl == "null") {
+      webServer.send(400, "application/json", "{\"error\":\"Firmware URL is required\"}");
+      return;
+    }
+    
+    Serial.printf("📦 OTA update requested from: %s\n", firmwareUrl.c_str());
+    
+    webServer.send(200, "application/json", 
+      "{\"success\":true,\"message\":\"OTA update accepted, downloading firmware...\"}");
+    
+    otaPending = true;
+    otaFirmwareUrl = firmwareUrl;
     
   } else {
     Serial.printf("⚠️  Unknown command: %s\n", command.c_str());
@@ -1942,7 +2230,8 @@ bool validateWithServer(int biometricId) {
     String response = http.getString();
     StaticJsonDocument<200> responseDoc;
     
-    if (deserializeJson(responseDoc, response)) {
+    DeserializationError parseError = deserializeJson(responseDoc, response);
+    if (!parseError) {
       bool isAuthorized = responseDoc["authorized"];
       int memberId = responseDoc["memberId"] | 0;
       
@@ -1955,7 +2244,7 @@ bool validateWithServer(int biometricId) {
       http.end();
       return isAuthorized;
     } else {
-      Serial.println("❌ Failed to parse server validation response");
+      Serial.printf("❌ Failed to parse server validation response: %s\n", parseError.c_str());
     }
   } else {
     Serial.printf("❌ Server validation failed with HTTP %d\n", httpResponseCode);
@@ -2002,95 +2291,102 @@ void updateMemberCache() {
     return;
   }
   
-  Serial.println("🔄 Updating member cache from server...");
+  Serial.println("🔄 Updating member cache from server (paginated)...");
+  clearCache();
   
-  // Send cache update request
-  String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/cache-update";
+  int page = 1;
+  const int pageSize = 100;
+  bool hasMore = true;
   
-  StaticJsonDocument<200> doc;
-  doc["deviceId"] = device_id;
-  doc["event"] = "cache_update";
-  doc["timestamp"] = getISO8601Time();
-  
-  String jsonString;
-  serializeJson(doc, jsonString);
-  
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
-  http.setTimeout(HTTP_TIMEOUT);
-  
-  int httpResponseCode = http.POST(jsonString);
-  
-  if (httpResponseCode == 200) {
-    String response = http.getString();
-    handleCacheUpdate(response);
-  } else {
-    Serial.printf("❌ Cache update failed with HTTP %d\n", httpResponseCode);
+  while (hasMore && cacheSize < MAX_CACHED_MEMBERS) {
+    String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/cache-update";
+    
+    StaticJsonDocument<256> doc;
+    doc["deviceId"] = device_id;
+    doc["event"] = "cache_update";
+    doc["timestamp"] = getISO8601Time();
+    doc["page"] = page;
+    doc["pageSize"] = pageSize;
+    
+    String jsonString;
+    serializeJson(doc, jsonString);
+    
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+    http.setTimeout(HTTP_TIMEOUT);
+    
+    int httpResponseCode = http.POST(jsonString);
+    
+    if (httpResponseCode == 200) {
+      String response = http.getString();
+      int added = handleCacheUpdatePage(response);
+      
+      if (added < pageSize) {
+        hasMore = false;
+      } else {
+        page++;
+      }
+    } else {
+      Serial.printf("❌ Cache update page %d failed with HTTP %d\n", page, httpResponseCode);
+      hasMore = false;
+    }
+    
+    http.end();
   }
   
-  http.end();
+  Serial.printf("✅ Paginated cache update complete - %d members cached across %d page(s)\n", cacheSize, page);
 }
 
-void handleCacheUpdate(String jsonResponse) {
-  // Optimized JSON document size for streamlined response (only essential fields)
-  StaticJsonDocument<2000> doc;
+// Returns count of members added from this page (-1 on error)
+int handleCacheUpdatePage(String jsonResponse) {
+  size_t docSize = jsonResponse.length() + 1024;
+  DynamicJsonDocument doc(docSize);
   
-  Serial.printf("📋 Received cache response: %d bytes\n", jsonResponse.length());
-  Serial.printf("📋 Response preview: %.100s...\n", jsonResponse.c_str());
+  Serial.printf("📋 Received cache page: %d bytes\n", jsonResponse.length());
   
   DeserializationError error = deserializeJson(doc, jsonResponse);
   
   if (error) {
-    Serial.printf("❌ Failed to parse cache update response: %s\n", error.c_str());
-    Serial.printf("📋 Response length: %d bytes\n", jsonResponse.length());
-    Serial.printf("📋 Response content: %s\n", jsonResponse.c_str());
-    return;
+    Serial.printf("❌ Failed to parse cache response: %s\n", error.c_str());
+    return -1;
   }
   
-  if (doc.is<JsonObject>()) {
-    // Clear existing cache
-    clearCache();
-    
-    // Update cache with server data
-    if (doc.containsKey("members") && doc["members"].is<JsonArray>()) {
-      JsonArray members = doc["members"];
-      
-      Serial.printf("📋 Processing %d members from server\n", members.size());
-      
-      for (JsonObject member : members) {
-        if (cacheSize < MAX_CACHED_MEMBERS) {
-          // Only essential fields: biometricId, authorized, memberId
-          memberCache[cacheSize].biometricId = member["biometricId"];
-          memberCache[cacheSize].isAuthorized = member["authorized"];
-          memberCache[cacheSize].lastUpdate = millis();
-          memberCache[cacheSize].expiryTime = millis() + CACHE_VALIDITY_TIME;
-          memberCache[cacheSize].memberId = member["memberId"];
-          cacheSize++;
-          
-          Serial.printf("📝 Cached member: Biometric ID %d, Authorized: %s, Member ID: %d\n", 
-                       member["biometricId"].as<int>(), 
-                       member["authorized"].as<bool>() ? "YES" : "NO",
-                       member["memberId"].as<int>());
-        } else {
-          Serial.println("⚠️ Cache full, cannot add more members");
-          break;
-        }
-      }
-      
-      Serial.printf("✅ Cache updated successfully - %d members cached\n", cacheSize);
-      Serial.printf("💾 Cache validity: %d minutes\n", CACHE_VALIDITY_TIME / 60000);
-      Serial.printf("🔄 Next auto-update in: %d minutes\n", CACHE_UPDATE_INTERVAL / 60000);
-    } else {
-      Serial.println("⚠️ No member data received in cache update");
-      if (doc.containsKey("success")) {
-        Serial.printf("📋 Server response success: %s\n", doc["success"].as<bool>() ? "true" : "false");
-      }
-      if (doc.containsKey("error")) {
-        Serial.printf("📋 Server error: %s\n", doc["error"].as<String>().c_str());
-      }
-    }
-  } else {
+  if (!doc.is<JsonObject>()) {
     Serial.println("❌ Response is not a valid JSON object");
+    return -1;
   }
+  
+  if (!doc.containsKey("members") || !doc["members"].is<JsonArray>()) {
+    Serial.println("⚠️ No member data in cache page");
+    return 0;
+  }
+  
+  JsonArray members = doc["members"];
+  int added = 0;
+  
+  Serial.printf("📋 Processing %d members from page\n", members.size());
+  
+  for (JsonObject member : members) {
+    if (cacheSize >= MAX_CACHED_MEMBERS) {
+      Serial.println("⚠️ Cache full, stopping");
+      break;
+    }
+    memberCache[cacheSize].biometricId = member["biometricId"];
+    memberCache[cacheSize].isAuthorized = member["authorized"];
+    memberCache[cacheSize].lastUpdate = millis();
+    memberCache[cacheSize].expiryTime = millis() + CACHE_VALIDITY_TIME;
+    memberCache[cacheSize].memberId = member["memberId"];
+    cacheSize++;
+    added++;
+  }
+  
+  Serial.printf("✅ Page processed - %d members added (total cached: %d)\n", added, cacheSize);
+  return added;
+}
+
+// Legacy single-call handler (used by cache invalidation endpoint)
+void handleCacheUpdate(String jsonResponse) {
+  clearCache();
+  handleCacheUpdatePage(jsonResponse);
 }
