@@ -195,6 +195,26 @@ function initializeDatabase() {
        FOREIGN KEY (device_id) REFERENCES devices(device_id),
        FOREIGN KEY (member_id) REFERENCES members(id)
      );`,
+    `CREATE TABLE IF NOT EXISTS firmware_versions (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       version TEXT NOT NULL,
+       filename TEXT NOT NULL,
+       filepath TEXT NOT NULL,
+       file_size INTEGER,
+       description TEXT,
+       uploaded_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS firmware_update_log (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT NOT NULL,
+       firmware_id INTEGER NOT NULL,
+       status TEXT DEFAULT 'pending',
+       started_at TEXT DEFAULT (datetime('now')),
+       completed_at TEXT,
+       error_message TEXT,
+       FOREIGN KEY (device_id) REFERENCES devices(device_id),
+       FOREIGN KEY (firmware_id) REFERENCES firmware_versions(id)
+     );`,
   ];
 
   const insertDefaultSettings = [
