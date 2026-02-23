@@ -394,10 +394,13 @@ ESP32 devices communicate via TCP/IP using JSON messages:
    # DEFAULT_GYM_SERVER_PORT = 3001  # Must match main server PORT in .env
    ```
 
-4. Connect ESP32 to computer via USB
-5. Select the correct port: **Tools → Port → (your ESP32 port)**
-6. Click **Upload** button
-7. **Configure Device** (if using Option A):
+4. **Set Partition Scheme** (required for OTA firmware updates):
+   - Go to **Tools → Partition Scheme → "Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)"**
+   - This must be set before the first USB flash. After that, all subsequent firmware updates can be pushed over-the-air from the gym management UI via **Settings → ESP32 Devices → Firmware Updates**.
+5. Connect ESP32 to computer via USB
+6. Select the correct port: **Tools → Port → (your ESP32 port)**
+7. Click **Upload** button
+8. **Configure Device** (if using Option A):
    - Open Serial Monitor at **115200 baud** to see device IP
    - Navigate to `http://ESP32_IP/config` in your browser
    - Enter your WiFi credentials and server settings
