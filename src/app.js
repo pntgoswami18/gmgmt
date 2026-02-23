@@ -17,19 +17,13 @@ const reportRoutes = require('./api/routes/reports');
 const scheduleRoutes = require('./api/routes/schedules');
 const settingsRoutes = require('./api/routes/settings');
 const biometricRoutes = require('./api/routes/biometric');
+const firmwareRoutes = require('./api/routes/firmware');
 const referralRoutes = require('./api/routes/referrals');
 const paymentDeactivationRoutes = require('./api/routes/paymentDeactivation');
 
 app.use(cors());
-app.use(express.json());
-app.use(morgan('dev')); // Add this line for logging
-
-// Add middleware to log all requests
-app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-    console.log('Headers:', JSON.stringify(req.headers, null, 2));
-    next();
-});
+app.use(express.json({ limit: '1mb' }));
+app.use(morgan('dev'));
 
 app.use('/uploads', express.static('public/uploads'));
 
@@ -43,6 +37,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/biometric', biometricRoutes);
+app.use('/api/firmware', firmwareRoutes);
 app.use('/api/referrals', referralRoutes);
 app.use('/api/payment-deactivation', paymentDeactivationRoutes);
 
@@ -121,6 +116,7 @@ const startServer = async () => {
             try {
                 const BiometricIntegration = require('./services/biometricIntegration');
                 const { setBiometricIntegration } = require('./api/controllers/biometricController');
+                const { setBiometricIntegration: setFirmwareBiometricIntegration } = require('./api/routes/firmware');
                 const biometricPort = process.env.BIOMETRIC_PORT || 8080;
                 
                 console.log('🔐 Creating biometric integration instance on port:', biometricPort);
@@ -131,6 +127,7 @@ const startServer = async () => {
                 
                 console.log('🔐 Connecting integration with controller...');
                 setBiometricIntegration(biometricIntegration);
+                setFirmwareBiometricIntegration(biometricIntegration);
                 
                 // Store reference for potential cleanup
                 app.biometricIntegration = biometricIntegration;

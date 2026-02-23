@@ -1153,17 +1153,34 @@ const esp32Webhook = async (req, res) => {
       setImmediate(async () => {
         try {
           const deviceIP = ip_address || req.ip;
+          const firmwareVersion = eventData.firmware_version || null;
 
-          // Update device status and IP address in devices table
+          // Update device status, IP address, and firmware version in devices table
           await pool.query(`
-            INSERT OR REPLACE INTO devices (device_id, device_type, device_name, ip_address, status, last_heartbeat, updated_at)
-            VALUES (?, ?, ?, ?, 'online', datetime('now'), datetime('now'))
+            INSERT OR REPLACE INTO devices (device_id, device_type, device_name, ip_address, firmware_version, status, last_heartbeat, updated_at)
+            VALUES (?, ?, ?, ?, COALESCE(?, (SELECT firmware_version FROM devices WHERE device_id = ?)), 'online', datetime('now'), datetime('now'))
           `, [
             deviceId || 'unknown',
             deviceType || 'esp32_door_lock',
             eventData.device_name || `ESP32 Device ${deviceId}`,
-            deviceIP
+            deviceIP,
+            firmwareVersion,
+            deviceId || 'unknown'
           ]);
+
+          // If device reported a firmware version, mark any pending OTA as completed
+          if (firmwareVersion && deviceId) {
+            try {
+              await pool.query(`
+                UPDATE firmware_update_log
+                SET status = 'completed', completed_at = datetime('now')
+                WHERE device_id = ? AND status = 'pending'
+                  AND firmware_id IN (SELECT id FROM firmware_versions WHERE version = ?)
+              `, [deviceId, firmwareVersion]);
+            } catch (otaErr) {
+              console.error('Error updating OTA log:', otaErr);
+            }
+          }
 
           const biometricEvent = {
             member_id: null,
@@ -1180,13 +1197,33 @@ const esp32Webhook = async (req, res) => {
           };
 
           await biometricIntegration.logBiometricEvent(biometricEvent);
-          console.log(`✅ ESP32 heartbeat logged from device ${deviceId} (IP: ${deviceIP})`);
+          console.log(`✅ ESP32 heartbeat logged from device ${deviceId} (IP: ${deviceIP}, FW: ${firmwareVersion || 'unknown'})`);
         } catch (error) {
           console.error(`❌ Error logging heartbeat from ${deviceId}:`, error);
         }
       });
 
       return; // Exit early for heartbeat events
+    } else if (event === 'ota_update') {
+      eventType = 'ota_update';
+
+      const otaStatus = status; // ota_started, ota_success, ota_failed, ota_no_update
+      success = otaStatus !== 'ota_failed';
+
+      if (otaStatus === 'ota_failed' && deviceId) {
+        const errorMsg = eventData.error || 'Unknown OTA error';
+        try {
+          await pool.query(`
+            UPDATE firmware_update_log
+            SET status = 'failed', error_message = ?, completed_at = datetime('now')
+            WHERE device_id = ? AND status = 'pending'
+          `, [errorMsg, deviceId]);
+        } catch (otaErr) {
+          console.error('Error updating OTA failure log:', otaErr);
+        }
+      }
+
+      console.log(`📦 OTA event from ${deviceId}: ${otaStatus}`);
     } else if (event === 'TimeLog') {
       if (status === 'authorized') {
         eventType = 'checkin'; // Could be checkin or checkout
@@ -1743,9 +1780,9 @@ const validateBiometricId = async (req, res) => {
 // Cache update endpoint for ESP32 devices
 const updateMemberCache = async (req, res) => {
   try {
-    const { deviceId, event, timestamp } = req.body;
+    const { deviceId, event, timestamp, page, pageSize } = req.body;
 
-    console.log(`🔄 Cache update request from device: ${deviceId}`);
+    console.log(`🔄 Cache update request from device: ${deviceId} (page: ${page || 'all'}, pageSize: ${pageSize || 'all'})`);
 
     if (!deviceId) {
       return res.status(400).json({
@@ -1754,8 +1791,11 @@ const updateMemberCache = async (req, res) => {
       });
     }
 
-    // Get only essential fields for biometric authentication
-    const query = `
+    const usePagination = page && pageSize;
+    const limit = usePagination ? parseInt(pageSize) : null;
+    const offset = usePagination ? (parseInt(page) - 1) * parseInt(pageSize) : 0;
+
+    let query = `
       SELECT 
         m.id as member_id,
         m.biometric_id,
@@ -1764,26 +1804,36 @@ const updateMemberCache = async (req, res) => {
       WHERE m.biometric_id IS NOT NULL 
         AND m.biometric_id != ''
         AND m.biometric_id != '0'
+      ORDER BY m.id
     `;
+
+    if (usePagination) {
+      query += ` LIMIT ${limit} OFFSET ${offset}`;
+    }
 
     const result = await pool.query(query);
     const members = result.rows;
 
-    // Format members for ESP32 cache - only essential fields for biometric authentication
     const cacheMembers = members.map(member => ({
       biometricId: parseInt(member.biometric_id),
       memberId: member.member_id,
       authorized: member.is_active === 1
     }));
 
-    console.log(`✅ Sending cache update: ${cacheMembers.length} members to device ${deviceId}`);
-
-    res.json({
+    const response = {
       success: true,
       members: cacheMembers,
-      totalMembers: cacheMembers.length,
+      count: cacheMembers.length,
       timestamp: new Date().toISOString()
-    });
+    };
+
+    if (usePagination) {
+      response.page = parseInt(page);
+      response.pageSize = parseInt(pageSize);
+    }
+
+    console.log(`✅ Sending cache update: ${cacheMembers.length} members to device ${deviceId} (page ${page || 'all'})`);
+    res.json(response);
 
   } catch (error) {
     console.error('❌ Error updating member cache:', error);
