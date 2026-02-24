@@ -1060,6 +1060,9 @@ class BiometricIntegration {
       console.warn('Could not fetch member name:', nameError.message);
     }
     
+    // Activate server-side enrollment mode so webhook events can be processed
+    this.startEnrollmentMode(memberId, memberName);
+    
     // Pass the member ID as the userId to the ESP32 device
     // This creates a direct 1:1 mapping between ESP32 userId and member ID
     await this.sendESP32Command(deviceId, 'start_enrollment', {
