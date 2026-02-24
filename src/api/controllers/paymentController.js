@@ -1,4 +1,4 @@
-const { pool } = require('../../config/sqlite');
+const { pool, runInTransaction } = require('../../config/sqlite');
 const { calculateDueDateForPlan } = require('../../utils/dateUtils');
 
 // Card payment processing is disabled (Stripe removed)
@@ -42,9 +42,9 @@ exports.createInvoice = async (req, res) => {
 // Record a manual payment (cash/bank/etc.)
 // If invoice_id is missing or invalid, create an invoice automatically
 exports.recordManualPayment = async (req, res) => {
-    const { db } = require('../../config/sqlite'); // Import db for transactions
-
-    const paymentTransaction = db.transaction(async (data) => {
+    try {
+        const result = await runInTransaction(async () => {
+        const data = req.body;
         let { invoice_id, amount, method, transaction_id, member_id, plan_id, due_date } = data;
 
         const normalizedAmount = parseFloat(amount);
@@ -151,10 +151,8 @@ exports.recordManualPayment = async (req, res) => {
         }
 
         return { payment: payment.rows[0], invoice_id: ensuredInvoiceId };
-    });
+        });
 
-    try {
-        const result = await paymentTransaction(req.body);
         res.status(201).json({ message: 'Manual payment recorded', payment: result.payment, invoice_id: result.invoice_id });
     } catch (err) {
         res.status(400).json({ message: err.message });

@@ -371,6 +371,24 @@ const pool = {
   }),
 };
 
-module.exports = { db, pool, initializeDatabase };
+/**
+ * Run an async callback inside a database transaction.
+ * better-sqlite3's db.transaction() only supports synchronous callbacks; passing
+ * an async function causes it to commit after the first await. This helper uses
+ * explicit BEGIN/COMMIT/ROLLBACK so async operations stay within the transaction.
+ */
+async function runInTransaction(callback) {
+  db.exec('BEGIN');
+  try {
+    const result = await callback();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+module.exports = { db, pool, initializeDatabase, runInTransaction };
 
 

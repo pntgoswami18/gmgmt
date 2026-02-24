@@ -2292,7 +2292,9 @@ void updateMemberCache() {
   }
   
   Serial.println("🔄 Updating member cache from server (paginated)...");
-  clearCache();
+  // Do NOT clear cache here - only clear when we successfully receive valid data.
+  // If the server is unreachable, we keep the existing cache so the door remains
+  // operable during temporary outages.
   
   int page = 1;
   const int pageSize = 100;
@@ -2320,6 +2322,9 @@ void updateMemberCache() {
     
     if (httpResponseCode == 200) {
       String response = http.getString();
+      if (page == 1) {
+        clearCache();  // Clear only when we have valid data to replace it
+      }
       int added = handleCacheUpdatePage(response);
       
       if (added < pageSize) {
