@@ -2323,6 +2323,8 @@ void handleRemoteCommand() {
     
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Door unlocked\"}");
     
+    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Door unlocked\"}");
+    
   } else if (command == "access_granted") {
     Serial.printf("📡 Current relay state before access granted: %s (PIN %d)\n", 
                   digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
