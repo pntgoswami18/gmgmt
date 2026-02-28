@@ -770,17 +770,17 @@ void checkFingerprint() {
         Serial.printf("❌ Server validation - Unauthorized member ID %d\n", fingerprintID);
         accessDenied();
         // Use async version even for denied access
-        sendBiometricDataAsync(fingerprintID, "unauthorized");
+        sendBiometricDataAsync(fingerprintID, "unauthorized", "access_revoked");
       }
     }
-    
+
     lastScanTime = millis();
   } else if (fingerprintID == -2) {
     // Fingerprint detected but not matched
     Serial.println("Fingerprint not recognized");
-    
+
     accessDenied();
-    sendBiometricDataAsync(-1, "unauthorized");
+    sendBiometricDataAsync(-1, "unauthorized", "fingerprint_not_recognized");
     
     lastScanTime = millis();
   }
