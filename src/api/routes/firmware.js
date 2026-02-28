@@ -265,6 +265,8 @@ router.delete('/:id', requireSameOrigin, async (req, res) => {
       fs.unlinkSync(firmware.filepath);
     }
 
+    // Remove log entries first to satisfy the foreign key constraint
+    await pool.query('DELETE FROM firmware_update_log WHERE firmware_id = ?', [id]);
     await pool.query('DELETE FROM firmware_versions WHERE id = ?', [id]);
     res.json({ success: true, message: 'Firmware deleted successfully' });
   } catch (error) {
