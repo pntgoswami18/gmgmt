@@ -1,6 +1,13 @@
 const { pool, runInTransaction } = require('../../config/sqlite');
 const { calculateDueDateForPlan } = require('../../utils/dateUtils');
 
+// Helper to throw errors with HTTP status (for use inside runInTransaction)
+function httpError(message, statusCode = 400) {
+    const err = new Error(message);
+    err.statusCode = statusCode;
+    return err;
+}
+
 // Card payment processing is disabled (Stripe removed)
 exports.processPayment = async (_req, res) => {
     return res.status(501).json({
@@ -49,18 +56,18 @@ exports.recordManualPayment = async (req, res) => {
 
         const normalizedAmount = parseFloat(amount);
         if (Number.isNaN(normalizedAmount) || normalizedAmount <= 0) {
-            throw new Error('Invalid amount');
+            throw httpError('Invalid amount', 400);
         }
 
         // If member_id is provided, check if member is an admin user
         if (member_id) {
             const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = $1', [member_id]);
             if (memberCheck.rows.length === 0) {
-                throw new Error('Member not found');
+                throw httpError('Member not found', 404);
             }
 
             if (memberCheck.rows[0].is_admin === 1) {
-                throw new Error('Admin users are exempt from payments and cannot have payments recorded against them');
+                throw httpError('Admin users are exempt from payments and cannot have payments recorded against them', 400);
             }
         }
 
@@ -99,7 +106,7 @@ exports.recordManualPayment = async (req, res) => {
         // Check if a payment already exists for this invoice
         const existingPayment = await pool.query('SELECT id FROM payments WHERE invoice_id = $1', [ensuredInvoiceId]);
         if (existingPayment.rows.length > 0) {
-            throw new Error(`Invoice #${ensuredInvoiceId} already has a payment recorded (Payment ID: ${existingPayment.rows[0].id}). Cannot record multiple payments for the same invoice.`);
+            throw httpError(`Invoice #${ensuredInvoiceId} already has a payment recorded (Payment ID: ${existingPayment.rows[0].id}). Cannot record multiple payments for the same invoice.`, 409);
         }
 
         await pool.query('INSERT INTO payments (invoice_id, amount, payment_method, transaction_id) VALUES ($1, $2, $3, $4)', [ensuredInvoiceId, normalizedAmount, method || 'manual', transaction_id || null]);
@@ -155,7 +162,8 @@ exports.recordManualPayment = async (req, res) => {
 
         res.status(201).json({ message: 'Manual payment recorded', payment: result.payment, invoice_id: result.invoice_id });
     } catch (err) {
-        res.status(400).json({ message: err.message });
+        const statusCode = err.statusCode || 400;
+        res.status(statusCode).json({ message: err.message });
     }
 };
 
