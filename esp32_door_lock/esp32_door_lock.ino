@@ -66,6 +66,9 @@ String gym_server_ip = "";
 int gym_server_port = 8080;
 String device_id = "";
 
+// Mutex for thread-safe access to gym_server_ip/port (httpSendTask on Core 0 vs config saves on Core 1)
+SemaphoreHandle_t configMutex = NULL;
+
 // Pin Definitions
 #define FINGERPRINT_RX_PIN    16
 #define FINGERPRINT_TX_PIN    17
@@ -480,6 +483,9 @@ void setup() {
   
   // Initialize member cache
   initializeCache();
+  
+  // Create mutex for thread-safe config access (httpSendTask on Core 0 vs config saves on Core 1)
+  configMutex = xSemaphoreCreateMutex();
   
   // Initialize FreeRTOS async HTTP queue and task on Core 0
   httpQueue = xQueueCreate(HTTP_QUEUE_SIZE, sizeof(HttpMessage));
@@ -1425,7 +1431,19 @@ void httpSendTask(void *parameter) {
         continue;
       }
       
-      String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/esp32-webhook";
+      // Copy config under mutex (Arduino String is not thread-safe for concurrent read/write)
+      String serverIp;
+      int serverPort = 8080;
+      if (configMutex != NULL && xSemaphoreTake(configMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        serverIp = gym_server_ip;
+        serverPort = gym_server_port;
+        xSemaphoreGive(configMutex);
+      }
+      if (serverIp.length() == 0) {
+        Serial.println("⚠️ No server IP - async data dropped");
+        continue;
+      }
+      String url = String("http://") + serverIp + ":" + serverPort + "/api/biometric/esp32-webhook";
       
       asyncHttp.begin(url);
       asyncHttp.addHeader("Content-Type", "application/json");
@@ -1953,7 +1971,9 @@ void handleConfigSave() {
   String action = webServer.arg("action");
   
   if (action == "reset") {
+    if (configMutex != NULL) xSemaphoreTake(configMutex, portMAX_DELAY);
     resetConfiguration();
+    if (configMutex != NULL) xSemaphoreGive(configMutex);
     webServer.send(200, "text/html", 
       "<html><body><h2>Configuration Reset</h2>"
       "<p>Configuration has been reset to defaults.</p>"
@@ -1987,9 +2007,11 @@ void handleConfigSave() {
     needsRestart = true;
   }
   
+  if (configMutex != NULL) xSemaphoreTake(configMutex, portMAX_DELAY);
   device_id = new_device_id;
   gym_server_ip = new_server_ip;
   gym_server_port = new_server_port;
+  if (configMutex != NULL) xSemaphoreGive(configMutex);
   
   // Save to preferences
   saveConfiguration();
@@ -2073,12 +2095,12 @@ void handleApiConfigSave() {
     }
   }
   
-  // Update server settings if provided
+  // Update server settings if provided (mutex protects gym_server_ip/port from httpSendTask on Core 0)
+  if (configMutex != NULL) xSemaphoreTake(configMutex, portMAX_DELAY);
   if (doc.containsKey("device_id")) {
     device_id = doc["device_id"].as<String>();
     configChanged = true;
   }
-  
   if (doc.containsKey("gym_server_ip")) {
     String new_ip = doc["gym_server_ip"].as<String>();
     if (new_ip != gym_server_ip) {
@@ -2087,7 +2109,6 @@ void handleApiConfigSave() {
       configChanged = true;
     }
   }
-  
   if (doc.containsKey("gym_server_port")) {
     int new_port = doc["gym_server_port"].as<int>();
     if (new_port != gym_server_port) {
@@ -2096,6 +2117,7 @@ void handleApiConfigSave() {
       configChanged = true;
     }
   }
+  if (configMutex != NULL) xSemaphoreGive(configMutex);
   
   if (configChanged) {
     saveConfiguration();

@@ -56,10 +56,11 @@ router.post('/upload', upload.single('firmware'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'Firmware version is required' });
     }
 
+    const uploadedAt = new Date().toISOString();
     const result = await pool.query(
-      `INSERT INTO firmware_versions (version, filename, filepath, file_size, description)
-       VALUES (?, ?, ?, ?, ?)`,
-      [version.trim(), req.file.filename, req.file.path, req.file.size, description || null]
+      `INSERT INTO firmware_versions (version, filename, filepath, file_size, description, uploaded_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [version.trim(), req.file.filename, req.file.path, req.file.size, description || null, uploadedAt]
     );
 
     res.json({
