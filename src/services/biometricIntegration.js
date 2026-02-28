@@ -1041,11 +1041,17 @@ class BiometricIntegration {
 
   async unlockDoorRemotely(deviceId, reason = 'admin_unlock') {
     console.log(`🔓 Remote unlock requested for device: ${deviceId}`);
-    
-    const commandResult = await this.sendESP32Command(deviceId, 'unlock_door', {
-      reason,
-      duration: 5000 // 5 seconds
-    });
+
+    let commandResult;
+    try {
+      commandResult = await this.sendESP32Command(deviceId, 'unlock_door', {
+        reason,
+        duration: 5000 // 5 seconds
+      });
+    } catch (err) {
+      console.error(`❌ Remote unlock command failed for ${deviceId}:`, err.message);
+      return { success: false, error: err.message };
+    }
 
     if (commandResult?.error) {
       console.warn(`⚠️ Remote unlock command reported issues: ${commandResult.error}`);

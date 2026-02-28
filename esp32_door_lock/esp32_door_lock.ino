@@ -143,7 +143,7 @@ String otaFirmwareUrl = "";
 
 // FreeRTOS async HTTP queue
 #define HTTP_QUEUE_SIZE 10
-#define HTTP_MSG_MAX_LEN 512
+#define HTTP_MSG_MAX_LEN 1024
 QueueHandle_t httpQueue = NULL;
 TaskHandle_t httpTaskHandle = NULL;
 
@@ -817,35 +817,6 @@ bool isDoorLocked() {
   return digitalRead(RELAY_PIN) == HIGH;
 }
 
-void unlockDoor() {
-  Serial.println("Door unlocked!");
-  
-  // Visual and audio feedback
-  setStatusLED("granted");
-  playTone(1000, 200);
-  delay(100);
-  playTone(1200, 200);
-  
-  // Unlock door - OPEN relay to allow door to unlock
-  Serial.println("🔓 Opening relay (door unlocked)");
-  Serial.printf("📡 Sending LOW signal to relay module (PIN %d)\n", RELAY_PIN);
-  digitalWrite(RELAY_PIN, LOW);
-  Serial.println("✅ Relay signal: LOW (door should be unlocked)");
-  
-  // Keep door unlocked for specified time
-  Serial.printf("⏱️  Door will remain unlocked for %d seconds\n", DOOR_UNLOCK_TIME / 1000);
-  delay(DOOR_UNLOCK_TIME);
-  
-  // Lock door - CLOSE relay to keep door locked
-  Serial.println("🔒 Closing relay (door locked)");
-  Serial.printf("📡 Sending HIGH signal to relay module (PIN %d)\n", RELAY_PIN);
-  digitalWrite(RELAY_PIN, HIGH);
-  Serial.println("✅ Relay signal: HIGH (door should be locked)");
-  setStatusLED("ready");
-  
-  Serial.println("Door locked");
-}
-
 // Non-blocking door unlock function for instant response
 void startNonBlockingUnlock(unsigned long duration, bool emergency) {
   Serial.println(emergency ? "🚨 Emergency unlock activated!" : "Door unlocked!");
@@ -1414,8 +1385,8 @@ bool enqueueHttpMessage(const String &jsonData) {
   HttpMessage msg;
   int len = jsonData.length();
   if (len >= HTTP_MSG_MAX_LEN) {
-    Serial.printf("⚠️ HTTP message too long (%d bytes), truncated\n", len);
-    len = HTTP_MSG_MAX_LEN - 1;
+    Serial.printf("❌ HTTP message too long (%d bytes), dropped\n", len);
+    return false;
   }
   memcpy(msg.jsonData, jsonData.c_str(), len);
   msg.jsonData[len] = '\0';
@@ -1472,7 +1443,10 @@ void httpSendTask(void *parameter) {
 
 // ==================== NON-BLOCKING TONE SYSTEM ====================
 void queueTone(int frequency, unsigned long duration) {
-  if (toneQueueCount >= MAX_TONE_QUEUE) return;
+  if (toneQueueCount >= MAX_TONE_QUEUE) {
+    Serial.println("⚠️ Tone queue full, tone dropped");
+    return;
+  }
   toneQueue[toneQueueTail] = {frequency, duration};
   toneQueueTail = (toneQueueTail + 1) % MAX_TONE_QUEUE;
   toneQueueCount++;
@@ -1566,22 +1540,9 @@ void setStatusLED(String status) {
   } else if (status == "denied") {
     digitalWrite(RED_LED_PIN, HIGH);
   } else if (status == "enrollment") {
-    // Blink blue for enrollment mode
-    for (int i = 0; i < 3; i++) {
-      digitalWrite(BLUE_LED_PIN, HIGH);
-      delay(100);
-      digitalWrite(BLUE_LED_PIN, LOW);
-      delay(100);
-    }
-    digitalWrite(BLUE_LED_PIN, HIGH);
+    digitalWrite(BLUE_LED_PIN, HIGH); // Steady blue for enrollment mode (non-blocking)
   } else if (status == "error") {
-    // Blink red for error
-    for (int i = 0; i < 5; i++) {
-      digitalWrite(RED_LED_PIN, HIGH);
-      delay(100);
-      digitalWrite(RED_LED_PIN, LOW);
-      delay(100);
-    }
+    digitalWrite(RED_LED_PIN, HIGH);  // Steady red for error (non-blocking)
   }
 }
 
@@ -1975,7 +1936,7 @@ void handleConfigSave() {
   String action = webServer.arg("action");
   
   if (action == "reset") {
-    if (configMutex != NULL) xSemaphoreTake(configMutex, portMAX_DELAY);
+    if (configMutex != NULL) xSemaphoreTake(configMutex, pdMS_TO_TICKS(500));
     resetConfiguration();
     if (configMutex != NULL) xSemaphoreGive(configMutex);
     webServer.send(200, "text/html", 
@@ -2011,11 +1972,14 @@ void handleConfigSave() {
     needsRestart = true;
   }
   
-  if (configMutex != NULL) xSemaphoreTake(configMutex, portMAX_DELAY);
-  device_id = new_device_id;
-  gym_server_ip = new_server_ip;
-  gym_server_port = new_server_port;
-  if (configMutex != NULL) xSemaphoreGive(configMutex);
+  if (configMutex == NULL || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+    device_id = new_device_id;
+    gym_server_ip = new_server_ip;
+    gym_server_port = new_server_port;
+    if (configMutex != NULL) xSemaphoreGive(configMutex);
+  } else {
+    Serial.println("⚠️ Config mutex timeout - skipping in-memory update (Preferences already saved)");
+  }
   
   // Save to preferences
   saveConfiguration();
@@ -2100,28 +2064,31 @@ void handleApiConfigSave() {
   }
   
   // Update server settings if provided (mutex protects gym_server_ip/port from httpSendTask on Core 0)
-  if (configMutex != NULL) xSemaphoreTake(configMutex, portMAX_DELAY);
-  if (doc.containsKey("device_id")) {
-    device_id = doc["device_id"].as<String>();
-    configChanged = true;
-  }
-  if (doc.containsKey("gym_server_ip")) {
-    String new_ip = doc["gym_server_ip"].as<String>();
-    if (new_ip != gym_server_ip) {
-      gym_server_ip = new_ip;
-      needsRestart = true;
+  if (configMutex == NULL || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+    if (doc.containsKey("device_id")) {
+      device_id = doc["device_id"].as<String>();
       configChanged = true;
     }
-  }
-  if (doc.containsKey("gym_server_port")) {
-    int new_port = doc["gym_server_port"].as<int>();
-    if (new_port != gym_server_port) {
-      gym_server_port = new_port;
-      needsRestart = true;
-      configChanged = true;
+    if (doc.containsKey("gym_server_ip")) {
+      String new_ip = doc["gym_server_ip"].as<String>();
+      if (new_ip != gym_server_ip) {
+        gym_server_ip = new_ip;
+        needsRestart = true;
+        configChanged = true;
+      }
     }
+    if (doc.containsKey("gym_server_port")) {
+      int new_port = doc["gym_server_port"].as<int>();
+      if (new_port != gym_server_port) {
+        gym_server_port = new_port;
+        needsRestart = true;
+        configChanged = true;
+      }
+    }
+    if (configMutex != NULL) xSemaphoreGive(configMutex);
+  } else {
+    Serial.println("⚠️ Config mutex timeout - skipping in-memory update (Preferences already saved)");
   }
-  if (configMutex != NULL) xSemaphoreGive(configMutex);
   
   if (configChanged) {
     saveConfiguration();
@@ -2245,9 +2212,19 @@ bool validateWithServer(int biometricId) {
     return false;
   }
   
-  // Create validation request
-  String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/validate";
-  
+  // Copy config under mutex before building URL (gym_server_ip/port also written by web handlers)
+  String serverIp;
+  int serverPort = 8080;
+  if (configMutex != NULL && xSemaphoreTake(configMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    serverIp = gym_server_ip;
+    serverPort = gym_server_port;
+    xSemaphoreGive(configMutex);
+  } else {
+    serverIp = gym_server_ip;   // fallback: tolerate possible torn read on rare config save
+    serverPort = gym_server_port;
+  }
+  String url = String("http://") + serverIp + ":" + serverPort + "/api/biometric/validate";
+
   StaticJsonDocument<200> doc;
   doc["biometricId"] = biometricId;
   doc["deviceId"] = device_id;
@@ -2401,7 +2378,8 @@ void updateMemberCache() {
 
 // Returns count of members added from this page (-1 on error)
 int handleCacheUpdatePage(String jsonResponse, bool applyChanges) {
-  size_t docSize = jsonResponse.length() + 1024;
+  const size_t MAX_CACHE_PAGE_DOC_SIZE = 32768; // 32KB cap to prevent heap fragmentation
+  size_t docSize = min((size_t)(jsonResponse.length() + 1024), MAX_CACHE_PAGE_DOC_SIZE);
   DynamicJsonDocument doc(docSize);
   
   Serial.printf("📋 Received cache page: %d bytes\n", jsonResponse.length());

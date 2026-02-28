@@ -14,6 +14,21 @@ const ensureFirmwareDir = () => {
 
 ensureFirmwareDir();
 
+// Reject state-mutating requests that come from a different origin (C1/C3 CSRF guard).
+// GET /download is intentionally excluded — ESP32 fetches firmware without a browser Origin header.
+function requireSameOrigin(req, res, next) {
+  const origin = req.headers.origin;
+  const referer = req.headers.referer;
+  if (origin || referer) {
+    const host = req.headers.host;
+    const source = origin || referer;
+    if (!source.includes(host)) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+  }
+  next();
+}
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     ensureFirmwareDir();
@@ -62,7 +77,7 @@ const setBiometricIntegration = (integration) => {
 };
 
 // Upload a new firmware binary
-router.post('/upload', upload.single('firmware'), async (req, res) => {
+router.post('/upload', requireSameOrigin, upload.single('firmware'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No firmware file provided' });
@@ -97,7 +112,7 @@ router.post('/upload', upload.single('firmware'), async (req, res) => {
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    res.status(500).json({ success: false, message: 'Failed to upload firmware', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to upload firmware' });
   }
 });
 
@@ -110,11 +125,11 @@ router.get('/list', async (_req, res) => {
     res.json({ success: true, firmwares: result.rows || [] });
   } catch (error) {
     console.error('Error listing firmware:', error);
-    res.status(500).json({ success: false, message: 'Failed to list firmware', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to list firmware' });
   }
 });
 
-// Download a firmware binary (used by ESP32 during OTA)
+// Download a firmware binary (used by ESP32 during OTA — no origin check required)
 router.get('/download/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -125,23 +140,30 @@ router.get('/download/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Firmware not found' });
     }
 
-    const filePath = firmware.filepath;
-    if (!fs.existsSync(filePath)) {
+    // C2: Validate that filepath is within the expected firmware directory
+    const resolvedPath = path.resolve(firmware.filepath);
+    if (!resolvedPath.startsWith(path.resolve(FIRMWARE_DIR))) {
+      console.error('Path traversal attempt blocked for firmware id:', id);
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+    if (!fs.existsSync(resolvedPath)) {
       return res.status(404).json({ success: false, message: 'Firmware file missing from disk' });
     }
 
+    // C4: Sanitize filename before inserting into Content-Disposition header
+    const safeFilename = firmware.filename.replace(/["\\\r\n]/g, '_');
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${firmware.filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
     res.setHeader('Content-Length', firmware.file_size);
-    fs.createReadStream(filePath).pipe(res);
+    fs.createReadStream(resolvedPath).pipe(res);
   } catch (error) {
     console.error('Error downloading firmware:', error);
-    res.status(500).json({ success: false, message: 'Failed to download firmware', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to download firmware' });
   }
 });
 
 // Trigger OTA update on a specific device
-router.post('/update/:deviceId', async (req, res) => {
+router.post('/update/:deviceId', requireSameOrigin, async (req, res) => {
   try {
     const { deviceId } = req.params;
     const { firmwareId } = req.body;
@@ -160,10 +182,10 @@ router.post('/update/:deviceId', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Firmware version not found' });
     }
 
-    // Build the download URL that the ESP32 will fetch from
-    const serverPort = process.env.PORT || 3001;
-    const serverIP = await getServerIP();
-    const downloadUrl = `http://${serverIP}:${serverPort}/api/firmware/download/${firmwareId}`;
+    // M7: Prefer SERVER_URL env var; fall back to auto-detected LAN IP
+    const downloadUrl = process.env.SERVER_URL
+      ? `${process.env.SERVER_URL}/api/firmware/download/${firmwareId}`
+      : `http://${getServerIP()}:${process.env.PORT || 3001}/api/firmware/download/${firmwareId}`;
 
     // Log the update attempt
     const logResult = await pool.query(
@@ -180,14 +202,14 @@ router.post('/update/:deviceId', async (req, res) => {
         updateLogId
       });
     } catch (cmdError) {
+      console.error('OTA command failed:', cmdError);
       await pool.query(
         `UPDATE firmware_update_log SET status = 'failed', error_message = ?, completed_at = datetime('now') WHERE id = ?`,
         [cmdError.message, updateLogId]
       );
       return res.status(500).json({
         success: false,
-        message: 'Failed to send OTA command to device',
-        error: cmdError.message
+        message: 'Failed to send OTA command to device'
       });
     }
 
@@ -199,7 +221,7 @@ router.post('/update/:deviceId', async (req, res) => {
     });
   } catch (error) {
     console.error('Error triggering OTA update:', error);
-    res.status(500).json({ success: false, message: 'Failed to trigger OTA update', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to trigger OTA update' });
   }
 });
 
@@ -224,12 +246,12 @@ router.get('/log', async (req, res) => {
     res.json({ success: true, logs: result.rows || [] });
   } catch (error) {
     console.error('Error fetching update log:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch update log', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to fetch update log' });
   }
 });
 
 // Delete a firmware version
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireSameOrigin, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('SELECT * FROM firmware_versions WHERE id = ?', [id]);
@@ -247,7 +269,7 @@ router.delete('/:id', async (req, res) => {
     res.json({ success: true, message: 'Firmware deleted successfully' });
   } catch (error) {
     console.error('Error deleting firmware:', error);
-    res.status(500).json({ success: false, message: 'Failed to delete firmware', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to delete firmware' });
   }
 });
 

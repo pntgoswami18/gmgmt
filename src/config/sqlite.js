@@ -293,7 +293,13 @@ function initializeDatabase() {
     db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_member_today ON attendance(member_id, date, check_out_time);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_settings_key_lookup ON settings(key);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_members_active_admin ON members(is_active, is_admin);");
-    
+
+    // Firmware table indexes
+    db.exec("CREATE INDEX IF NOT EXISTS idx_firmware_update_log_device_id ON firmware_update_log(device_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_firmware_update_log_status_started ON firmware_update_log(status, started_at);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_firmware_update_log_firmware_id ON firmware_update_log(firmware_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_firmware_versions_version ON firmware_versions(version);");
+
     // Insert default settings
     for (const [k, v] of insertDefaultSettings) {
       db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)').run(k, v);
