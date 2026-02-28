@@ -38,6 +38,24 @@ const upload = multer({
 });
 
 let biometricIntegration = null;
+const OTA_PENDING_TIMEOUT_MINUTES = Number.parseInt(process.env.OTA_PENDING_TIMEOUT_MINUTES || '5', 10);
+
+async function markTimedOutFirmwareUpdates() {
+  const timeoutMinutes = Number.isFinite(OTA_PENDING_TIMEOUT_MINUTES) && OTA_PENDING_TIMEOUT_MINUTES > 0
+    ? OTA_PENDING_TIMEOUT_MINUTES
+    : 5;
+
+  // Auto-fail stale pending OTA jobs so UI never shows pending forever.
+  return pool.query(
+    `UPDATE firmware_update_log
+     SET status = 'failed',
+         error_message = COALESCE(error_message, ?),
+         completed_at = datetime('now')
+     WHERE status = 'pending'
+       AND started_at <= datetime('now', '-' || ? || ' minutes')`,
+    [`OTA timed out after ${timeoutMinutes} minutes without completion status`, String(timeoutMinutes)]
+  );
+}
 
 const setBiometricIntegration = (integration) => {
   biometricIntegration = integration;
@@ -188,6 +206,8 @@ router.post('/update/:deviceId', async (req, res) => {
 // Get update log for a device (or all devices)
 router.get('/log', async (req, res) => {
   try {
+    await markTimedOutFirmwareUpdates();
+
     const { deviceId } = req.query;
     let query = `SELECT ful.*, fv.version as firmware_version
                  FROM firmware_update_log ful
