@@ -189,7 +189,7 @@ bool checkLocalAuthorization(int biometricId);
 bool validateWithServer(int biometricId);
 void updateMemberCache();
 void handleCacheUpdate(String jsonResponse);
-int handleCacheUpdatePage(String jsonResponse);
+int handleCacheUpdatePage(String jsonResponse, bool applyChanges = true);
 void initializeCache();
 void clearCache();
 void updateCacheEntry(int biometricId, bool isAuthorized, int memberId);
@@ -2335,10 +2335,27 @@ void updateMemberCache() {
     
     if (httpResponseCode == 200) {
       String response = http.getString();
+      int added = -1;
       if (page == 1) {
-        clearCache();  // Clear only when we have valid data to replace it
+        // Validate page 1 first. Only clear/apply after successful parsing so
+        // existing cache is preserved when the first page is malformed.
+        int firstPageValidation = handleCacheUpdatePage(response, false);
+        if (firstPageValidation < 0) {
+          Serial.println("❌ First cache page invalid - keeping existing cache");
+          hasMore = false;
+        } else {
+          clearCache();
+          added = handleCacheUpdatePage(response, true);
+        }
+      } else {
+        added = handleCacheUpdatePage(response, true);
       }
-      int added = handleCacheUpdatePage(response);
+
+      if (added < 0) {
+        hasMore = false;
+        http.end();
+        continue;
+      }
       
       if (added < pageSize) {
         hasMore = false;
@@ -2357,7 +2374,7 @@ void updateMemberCache() {
 }
 
 // Returns count of members added from this page (-1 on error)
-int handleCacheUpdatePage(String jsonResponse) {
+int handleCacheUpdatePage(String jsonResponse, bool applyChanges) {
   size_t docSize = jsonResponse.length() + 1024;
   DynamicJsonDocument doc(docSize);
   
@@ -2386,20 +2403,26 @@ int handleCacheUpdatePage(String jsonResponse) {
   Serial.printf("📋 Processing %d members from page\n", members.size());
   
   for (JsonObject member : members) {
-    if (cacheSize >= MAX_CACHED_MEMBERS) {
+    if (applyChanges && cacheSize >= MAX_CACHED_MEMBERS) {
       Serial.println("⚠️ Cache full, stopping");
       break;
     }
-    memberCache[cacheSize].biometricId = member["biometricId"];
-    memberCache[cacheSize].isAuthorized = member["authorized"];
-    memberCache[cacheSize].lastUpdate = millis();
-    memberCache[cacheSize].expiryTime = millis() + CACHE_VALIDITY_TIME;
-    memberCache[cacheSize].memberId = member["memberId"];
-    cacheSize++;
+    if (applyChanges) {
+      memberCache[cacheSize].biometricId = member["biometricId"];
+      memberCache[cacheSize].isAuthorized = member["authorized"];
+      memberCache[cacheSize].lastUpdate = millis();
+      memberCache[cacheSize].expiryTime = millis() + CACHE_VALIDITY_TIME;
+      memberCache[cacheSize].memberId = member["memberId"];
+      cacheSize++;
+    }
     added++;
   }
   
-  Serial.printf("✅ Page processed - %d members added (total cached: %d)\n", added, cacheSize);
+  if (applyChanges) {
+    Serial.printf("✅ Page processed - %d members added (total cached: %d)\n", added, cacheSize);
+  } else {
+    Serial.printf("✅ Cache page validated - %d members parsed\n", added);
+  }
   return added;
 }
 

@@ -18,6 +18,7 @@
     "esp32:test:windows": "node tools/test_esp32_integration.js windows",
     "esp32:test:system": "node tools/test_esp32_integration.js system",
     "esp32:test:webhook": "node tools/test_esp32_webhook.js",
+    "test:unit:biometric": "node --test src/services/__tests__/biometricIntegration.test.js",
     "esp32:setup": "node tools/setup_esp32_database.js",
     "esp32:setup:manual": "sqlite3 data/gmgmt.sqlite < tools/setup_esp32_devices.sql",
     "esp32:help": "node -e \"console.log('\\n🔐 ESP32 Door Lock Commands:\\n  npm run esp32:setup     - Setup ESP32 database tables\\n  npm run esp32:test      - Run all ESP32 integration tests\\n  npm run esp32:test:tcp  - Test TCP connectivity\\n  npm run esp32:test:api  - Test REST API endpoints\\n  npm run esp32:test:network - Test network connectivity\\n  npm run esp32:test:system  - Check system requirements\\n  npm run esp32:test:webhook - Test ESP32 webhook endpoint\\n\\nWindows-specific:\\n  npm run esp32:test:windows - Windows diagnostics\\n\\nDocumentation:\\n  ESP32_DEPLOYMENT_GUIDE.md     - Full deployment guide\\n  tools/WINDOWS_TESTING_GUIDE.md - Windows-specific guide\\n  tools/esp32_testing_guide.md   - Comprehensive testing\\n')\"",
