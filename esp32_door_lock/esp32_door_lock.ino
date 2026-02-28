@@ -2672,6 +2672,7 @@ void handleApiConfigSave() {
   } else {
     Serial.println("⚠️ Config mutex timeout - skipping in-memory update (Preferences already saved)");
   }
+  if (configMutex != NULL) xSemaphoreGive(configMutex);
   
   if (configChanged) {
     saveConfiguration();
