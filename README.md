@@ -405,7 +405,59 @@ ESP32 devices communicate via TCP/IP using JSON messages:
    - Navigate to `http://ESP32_IP/config` in your browser
    - Enter your WiFi credentials and server settings
 
-#### 3. Hardware Connections
+#### 3. OTA Firmware Updates (After Initial USB Flash)
+
+Once the ESP32 has been flashed over USB at least once with the OTA partition scheme, you can push firmware updates over-the-air from the gym management UI.
+
+**1. Build the firmware binary**
+
+1. Open `esp32_door_lock/esp32_door_lock.ino` in Arduino IDE
+2. Set **Tools → Partition Scheme** to **"Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)"**
+3. Select **Tools → Board → ESP32 Dev Module**
+4. Compile without uploading: **Sketch → Verify/Compile** (Ctrl+R)
+5. After a successful compile, the `.bin` file is created. On macOS/Linux it is typically at:
+   ```
+   ~/Arduino/build/esp32_door_lock.ino.bin
+   ```
+   (Check the Arduino IDE output for the exact path on your system.)
+
+**2. Upload the firmware to the server**
+
+1. Open the gym management app in your browser
+2. Go to **Settings → ESP32 Devices**
+3. Open the **Firmware Updates** tab
+4. In the **Upload Firmware** section:
+   - **Version**: Enter a version label (e.g. `1.0.1`)
+   - **Description**: Optional (e.g. "Remote unlock fix")
+   - **File**: Select the `.bin` file from step 1
+5. Click **Upload**
+
+**3. Trigger OTA on the device**
+
+1. In the same **Firmware Updates** tab, find **Device Firmware Status**
+2. Locate your device (e.g. DOOR_001)
+3. Click **Update** next to the device to push the new firmware
+
+**4. What happens during OTA**
+
+- The server sends an OTA command to the ESP32 with the firmware download URL
+- The ESP32 fetches the `.bin` file from the server
+- It flashes the new firmware and reboots
+- The next heartbeat will show the new firmware version
+
+**Requirements**
+
+- The ESP32 must have been flashed at least once over USB with the OTA partition scheme
+- The ESP32 and server must be on the same network (or reachable from each other)
+- The server must be reachable at its IP (e.g. `http://192.168.x.x:3001`) from the ESP32
+
+**Troubleshooting**
+
+- **ESP32 can't reach the server**: Ensure the server IP in the OTA download URL is reachable from the ESP32's network
+- **OTA fails**: Check the **Firmware Update Log** in the UI and the ESP32 Serial Monitor for error messages
+- **No firmware listed**: Upload a firmware binary first in the **Firmware Updates** tab
+
+#### 4. Hardware Connections
 
 > **📋 ESP32 Pin Reference**: For detailed pin capabilities and limitations, see the [ESP32 Pin Reference](http://wiki.fluidnc.com/en/hardware/esp32_pin_reference) documentation.
 
@@ -487,7 +539,7 @@ Wiring Notes:
 • Buzzer can be active (3.3V) or passive (requires driver circuit)
 ```
 
-##### 3.6 Push Button Connection Schematics
+##### 4.6 Push Button Connection Schematics
 
 ###### Enroll Button (Pin 4) - Fingerprint Enrollment Control
 
@@ -608,7 +660,7 @@ Button Specifications:
 • Protection: Consider adding protective cover or key switch
 ```
 
-##### 3.7 Button Integration with ESP32 Firmware
+##### 4.7 Button Integration with ESP32 Firmware
 
 ###### Button State Detection
 
@@ -765,7 +817,7 @@ void loop() {
 }
 ```
 
-##### 3.5 Detailed Connection Schematics
+##### 4.5 Detailed Connection Schematics
 
 ###### R307 Fingerprint Sensor Connection
 
@@ -889,7 +941,7 @@ Safety Features:
 • No current flows through door lock when relay is inactive
 ```
 
-#### 4. Configuration Management
+#### 5. Configuration Management
 
 The ESP32 supports dynamic, environment-driven configuration:
 
@@ -898,14 +950,14 @@ The ESP32 supports dynamic, environment-driven configuration:
 3. **Remote Management**: Configure from gym management system
 4. **Development Defaults**: Optional `config.h` file for custom defaults
 
-#### 5. Critical Port Configuration
+#### 6. Critical Port Configuration
 
 **IMPORTANT**: The ESP32 must connect to the **main server port** (PORT in .env), NOT the BIOMETRIC_PORT:
 
 - **✅ Correct**: ESP32 port = 3001 (matches main server PORT)
 - **❌ Wrong**: ESP32 port = 8080 (causes HTTP timeout errors)
 
-#### 6. Testing Commands
+#### 7. Testing Commands
 
 ```bash
 # Setup and testing
