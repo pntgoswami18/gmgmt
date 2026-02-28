@@ -492,6 +492,13 @@ class BiometricIntegration {
       this.sendESP32Command(biometricData.deviceId, 'access_granted', {
         memberName: member.name,
         memberId: member.id
+      }).catch((error) => {
+        // Fire-and-forget command: swallow rejection to avoid process-level
+        // unhandled promise rejection crashes on transient network failures.
+        console.warn(
+          `⚠️ Failed to send access_granted command to device ${biometricData.deviceId}:`,
+          error.message
+        );
       });
     }
     
