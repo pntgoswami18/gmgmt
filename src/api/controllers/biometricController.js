@@ -1,3 +1,4 @@
+const http = require('http');
 const { pool } = require('../../config/sqlite');
 const whatsappService = require('../../services/whatsappService');
 const settingsCache = require('../../services/settingsCache');
@@ -1883,17 +1884,45 @@ const invalidateESP32Cache = async () => {
       try {
         console.log(`🔄 Invalidating cache for device: ${device.device_name} (${device.device_id}) at IP: ${device.ip_address}`);
 
-        // Send cache invalidation request to ESP32 device
-        const axios = require('axios');
+        // Send cache invalidation request to ESP32 device (using built-in http, no axios dependency)
         const deviceUrl = `http://${device.ip_address}/api/cache/invalidate`;
+        const body = JSON.stringify({
+          reason: 'member_status_change',
+          timestamp: new Date().toISOString()
+        });
 
         console.log(`📡 Sending cache invalidation to: ${deviceUrl}`);
 
-        await axios.post(deviceUrl, {
-          reason: 'member_status_change',
-          timestamp: new Date().toISOString()
-        }, {
-          timeout: 5000 // 5 second timeout
+        await new Promise((resolve, reject) => {
+          const url = new URL(deviceUrl);
+          const req = http.request({
+            hostname: url.hostname,
+            port: url.port || 80,
+            path: url.pathname,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(body)
+            },
+            timeout: 5000
+          }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                resolve();
+              } else {
+                reject(new Error(`HTTP ${res.statusCode}: ${data || res.statusMessage}`));
+              }
+            });
+          });
+          req.on('error', reject);
+          req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('Request timeout'));
+          });
+          req.write(body);
+          req.end();
         });
 
         console.log(`✅ Cache invalidation sent to device: ${device.device_name}`);
