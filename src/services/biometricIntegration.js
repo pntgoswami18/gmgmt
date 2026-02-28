@@ -1066,14 +1066,27 @@ class BiometricIntegration {
     
     // Activate server-side enrollment mode so webhook events can be processed
     this.startEnrollmentMode(memberId, memberName);
-    
-    // Pass the member ID as the userId to the ESP32 device
-    // This creates a direct 1:1 mapping between ESP32 userId and member ID
-    await this.sendESP32Command(deviceId, 'start_enrollment', {
-      memberId: memberId,
-      userId: memberId, // Use member ID as the ESP32 userId
-      enrollmentId: memberId
-    });
+
+    try {
+      // Pass the member ID as the userId to the ESP32 device
+      // This creates a direct 1:1 mapping between ESP32 userId and member ID
+      await this.sendESP32Command(deviceId, 'start_enrollment', {
+        memberId: memberId,
+        userId: memberId, // Use member ID as the ESP32 userId
+        enrollmentId: memberId
+      });
+    } catch (error) {
+      // Roll back enrollment mode immediately so failed commands do not leave
+      // the server stuck in an "enrollment in progress" state.
+      if (
+        this.enrollmentMode &&
+        this.enrollmentMode.active &&
+        String(this.enrollmentMode.memberId) === String(memberId)
+      ) {
+        this.stopEnrollmentMode('command_failed');
+      }
+      throw error;
+    }
 
     // Send WebSocket event to notify frontend that enrollment has started
     this.sendToWebSocketClients({

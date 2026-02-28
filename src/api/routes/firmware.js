@@ -6,9 +6,19 @@ const fs = require('fs');
 const { pool } = require('../../config/sqlite');
 
 const FIRMWARE_DIR = path.join(__dirname, '../../../public/uploads/firmware');
+const ensureFirmwareDir = () => {
+  if (!fs.existsSync(FIRMWARE_DIR)) {
+    fs.mkdirSync(FIRMWARE_DIR, { recursive: true });
+  }
+};
+
+ensureFirmwareDir();
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, FIRMWARE_DIR),
+  destination: (_req, _file, cb) => {
+    ensureFirmwareDir();
+    cb(null, FIRMWARE_DIR);
+  },
   filename: (_req, file, cb) => {
     const unique = Date.now();
     cb(null, `firmware-${unique}${path.extname(file.originalname)}`);
