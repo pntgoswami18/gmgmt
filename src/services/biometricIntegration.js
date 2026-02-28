@@ -756,7 +756,7 @@ class BiometricIntegration {
           if (whatsappResult.success) {
             console.log(`📱 WhatsApp welcome message prepared for ${member.name}`);
             // Broadcast WhatsApp message status to WebSocket clients
-            this.broadcastToWebSocketClients({
+            this.sendToWebSocketClients({
               type: 'whatsapp_welcome_sent',
               memberId: memberId,
               memberName: member.name,
@@ -768,7 +768,7 @@ class BiometricIntegration {
           } else {
             console.log(`📱 WhatsApp welcome message failed for ${member.name}: ${whatsappResult.error}`);
             // Broadcast WhatsApp message failure to WebSocket clients
-            this.broadcastToWebSocketClients({
+            this.sendToWebSocketClients({
               type: 'whatsapp_welcome_failed',
               memberId: memberId,
               memberName: member.name,
@@ -781,7 +781,7 @@ class BiometricIntegration {
       } catch (whatsappError) {
         console.error('📱 Error sending WhatsApp welcome message:', whatsappError);
         // Broadcast WhatsApp error to WebSocket clients
-        this.broadcastToWebSocketClients({
+        this.sendToWebSocketClients({
           type: 'whatsapp_welcome_error',
           memberId: memberId,
           success: false,
