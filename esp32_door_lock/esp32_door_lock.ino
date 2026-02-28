@@ -862,6 +862,10 @@ void startNonBlockingUnlock(unsigned long duration, bool emergency) {
   doorUnlockDuration = duration;
   isEmergencyUnlock = emergency;
   
+  // Clear denied-state timer so it cannot override "granted" LED (e.g. if user
+  // was denied then scanned authorized within ACCESS_DENIED_DISPLAY_TIME)
+  accessDeniedActive = false;
+  
   // Visual and audio feedback (truly non-blocking via tone queue)
   setStatusLED("granted");
   queueTone(1000, 200);
