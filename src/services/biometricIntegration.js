@@ -980,6 +980,13 @@ class BiometricIntegration {
       };
 
       return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (fn, value) => {
+          if (settled) return;
+          settled = true;
+          fn(value);
+        };
+
         const req = http.request(options, (res) => {
           let responseData = '';
           
@@ -992,30 +999,27 @@ class BiometricIntegration {
               try {
                 const jsonResponse = JSON.parse(responseData);
                 console.log(`✅ ESP32 command sent successfully: ${res.statusCode}`);
-                resolve(jsonResponse);
+                finish(resolve, jsonResponse);
               } catch (parseError) {
                 console.log(`✅ ESP32 command sent successfully: ${res.statusCode} (non-JSON response)`);
-                resolve({ success: true, response: responseData });
+                finish(resolve, { success: true, response: responseData });
               }
             } else {
               console.error(`❌ ESP32 command failed: HTTP ${res.statusCode}`);
-              reject(new Error(`HTTP ${res.statusCode}: ${responseData}`));
+              finish(reject, new Error(`HTTP ${res.statusCode}: ${responseData}`));
             }
           });
         });
 
         req.on('error', (error) => {
           console.error(`❌ HTTP request error:`, error.message);
-          // Don't reject immediately - ESP32 might still process the command
-          console.log('⚠️ Continuing despite HTTP error - ESP32 may still process command via webhook');
-          resolve({ success: true, message: 'Command sent despite HTTP error', error: error.message });
+          finish(reject, new Error(`HTTP request error: ${error.message}`));
         });
 
         req.on('timeout', () => {
           console.error(`⏰ HTTP request timeout after ${options.timeout}ms`);
           req.destroy();
-          console.log('⚠️ HTTP timeout - ESP32 may still process command via webhook');
-          resolve({ success: true, message: 'Command sent despite timeout', error: 'timeout' });
+          finish(reject, new Error(`HTTP timeout after ${options.timeout}ms`));
         });
 
         req.write(postData);

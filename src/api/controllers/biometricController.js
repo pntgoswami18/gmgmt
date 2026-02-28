@@ -936,13 +936,21 @@ const unlockDoorRemotely = async (req, res) => {
     }
 
     const commandResult = await biometricIntegration.unlockDoorRemotely(deviceId, reason);
-    const acknowledged = !commandResult || !commandResult.error;
+    const acknowledged = commandResult?.success !== false;
+
+    if (!acknowledged) {
+      return res.status(502).json({
+        success: false,
+        message: `Device ${deviceId} rejected remote unlock command`,
+        deviceId,
+        reason,
+        commandResult
+      });
+    }
 
     res.json({
-      success: acknowledged,
-      message: acknowledged
-        ? `Remote unlock command sent to device ${deviceId}`
-        : `Remote unlock command queued for device ${deviceId}, awaiting ESP32 confirmation`,
+      success: true,
+      message: `Remote unlock command sent to device ${deviceId}`,
       deviceId,
       reason,
       commandResult

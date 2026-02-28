@@ -1805,12 +1805,25 @@ void handleRemoteCommand() {
     return;
   }
   
-  // Extract command details
+  // Extract command details (with compatibility fallbacks)
   String command = doc["command"].as<String>();
+  if (command.length() == 0 || command == "null") {
+    command = doc["action"].as<String>();
+  }
+
   String deviceId = doc["deviceId"].as<String>();
+  if (deviceId.length() == 0 || deviceId == "null") {
+    deviceId = doc["device_id"].as<String>();
+  }
+  deviceId.trim();
+
+  String localDeviceId = device_id;
+  localDeviceId.trim();
   
-  // Verify this command is for our device
-  if (deviceId != device_id && !deviceId.isEmpty()) {
+  // Verify this command is for our device (case-insensitive for robustness)
+  if (!deviceId.isEmpty() && !deviceId.equalsIgnoreCase(localDeviceId)) {
+    Serial.printf("⚠️  Remote command rejected - target device mismatch (target: %s, local: %s)\n",
+                  deviceId.c_str(), localDeviceId.c_str());
     webServer.send(400, "application/json", "{\"error\":\"Command not for this device\"}");
     return;
   }
@@ -1834,7 +1847,7 @@ void handleRemoteCommand() {
     Serial.printf("🚀 Enrollment mode started with ID: %d\n", enrollmentID);
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment mode started\"}");
     
-  } else if (command == "unlock_door") {
+  } else if (command == "unlock_door" || command == "unlock") {
     Serial.printf("📡 Current relay state before remote unlock: %s (PIN %d)\n", 
                   digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
     
