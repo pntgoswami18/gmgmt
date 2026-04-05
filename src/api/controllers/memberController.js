@@ -146,7 +146,7 @@ exports.getMemberDetails = async (req, res) => {
             WHERE m.id = ?
         `;
         const memberResult = await pool.query(memberQuery, [id]);
-        
+
         if (memberResult.rows.length === 0) {
             return res.status(404).json({ message: 'Member not found' });
         }
@@ -194,7 +194,7 @@ exports.getMemberDetails = async (req, res) => {
         let unusedReferralDiscount = null;
         const referralSystemQuery = await pool.query('SELECT value FROM settings WHERE key = ?', ['referral_system_enabled']);
         const referralSystemEnabled = referralSystemQuery.rows[0]?.value === 'true';
-        
+
         if (referralSystemEnabled) {
             const referralDiscountQuery = `
                 SELECT 
@@ -298,7 +298,7 @@ exports.updateMember = async (req, res) => {
         const safePhotoUrl = photo_url === undefined ? existing.photo_url || null : photo_url || null;
         const safeAdminStatus = is_admin === undefined ? existing.is_admin : (is_admin ? 1 : 0);
         const safeJoinDate = join_date === undefined ? existing.join_date || new Date().toISOString().split('T')[0] : join_date;
-        
+
         // Handle membership plan ID - admin users should not have membership plans
         let safeMembershipPlanId = null;
         if (is_admin !== 1) {
@@ -351,11 +351,15 @@ exports.upsertBiometric = async (req, res) => {
         }
 
         // Check if device_user_id is already assigned to another member
+        let normalizedBiometricId = null;
         if (device_user_id) {
-            const existingMember = await pool.query('SELECT id, name FROM members WHERE biometric_id = ? AND id != ?', [device_user_id, id]);
+            // Normalize to string integer to match biometricController behavior
+            normalizedBiometricId = String(parseInt(device_user_id, 10));
+
+            const existingMember = await pool.query('SELECT id, name FROM members WHERE biometric_id = ? AND id != ?', [normalizedBiometricId, id]);
             if (existingMember.rows.length > 0) {
-                return res.status(409).json({ 
-                    message: `Device User ID ${device_user_id} is already assigned to another member` 
+                return res.status(409).json({
+                    message: `Device User ID ${device_user_id} is already assigned to another member`
                 });
             }
         }
@@ -363,14 +367,14 @@ exports.upsertBiometric = async (req, res) => {
         // Update member with biometric data
         await pool.query(
             'UPDATE members SET biometric_id = ? WHERE id = ?',
-            [device_user_id || null, id]
+            [normalizedBiometricId, id]
         );
 
         // Get updated member data
         const updatedMember = await pool.query('SELECT id, name, biometric_id FROM members WHERE id = ?', [id]);
-        
-        res.json({ 
-            message: 'Biometric data saved', 
+
+        res.json({
+            message: 'Biometric data saved',
             member: updatedMember.rows[0],
             biometric: {
                 device_user_id: device_user_id || null,
@@ -409,7 +413,7 @@ exports.setActiveStatus = async (req, res) => {
         const val = String(is_active) === '0' || is_active === false ? 0 : 1;
         await pool.query('UPDATE members SET is_active = $1 WHERE id = $2', [val, id]);
         const updated = await pool.query('SELECT * FROM members WHERE id = $1', [id]);
-        
+
         // Trigger immediate cache invalidation for ESP32 devices when member status changes
         try {
             const { invalidateESP32Cache } = require('../controllers/biometricController');
@@ -421,7 +425,7 @@ exports.setActiveStatus = async (req, res) => {
             console.error('❌ Error invalidating ESP32 cache:', cacheError);
             // Don't fail the main operation if cache invalidation fails
         }
-        
+
         res.json(updated.rows[0]);
     } catch (err) {
         res.status(400).json({ message: err.message });

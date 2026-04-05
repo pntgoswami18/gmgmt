@@ -195,6 +195,26 @@ function initializeDatabase() {
        FOREIGN KEY (device_id) REFERENCES devices(device_id),
        FOREIGN KEY (member_id) REFERENCES members(id)
      );`,
+    `CREATE TABLE IF NOT EXISTS firmware_versions (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       version TEXT NOT NULL,
+       filename TEXT NOT NULL,
+       filepath TEXT NOT NULL,
+       file_size INTEGER,
+       description TEXT,
+       uploaded_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS firmware_update_log (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT NOT NULL,
+       firmware_id INTEGER NOT NULL,
+       status TEXT DEFAULT 'pending',
+       started_at TEXT DEFAULT (datetime('now')),
+       completed_at TEXT,
+       error_message TEXT,
+       FOREIGN KEY (device_id) REFERENCES devices(device_id),
+       FOREIGN KEY (firmware_id) REFERENCES firmware_versions(id)
+     );`,
   ];
 
   const insertDefaultSettings = [
@@ -273,7 +293,13 @@ function initializeDatabase() {
     db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_member_today ON attendance(member_id, date, check_out_time);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_settings_key_lookup ON settings(key);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_members_active_admin ON members(is_active, is_admin);");
-    
+
+    // Firmware table indexes
+    db.exec("CREATE INDEX IF NOT EXISTS idx_firmware_update_log_device_id ON firmware_update_log(device_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_firmware_update_log_status_started ON firmware_update_log(status, started_at);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_firmware_update_log_firmware_id ON firmware_update_log(firmware_id);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_firmware_versions_version ON firmware_versions(version);");
+
     // Insert default settings
     for (const [k, v] of insertDefaultSettings) {
       db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)').run(k, v);
@@ -351,6 +377,24 @@ const pool = {
   }),
 };
 
-module.exports = { db, pool, initializeDatabase };
+/**
+ * Run an async callback inside a database transaction.
+ * better-sqlite3's db.transaction() only supports synchronous callbacks; passing
+ * an async function causes it to commit after the first await. This helper uses
+ * explicit BEGIN/COMMIT/ROLLBACK so async operations stay within the transaction.
+ */
+async function runInTransaction(callback) {
+  db.exec('BEGIN');
+  try {
+    const result = await callback();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+module.exports = { db, pool, initializeDatabase, runInTransaction };
 
 

@@ -107,10 +107,10 @@ class BiometricIntegration {
 
   async findMemberByBiometricId(biometricId) {
     try {
-      // This assumes you have a biometric_id field in your members table
-      // You may need to modify your member model to include this field
+      // Normalize to a clean integer string so "5", "5.0", 5 all match the same DB row
+      const lookupId = String(parseInt(biometricId, 10));
       const query = 'SELECT * FROM members WHERE biometric_id = ?';
-      const result = await pool.query(query, [biometricId]);
+      const result = await pool.query(query, [lookupId]);
       return result.rows[0] || null;
     } catch (error) {
       console.error('Error finding member by biometric ID:', error);
@@ -492,6 +492,13 @@ class BiometricIntegration {
       this.sendESP32Command(biometricData.deviceId, 'access_granted', {
         memberName: member.name,
         memberId: member.id
+      }).catch((error) => {
+        // Fire-and-forget command: swallow rejection to avoid process-level
+        // unhandled promise rejection crashes on transient network failures.
+        console.warn(
+          `⚠️ Failed to send access_granted command to device ${biometricData.deviceId}:`,
+          error.message
+        );
       });
     }
     
@@ -606,13 +613,11 @@ class BiometricIntegration {
     }
 
     try {
-      this.enrollmentMode.attempts++;
-      
       const { userId, memberId, status, enrollmentStep } = biometricData;
-      
+
       // Use the memberId from biometricData if available, otherwise use enrollment mode memberId
       const targetMemberId = memberId || this.enrollmentMode.memberId;
-      
+
       if (status === 'enrollment_success' || status === 'enrolled') {
         // Enrollment successful
         await this.saveBiometricEnrollment(targetMemberId, userId, biometricData);
@@ -630,9 +635,10 @@ class BiometricIntegration {
         return true;
         
       } else if (status === 'enrollment_failed' || status === 'error') {
-        // Enrollment failed
+        // Enrollment failed — only genuine failures count toward the retry limit
+        this.enrollmentMode.attempts++;
         console.log(`❌ Enrollment failed for member ${targetMemberId}: ${biometricData.error || 'Unknown error'}`);
-        
+
         if (this.enrollmentMode.attempts >= this.enrollmentMode.maxAttempts) {
           this.listener.broadcast(`ENROLL:FAILED:MAX_ATTEMPTS`);
           this.sendToWebSocketClients({
@@ -749,7 +755,7 @@ class BiometricIntegration {
           if (whatsappResult.success) {
             console.log(`📱 WhatsApp welcome message prepared for ${member.name}`);
             // Broadcast WhatsApp message status to WebSocket clients
-            this.broadcastToWebSocketClients({
+            this.sendToWebSocketClients({
               type: 'whatsapp_welcome_sent',
               memberId: memberId,
               memberName: member.name,
@@ -761,7 +767,7 @@ class BiometricIntegration {
           } else {
             console.log(`📱 WhatsApp welcome message failed for ${member.name}: ${whatsappResult.error}`);
             // Broadcast WhatsApp message failure to WebSocket clients
-            this.broadcastToWebSocketClients({
+            this.sendToWebSocketClients({
               type: 'whatsapp_welcome_failed',
               memberId: memberId,
               memberName: member.name,
@@ -774,7 +780,7 @@ class BiometricIntegration {
       } catch (whatsappError) {
         console.error('📱 Error sending WhatsApp welcome message:', whatsappError);
         // Broadcast WhatsApp error to WebSocket clients
-        this.broadcastToWebSocketClients({
+        this.sendToWebSocketClients({
           type: 'whatsapp_welcome_error',
           memberId: memberId,
           success: false,
@@ -980,6 +986,13 @@ class BiometricIntegration {
       };
 
       return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (fn, value) => {
+          if (settled) return;
+          settled = true;
+          fn(value);
+        };
+
         const req = http.request(options, (res) => {
           let responseData = '';
           
@@ -992,30 +1005,27 @@ class BiometricIntegration {
               try {
                 const jsonResponse = JSON.parse(responseData);
                 console.log(`✅ ESP32 command sent successfully: ${res.statusCode}`);
-                resolve(jsonResponse);
+                finish(resolve, jsonResponse);
               } catch (parseError) {
                 console.log(`✅ ESP32 command sent successfully: ${res.statusCode} (non-JSON response)`);
-                resolve({ success: true, response: responseData });
+                finish(resolve, { success: true, response: responseData });
               }
             } else {
               console.error(`❌ ESP32 command failed: HTTP ${res.statusCode}`);
-              reject(new Error(`HTTP ${res.statusCode}: ${responseData}`));
+              finish(reject, new Error(`HTTP ${res.statusCode}: ${responseData}`));
             }
           });
         });
 
         req.on('error', (error) => {
           console.error(`❌ HTTP request error:`, error.message);
-          // Don't reject immediately - ESP32 might still process the command
-          console.log('⚠️ Continuing despite HTTP error - ESP32 may still process command via webhook');
-          resolve({ success: true, message: 'Command sent despite HTTP error', error: error.message });
+          finish(reject, new Error(`HTTP request error: ${error.message}`));
         });
 
         req.on('timeout', () => {
           console.error(`⏰ HTTP request timeout after ${options.timeout}ms`);
           req.destroy();
-          console.log('⚠️ HTTP timeout - ESP32 may still process command via webhook');
-          resolve({ success: true, message: 'Command sent despite timeout', error: 'timeout' });
+          finish(reject, new Error(`HTTP timeout after ${options.timeout}ms`));
         });
 
         req.write(postData);
@@ -1030,11 +1040,17 @@ class BiometricIntegration {
 
   async unlockDoorRemotely(deviceId, reason = 'admin_unlock') {
     console.log(`🔓 Remote unlock requested for device: ${deviceId}`);
-    
-    const commandResult = await this.sendESP32Command(deviceId, 'unlock_door', {
-      reason,
-      duration: 5000 // 5 seconds
-    });
+
+    let commandResult;
+    try {
+      commandResult = await this.sendESP32Command(deviceId, 'unlock_door', {
+        reason,
+        duration: 5000 // 5 seconds
+      });
+    } catch (err) {
+      console.error(`❌ Remote unlock command failed for ${deviceId}:`, err.message);
+      return { success: false, error: err.message };
+    }
 
     if (commandResult?.error) {
       console.warn(`⚠️ Remote unlock command reported issues: ${commandResult.error}`);
@@ -1060,13 +1076,29 @@ class BiometricIntegration {
       console.warn('Could not fetch member name:', nameError.message);
     }
     
-    // Pass the member ID as the userId to the ESP32 device
-    // This creates a direct 1:1 mapping between ESP32 userId and member ID
-    await this.sendESP32Command(deviceId, 'start_enrollment', {
-      memberId: memberId,
-      userId: memberId, // Use member ID as the ESP32 userId
-      enrollmentId: memberId
-    });
+    // Activate server-side enrollment mode so webhook events can be processed
+    this.startEnrollmentMode(memberId, memberName);
+
+    try {
+      // Pass the member ID as the userId to the ESP32 device
+      // This creates a direct 1:1 mapping between ESP32 userId and member ID
+      await this.sendESP32Command(deviceId, 'start_enrollment', {
+        memberId: memberId,
+        userId: memberId, // Use member ID as the ESP32 userId
+        enrollmentId: memberId
+      });
+    } catch (error) {
+      // Roll back enrollment mode immediately so failed commands do not leave
+      // the server stuck in an "enrollment in progress" state.
+      if (
+        this.enrollmentMode &&
+        this.enrollmentMode.active &&
+        String(this.enrollmentMode.memberId) === String(memberId)
+      ) {
+        this.stopEnrollmentMode('command_failed');
+      }
+      throw error;
+    }
 
     // Send WebSocket event to notify frontend that enrollment has started
     this.sendToWebSocketClients({
