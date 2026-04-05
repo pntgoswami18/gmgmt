@@ -107,10 +107,10 @@ class BiometricIntegration {
 
   async findMemberByBiometricId(biometricId) {
     try {
-      // This assumes you have a biometric_id field in your members table
-      // You may need to modify your member model to include this field
+      // Normalize to a clean integer string so "5", "5.0", 5 all match the same DB row
+      const lookupId = String(parseInt(biometricId, 10));
       const query = 'SELECT * FROM members WHERE biometric_id = ?';
-      const result = await pool.query(query, [biometricId]);
+      const result = await pool.query(query, [lookupId]);
       return result.rows[0] || null;
     } catch (error) {
       console.error('Error finding member by biometric ID:', error);
@@ -613,13 +613,11 @@ class BiometricIntegration {
     }
 
     try {
-      this.enrollmentMode.attempts++;
-      
       const { userId, memberId, status, enrollmentStep } = biometricData;
-      
+
       // Use the memberId from biometricData if available, otherwise use enrollment mode memberId
       const targetMemberId = memberId || this.enrollmentMode.memberId;
-      
+
       if (status === 'enrollment_success' || status === 'enrolled') {
         // Enrollment successful
         await this.saveBiometricEnrollment(targetMemberId, userId, biometricData);
@@ -637,9 +635,10 @@ class BiometricIntegration {
         return true;
         
       } else if (status === 'enrollment_failed' || status === 'error') {
-        // Enrollment failed
+        // Enrollment failed — only genuine failures count toward the retry limit
+        this.enrollmentMode.attempts++;
         console.log(`❌ Enrollment failed for member ${targetMemberId}: ${biometricData.error || 'Unknown error'}`);
-        
+
         if (this.enrollmentMode.attempts >= this.enrollmentMode.maxAttempts) {
           this.listener.broadcast(`ENROLL:FAILED:MAX_ATTEMPTS`);
           this.sendToWebSocketClients({

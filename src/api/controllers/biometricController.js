@@ -77,15 +77,7 @@ const startEnrollment = async (req, res) => {
       });
     }
 
-    // Check if member already has biometric data
-    if (member.biometric_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Member already has biometric data enrolled. Remove existing data first.'
-      });
-    }
-
-    // Start enrollment mode
+    // Start enrollment mode (allow re-enrollment so existing members can update their fingerprint)
     const enrollmentSession = biometricIntegration.startEnrollmentMode(member.id, member.name);
 
     res.json({
