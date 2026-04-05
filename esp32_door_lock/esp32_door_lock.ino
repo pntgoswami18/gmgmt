@@ -570,8 +570,10 @@ void loop() {
   // Update non-blocking access denied LED reset
   updateAccessDeniedState();
   
-  // Handle pending OTA update (deferred from web handler to avoid timeout)
-  if (otaPending) {
+  // Handle pending OTA update (deferred from web handler to avoid timeout).
+  // Do not start OTA while an enrollment is in progress — the device reboots on
+  // success which would silently abort the fingerprint scan mid-session.
+  if (otaPending && !enrollmentMode) {
     otaPending = false;
     performOTAUpdate();
   }

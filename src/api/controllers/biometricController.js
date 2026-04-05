@@ -1211,16 +1211,36 @@ const esp32Webhook = async (req, res) => {
       const otaStatus = status; // ota_started, ota_success, ota_failed, ota_no_update
       success = otaStatus !== 'ota_failed';
 
-      if (otaStatus === 'ota_failed' && deviceId) {
-        const errorMsg = eventData.error || 'Unknown OTA error';
+      if (deviceId) {
         try {
-          await pool.query(`
-            UPDATE firmware_update_log
-            SET status = 'failed', error_message = ?, completed_at = datetime('now')
-            WHERE device_id = ? AND status = 'pending'
-          `, [errorMsg, deviceId]);
+          if (otaStatus === 'ota_started') {
+            await pool.query(`
+              UPDATE firmware_update_log
+              SET status = 'in_progress'
+              WHERE device_id = ? AND status = 'pending'
+            `, [deviceId]);
+          } else if (otaStatus === 'ota_success') {
+            await pool.query(`
+              UPDATE firmware_update_log
+              SET status = 'completed', completed_at = datetime('now')
+              WHERE device_id = ? AND status IN ('pending', 'in_progress')
+            `, [deviceId]);
+          } else if (otaStatus === 'ota_failed') {
+            const errorMsg = eventData.error || 'Unknown OTA error';
+            await pool.query(`
+              UPDATE firmware_update_log
+              SET status = 'failed', error_message = ?, completed_at = datetime('now')
+              WHERE device_id = ? AND status IN ('pending', 'in_progress')
+            `, [errorMsg, deviceId]);
+          } else if (otaStatus === 'ota_no_update') {
+            await pool.query(`
+              UPDATE firmware_update_log
+              SET status = 'no_update', completed_at = datetime('now')
+              WHERE device_id = ? AND status IN ('pending', 'in_progress')
+            `, [deviceId]);
+          }
         } catch (otaErr) {
-          console.error('Error updating OTA failure log:', otaErr);
+          console.error('Error updating OTA log:', otaErr);
         }
       }
 
