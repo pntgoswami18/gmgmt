@@ -113,7 +113,8 @@ struct MemberAuth {
 // ==================== GLOBAL VARIABLES ====================
 bool systemReady = false;
 bool enrollmentMode = false;
-int enrollmentID = 0;
+int enrollmentID = 0;       // sensor slot (1–finger.capacity); passed to storeModel()
+int enrollmentMemberID = 0; // actual backend member ID; used for server reporting
 unsigned long lastHeartbeat = 0;
 unsigned long lastButtonCheck = 0;
 unsigned long lastNTPResync = 0;  // Track last NTP resync attempt
@@ -175,7 +176,7 @@ unsigned long accessDeniedStartTime = 0;
 #define ACCESS_DENIED_DISPLAY_TIME 2000  // 2s LED display for denied access
 
 // ==================== FUNCTION DECLARATIONS ====================
-void sendEnrollmentProgress(String progressStep);
+void sendEnrollmentProgress(String progressStep, bool blocking = false);
 void sendEnrollmentData(int memberID, String status);
 void sendBiometricData(int memberID, String status, String reason = "");
 void sendBiometricDataAsync(int memberID, String status, String reason = "");
@@ -912,10 +913,11 @@ void startEnrollmentMode() {
       Serial.println("❌ Cannot start enrollment - no available fingerprint slots");
       sendEnrollmentData(0, "enrollment_failed");
       enrollmentID = 0;
+      enrollmentMemberID = 0;
       return;
     }
   }
-  
+
   enrollmentMode = true;
   Serial.printf("Enrollment mode started for ID: %d\n", enrollmentID);
   Serial.println("Please place finger on sensor...");
@@ -945,7 +947,8 @@ void handleEnrollment() {
     
     // Reset enrollmentID for next enrollment
     enrollmentID = 0;
-    
+    enrollmentMemberID = 0;
+
   } else if (result == -1) {
     // Enrollment failed
     Serial.println("Fingerprint enrollment failed");
@@ -963,6 +966,7 @@ void handleEnrollment() {
     
     // Reset enrollmentID for next enrollment
     enrollmentID = 0;
+    enrollmentMemberID = 0;
   }
   // result == 0 means still in progress
 }
@@ -981,7 +985,7 @@ int enrollFingerprint() {
   while (p != FINGERPRINT_OK) {
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - no finger detected");
-      sendEnrollmentProgress("timeout_first_finger");
+      sendEnrollmentProgress("timeout_first_finger", true);
       return -1;
     }
     
@@ -1000,18 +1004,18 @@ int enrollFingerprint() {
         retries++;
         Serial.printf("Transient sensor error (attempt %d/%d)\n", retries, MAX_RETRIES);
         if (retries >= MAX_RETRIES) {
-          sendEnrollmentProgress(p == FINGERPRINT_PACKETRECIEVEERR ? "communication_error" : "imaging_error");
+          sendEnrollmentProgress(p == FINGERPRINT_PACKETRECIEVEERR ? "communication_error" : "imaging_error", true);
           return -1;
         }
         delay(200);
         continue;
       default:
         Serial.println("Unknown error");
-        sendEnrollmentProgress("unknown_error");
+        sendEnrollmentProgress("unknown_error", true);
         return -1;
     }
   }
-  
+
   // Convert image to template (with retry)
   retries = 0;
   p = finger.image2Tz(1);
@@ -1023,10 +1027,10 @@ int enrollFingerprint() {
   }
   if (p != FINGERPRINT_OK) {
     Serial.println("Template creation failed");
-    sendEnrollmentProgress("template_creation_failed");
+    sendEnrollmentProgress("template_creation_failed", true);
     return -1;
   }
-  
+
   Serial.println("Remove finger...");
   sendEnrollmentProgress("remove_finger");
   delay(2000);
@@ -1036,7 +1040,7 @@ int enrollFingerprint() {
   while (p != FINGERPRINT_NOFINGER) {
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - finger not removed");
-      sendEnrollmentProgress("timeout_finger_removal");
+      sendEnrollmentProgress("timeout_finger_removal", true);
       return -1;
     }
     
@@ -1052,7 +1056,7 @@ int enrollFingerprint() {
   while (p != FINGERPRINT_OK) {
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - second finger placement failed");
-      sendEnrollmentProgress("timeout_second_finger");
+      sendEnrollmentProgress("timeout_second_finger", true);
       return -1;
     }
     
@@ -1071,18 +1075,18 @@ int enrollFingerprint() {
         retries++;
         Serial.printf("Transient sensor error (attempt %d/%d)\n", retries, MAX_RETRIES);
         if (retries >= MAX_RETRIES) {
-          sendEnrollmentProgress(p == FINGERPRINT_PACKETRECIEVEERR ? "communication_error" : "imaging_error");
+          sendEnrollmentProgress(p == FINGERPRINT_PACKETRECIEVEERR ? "communication_error" : "imaging_error", true);
           return -1;
         }
         delay(200);
         continue;
       default:
         Serial.println("Unknown error");
-        sendEnrollmentProgress("unknown_error");
+        sendEnrollmentProgress("unknown_error", true);
         return -1;
     }
   }
-  
+
   // Convert second image (with retry)
   retries = 0;
   p = finger.image2Tz(2);
@@ -1094,10 +1098,10 @@ int enrollFingerprint() {
   }
   if (p != FINGERPRINT_OK) {
     Serial.println("Second template creation failed");
-    sendEnrollmentProgress("second_template_failed");
+    sendEnrollmentProgress("second_template_failed", true);
     return -1;
   }
-  
+
   // Create model
   sendEnrollmentProgress("creating_model");
   p = finger.createModel();
@@ -1106,7 +1110,7 @@ int enrollFingerprint() {
     sendEnrollmentProgress("prints_matched");
   } else {
     Serial.println("Prints did not match");
-    sendEnrollmentProgress("prints_mismatch");
+    sendEnrollmentProgress("prints_mismatch", true);
     return -1;
   }
   
@@ -1119,7 +1123,7 @@ int enrollFingerprint() {
     return 1;
   } else {
     Serial.println("Storage failed");
-    sendEnrollmentProgress("storage_failed");
+    sendEnrollmentProgress("storage_failed", true);
     return -1;
   }
 }
@@ -1207,7 +1211,7 @@ void sendEnrollmentData(int memberID, String status) {
   
   StaticJsonDocument<300> doc;
   doc["userId"] = String(memberID);
-  doc["memberId"] = String(memberID);
+  doc["memberId"] = String(enrollmentMemberID > 0 ? enrollmentMemberID : memberID);
   doc["timestamp"] = getISO8601Time();
   doc["status"] = status;
   doc["deviceId"] = device_id;
@@ -1221,27 +1225,31 @@ void sendEnrollmentData(int memberID, String status) {
   sendToServer(jsonString);
 }
 
-void sendEnrollmentProgress(String progressStep) {
+void sendEnrollmentProgress(String progressStep, bool blocking) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected - enrollment progress not sent");
     return;
   }
-  
+
   StaticJsonDocument<300> doc;
   doc["userId"] = String(enrollmentID);
-  doc["memberId"] = String(enrollmentID);
+  doc["memberId"] = String(enrollmentMemberID > 0 ? enrollmentMemberID : enrollmentID);
   doc["timestamp"] = getISO8601Time();
   doc["status"] = "enrollment_progress";
   doc["deviceId"] = device_id;
   doc["event"] = "Enroll";
   doc["deviceType"] = "esp32_door_lock";
   doc["enrollmentStep"] = progressStep;
-  
+
   String jsonString;
   serializeJson(doc, jsonString);
-  
+
   Serial.printf("📤 Sending enrollment progress: %s\n", progressStep.c_str());
-  sendToServerAsync(jsonString);
+  if (blocking) {
+    sendToServer(jsonString);
+  } else {
+    sendToServerAsync(jsonString);
+  }
 }
 
 // ==================== OTA UPDATE FUNCTIONS ====================
@@ -1821,13 +1829,22 @@ void handleRemoteCommand() {
     if (doc["data"]["memberId"]) {
       int memberId = doc["data"]["memberId"].as<int>();
       Serial.printf("🎯 Starting enrollment for member ID: %d\n", memberId);
-      // Store member ID for enrollment tracking
-      enrollmentID = memberId;
-      Serial.printf("📝 Stored enrollmentID: %d\n", enrollmentID);
+      // Store the actual member ID for reporting, and pick a valid sensor slot
+      enrollmentMemberID = memberId;
+      enrollmentID = getNextAvailableID();
+      if (enrollmentID < 0) {
+        Serial.println("❌ No available fingerprint slots for remote enrollment");
+        sendEnrollmentData(0, "enrollment_failed");
+        enrollmentID = 0;
+        enrollmentMemberID = 0;
+        webServer.send(503, "application/json", "{\"error\":\"No available fingerprint slots\"}");
+        return;
+      }
+      Serial.printf("📝 Sensor slot: %d, Member ID: %d\n", enrollmentID, enrollmentMemberID);
     } else {
       Serial.println("⚠️ No member ID provided, will use next available ID");
     }
-    
+
     startEnrollmentMode();
     Serial.printf("🚀 Enrollment mode started with ID: %d\n", enrollmentID);
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment mode started\"}");
@@ -1873,7 +1890,8 @@ void handleRemoteCommand() {
       
       // Reset enrollmentID for next enrollment
       enrollmentID = 0;
-      
+      enrollmentMemberID = 0;
+
       webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment cancelled\"}");
     } else {
       webServer.send(200, "application/json", "{\"success\":true,\"message\":\"No enrollment to cancel\"}");
