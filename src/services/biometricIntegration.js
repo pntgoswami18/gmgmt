@@ -652,6 +652,15 @@ class BiometricIntegration {
 
       // Use the memberId from biometricData if available, otherwise use enrollment mode memberId
       const targetMemberId = memberId || this.enrollmentMode.memberId;
+      const activeMemberId = String(this.enrollmentMode.memberId);
+      const incomingMemberId = targetMemberId != null ? String(targetMemberId) : null;
+
+      if (incomingMemberId && incomingMemberId !== activeMemberId) {
+        console.warn(
+          `⚠️ Ignoring enrollment event for member ${incomingMemberId} while active enrollment is for member ${activeMemberId}`
+        );
+        return false;
+      }
 
       if (status === 'enrollment_success' || status === 'enrolled') {
         // Enrollment successful

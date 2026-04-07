@@ -1330,6 +1330,20 @@ const esp32Webhook = async (req, res) => {
       console.log(
         `🎯 Processing enrollment event: status=${status}, userId=${userId}, deviceId=${deviceId}`
       );
+      const canonicalMemberId = String(memberId || userId || '').trim();
+      const deviceUserId = String(userId || '').trim();
+
+      if (!canonicalMemberId) {
+        console.warn(
+          `⚠️ Enrollment event missing identity fields (memberId/userId). status=${status}, deviceId=${deviceId}`
+        );
+      }
+
+      if (memberId && userId && String(memberId).trim() !== String(userId).trim()) {
+        console.warn(
+          `⚠️ Enrollment identity mismatch: memberId=${memberId}, userId=${userId}. Using memberId as canonical member identity.`
+        );
+      }
 
       // Handle enrollment progress messages
       if (status === 'enrollment_progress') {
@@ -1338,55 +1352,29 @@ const esp32Webhook = async (req, res) => {
 
         // Extract enrollment step from the message
         const { enrollmentStep } = eventData;
-        console.log(`🔄 Processing enrollment progress: ${enrollmentStep} for user ${userId}`);
+        console.log(
+          `🔄 Processing enrollment progress: ${enrollmentStep} for member ${canonicalMemberId}`
+        );
 
-        // Since we now pass memberId as userId to ESP32, userId IS the member ID
-        memberIdToUse = userId;
+        memberIdToUse = canonicalMemberId || null;
         biometricId = null; // No biometric_id until enrollment is actually complete
 
         try {
-          // Get member name for better user experience
-          let memberName = `Member ${userId}`;
-          try {
-            const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [
-              userId,
-            ]);
-            if (memberResult.rows && memberResult.rows.length > 0) {
-              memberName = memberResult.rows[0].name;
-            }
-          } catch (nameError) {
-            console.warn('Could not fetch member name:', nameError.message);
-          }
-
-          console.log(
-            `📤 Sending WebSocket progress update for member ${userId}: ${enrollmentStep}`
-          );
-
-          // Send WebSocket update to frontend for progress
-          biometricIntegration.sendToWebSocketClients({
-            type: 'enrollment_progress',
-            status: 'progress',
-            memberId: userId,
-            memberName: memberName,
-            currentStep: enrollmentStep,
-            message: `Enrollment progress: ${enrollmentStep}`,
-            deviceId: deviceId,
-            timestamp: timestamp,
-          });
-
           console.log(`📤 Calling handleEnrollmentData for progress updates`);
 
-          // Also call handleEnrollmentData for progress updates
+          // Route progress updates through biometricIntegration to avoid duplicate WebSocket events
           await biometricIntegration.handleEnrollmentData({
-            userId: userId,
-            memberId: userId,
+            userId: deviceUserId || null,
+            memberId: canonicalMemberId || null,
             status: 'enrollment_progress',
             enrollmentStep: enrollmentStep,
             deviceId: deviceId,
             timestamp: timestamp,
           });
 
-          console.log(`✅ Enrollment progress updated for user ${userId}: ${enrollmentStep}`);
+          console.log(
+            `✅ Enrollment progress updated for member ${canonicalMemberId}: ${enrollmentStep}`
+          );
         } catch (progressError) {
           console.error('❌ Error updating enrollment progress:', progressError);
         }
@@ -1394,19 +1382,20 @@ const esp32Webhook = async (req, res) => {
         eventType = 'enrollment';
         success = true;
 
-        // Since we now pass memberId as userId to ESP32, userId IS the member ID
-        memberIdToUse = userId; // userId now directly represents the member ID
+        memberIdToUse = canonicalMemberId || null;
         // Ensure biometricId is stored as a clean string (no decimals)
-        biometricId = String(parseInt(userId, 10)); // Store the same ID as biometric_id for consistency
+        const parsedDeviceUserId = parseInt(deviceUserId, 10);
+        biometricId =
+          deviceUserId && Number.isFinite(parsedDeviceUserId) ? String(parsedDeviceUserId) : null;
 
         // IMPORTANT: Update enrollment status in biometricIntegration service
         // This ensures the frontend knows enrollment is complete
         try {
           // Get member name for better user experience
-          let memberName = `Member ${userId}`;
+          let memberName = `Member ${canonicalMemberId || deviceUserId}`;
           try {
             const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [
-              userId,
+              canonicalMemberId,
             ]);
             if (memberResult.rows && memberResult.rows.length > 0) {
               memberName = memberResult.rows[0].name;
@@ -1419,7 +1408,7 @@ const esp32Webhook = async (req, res) => {
           biometricIntegration.sendToWebSocketClients({
             type: 'enrollment_complete',
             status: 'success',
-            memberId: userId,
+            memberId: canonicalMemberId,
             memberName: memberName,
             message: 'Enrollment completed successfully via ESP32',
             deviceId: deviceId,
@@ -1428,8 +1417,8 @@ const esp32Webhook = async (req, res) => {
 
           // Also call handleEnrollmentData for consistency
           await biometricIntegration.handleEnrollmentData({
-            userId: userId,
-            memberId: userId, // Pass the member ID (same as userId)
+            userId: deviceUserId || null,
+            memberId: canonicalMemberId || null,
             status: 'enrollment_success',
             enrollmentStep: 'complete',
             deviceId: deviceId,
@@ -1441,13 +1430,13 @@ const esp32Webhook = async (req, res) => {
           if (
             biometricIntegration.enrollmentMode &&
             biometricIntegration.enrollmentMode.active &&
-            biometricIntegration.enrollmentMode.memberId == userId
+            biometricIntegration.enrollmentMode.memberId == canonicalMemberId
           ) {
             biometricIntegration.stopEnrollmentMode('success');
-            console.log(`🛑 Enrollment mode stopped for member ${userId}`);
+            console.log(`🛑 Enrollment mode stopped for member ${canonicalMemberId}`);
           }
 
-          console.log(`✅ Enrollment status updated for user ${userId}`);
+          console.log(`✅ Enrollment status updated for member ${canonicalMemberId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment status:', enrollmentError);
         }
@@ -1455,17 +1444,16 @@ const esp32Webhook = async (req, res) => {
         eventType = 'enrollment_cancelled';
         success = false;
 
-        // Since we now pass memberId as userId to ESP32, userId IS the member ID
-        memberIdToUse = userId;
+        memberIdToUse = canonicalMemberId || null;
         biometricId = null; // No biometric_id for cancelled enrollment
 
         // Update enrollment status for cancellation
         try {
           // Get member name for better user experience
-          let memberName = `Member ${userId}`;
+          let memberName = `Member ${canonicalMemberId || deviceUserId}`;
           try {
             const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [
-              userId,
+              canonicalMemberId,
             ]);
             if (memberResult.rows && memberResult.rows.length > 0) {
               memberName = memberResult.rows[0].name;
@@ -1478,7 +1466,7 @@ const esp32Webhook = async (req, res) => {
           biometricIntegration.sendToWebSocketClients({
             type: 'enrollment_complete',
             status: 'cancelled',
-            memberId: userId,
+            memberId: canonicalMemberId,
             memberName: memberName,
             message: 'Enrollment was cancelled via ESP32',
             deviceId: deviceId,
@@ -1487,8 +1475,8 @@ const esp32Webhook = async (req, res) => {
 
           // Also call handleEnrollmentData for consistency
           await biometricIntegration.handleEnrollmentData({
-            userId: userId,
-            memberId: userId, // Pass the member ID (same as userId)
+            userId: deviceUserId || null,
+            memberId: canonicalMemberId || null,
             status: 'enrollment_cancelled',
             enrollmentStep: 'cancelled',
             deviceId: deviceId,
@@ -1499,13 +1487,13 @@ const esp32Webhook = async (req, res) => {
           if (
             biometricIntegration.enrollmentMode &&
             biometricIntegration.enrollmentMode.active &&
-            biometricIntegration.enrollmentMode.memberId == userId
+            biometricIntegration.enrollmentMode.memberId == canonicalMemberId
           ) {
             biometricIntegration.stopEnrollmentMode('cancelled');
-            console.log(`🛑 Enrollment mode stopped for member ${userId}`);
+            console.log(`🛑 Enrollment mode stopped for member ${canonicalMemberId}`);
           }
 
-          console.log(`⏹️ Enrollment cancellation status updated for user ${userId}`);
+          console.log(`⏹️ Enrollment cancellation status updated for member ${canonicalMemberId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment cancellation status:', enrollmentError);
         }
@@ -1513,17 +1501,16 @@ const esp32Webhook = async (req, res) => {
         eventType = 'enrollment_failed';
         success = false;
 
-        // Since we now pass memberId as userId to ESP32, userId IS the member ID
-        memberIdToUse = userId;
+        memberIdToUse = canonicalMemberId || null;
         biometricId = null; // No biometric_id for failed enrollment
 
         // Update enrollment status for failure
         try {
           // Get member name for better user experience
-          let memberName = `Member ${userId}`;
+          let memberName = `Member ${canonicalMemberId || deviceUserId}`;
           try {
             const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [
-              userId,
+              canonicalMemberId,
             ]);
             if (memberResult.rows && memberResult.rows.length > 0) {
               memberName = memberResult.rows[0].name;
@@ -1536,7 +1523,7 @@ const esp32Webhook = async (req, res) => {
           biometricIntegration.sendToWebSocketClients({
             type: 'enrollment_complete',
             status: 'failed',
-            memberId: userId,
+            memberId: canonicalMemberId,
             memberName: memberName,
             message: 'ESP32 enrollment failed',
             deviceId: deviceId,
@@ -1545,8 +1532,8 @@ const esp32Webhook = async (req, res) => {
 
           // Also call handleEnrollmentData for consistency
           await biometricIntegration.handleEnrollmentData({
-            userId: userId,
-            memberId: userId, // Pass the member ID (same as userId)
+            userId: deviceUserId || null,
+            memberId: canonicalMemberId || null,
             status: 'enrollment_failed',
             enrollmentStep: 'failed',
             deviceId: deviceId,
@@ -1558,13 +1545,13 @@ const esp32Webhook = async (req, res) => {
           if (
             biometricIntegration.enrollmentMode &&
             biometricIntegration.enrollmentMode.active &&
-            biometricIntegration.enrollmentMode.memberId == userId
+            biometricIntegration.enrollmentMode.memberId == canonicalMemberId
           ) {
             biometricIntegration.stopEnrollmentMode('failed');
-            console.log(`🛑 Enrollment mode stopped for member ${userId}`);
+            console.log(`🛑 Enrollment mode stopped for member ${canonicalMemberId}`);
           }
 
-          console.log(`❌ Enrollment failure status updated for user ${userId}`);
+          console.log(`❌ Enrollment failure status updated for member ${canonicalMemberId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment failure status:', enrollmentError);
         }
