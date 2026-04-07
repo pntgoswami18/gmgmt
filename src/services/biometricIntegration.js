@@ -109,7 +109,10 @@ class BiometricIntegration {
     try {
       // Normalize to a clean integer string so "5", "5.0", 5 all match the same DB row
       const lookupId = String(parseInt(biometricId, 10));
+      // Normalize to a clean integer string so "5", "5.0", 5 all match the same DB row
+      const lookupId = String(parseInt(biometricId, 10));
       const query = 'SELECT * FROM members WHERE biometric_id = ?';
+      const result = await pool.query(query, [lookupId]);
       const result = await pool.query(query, [lookupId]);
       return result.rows[0] || null;
     } catch (error) {
@@ -652,8 +655,10 @@ class BiometricIntegration {
     try {
       const { userId, memberId, status, enrollmentStep } = biometricData;
 
+
       // Use the memberId from biometricData if available, otherwise use enrollment mode memberId
       const targetMemberId = memberId || this.enrollmentMode.memberId;
+
 
       if (status === 'enrollment_success' || status === 'enrolled') {
         // Enrollment successful
@@ -817,6 +822,7 @@ class BiometricIntegration {
             console.log(`📱 WhatsApp welcome message prepared for ${member.name}`);
             // Broadcast WhatsApp message status to WebSocket clients
             this.sendToWebSocketClients({
+            this.sendToWebSocketClients({
               type: 'whatsapp_welcome_sent',
               memberId: memberId,
               memberName: member.name,
@@ -831,6 +837,7 @@ class BiometricIntegration {
             );
             // Broadcast WhatsApp message failure to WebSocket clients
             this.sendToWebSocketClients({
+            this.sendToWebSocketClients({
               type: 'whatsapp_welcome_failed',
               memberId: memberId,
               memberName: member.name,
@@ -843,6 +850,7 @@ class BiometricIntegration {
       } catch (whatsappError) {
         console.error('📱 Error sending WhatsApp welcome message:', whatsappError);
         // Broadcast WhatsApp error to WebSocket clients
+        this.sendToWebSocketClients({
         this.sendToWebSocketClients({
           type: 'whatsapp_welcome_error',
           memberId: memberId,
@@ -1056,6 +1064,13 @@ class BiometricIntegration {
           fn(value);
         };
 
+        let settled = false;
+        const finish = (fn, value) => {
+          if (settled) return;
+          settled = true;
+          fn(value);
+        };
+
         const req = http.request(options, (res) => {
           let responseData = '';
 
@@ -1069,6 +1084,7 @@ class BiometricIntegration {
                 const jsonResponse = JSON.parse(responseData);
                 console.log(`✅ ESP32 command sent successfully: ${res.statusCode}`);
                 finish(resolve, jsonResponse);
+                finish(resolve, jsonResponse);
               } catch (parseError) {
                 console.log(
                   `✅ ESP32 command sent successfully: ${res.statusCode} (non-JSON response)`
@@ -1078,6 +1094,7 @@ class BiometricIntegration {
             } else {
               console.error(`❌ ESP32 command failed: HTTP ${res.statusCode}`);
               finish(reject, new Error(`HTTP ${res.statusCode}: ${responseData}`));
+              finish(reject, new Error(`HTTP ${res.statusCode}: ${responseData}`));
             }
           });
         });
@@ -1085,11 +1102,13 @@ class BiometricIntegration {
         req.on('error', (error) => {
           console.error(`❌ HTTP request error:`, error.message);
           finish(reject, new Error(`HTTP request error: ${error.message}`));
+          finish(reject, new Error(`HTTP request error: ${error.message}`));
         });
 
         req.on('timeout', () => {
           console.error(`⏰ HTTP request timeout after ${options.timeout}ms`);
           req.destroy();
+          finish(reject, new Error(`HTTP timeout after ${options.timeout}ms`));
           finish(reject, new Error(`HTTP timeout after ${options.timeout}ms`));
         });
 

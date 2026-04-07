@@ -917,17 +917,8 @@ void startEnrollmentMode() {
   // Only set enrollmentID if it hasn't been set by remote command
   if (enrollmentID == 0) {
     enrollmentID = getNextAvailableID();
-    if (enrollmentID < 0) {
-      Serial.println("❌ Cannot start enrollment - no available fingerprint slots");
-      sendEnrollmentData(0, "enrollment_failed");
-      enrollmentID = 0;
-      enrollmentMemberID = 0;
-      enrollmentTemplate = "";
-      return;
-    }
   }
-
-  enrollmentMode = true;
+  
   Serial.printf("Enrollment mode started for ID: %d\n", enrollmentID);
   Serial.println("Please place finger on sensor...");
   
@@ -1012,23 +1003,17 @@ int enrollFingerprint() {
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
       case FINGERPRINT_IMAGEFAIL:
-        retries++;
-        Serial.printf("Transient sensor error (attempt %d/%d)\n", retries, MAX_RETRIES);
-        if (retries >= MAX_RETRIES) {
-          sendEnrollmentProgress(p == FINGERPRINT_PACKETRECIEVEERR ? "communication_error" : "imaging_error", true);
-          return -1;
-        }
-        delay(200);
-        continue;
+        Serial.println("Imaging error");
+        sendEnrollmentProgress("imaging_error");
+        return -1;
       default:
         Serial.println("Unknown error");
         sendEnrollmentProgress("unknown_error", true);
         return -1;
     }
   }
-
-  // Convert image to template (with retry)
-  retries = 0;
+  
+  // Convert image to template
   p = finger.image2Tz(1);
   while (p != FINGERPRINT_OK && retries < MAX_RETRIES) {
     retries++;
@@ -1083,23 +1068,17 @@ int enrollFingerprint() {
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
       case FINGERPRINT_IMAGEFAIL:
-        retries++;
-        Serial.printf("Transient sensor error (attempt %d/%d)\n", retries, MAX_RETRIES);
-        if (retries >= MAX_RETRIES) {
-          sendEnrollmentProgress(p == FINGERPRINT_PACKETRECIEVEERR ? "communication_error" : "imaging_error", true);
-          return -1;
-        }
-        delay(200);
-        continue;
+        Serial.println("Imaging error");
+        sendEnrollmentProgress("imaging_error");
+        return -1;
       default:
         Serial.println("Unknown error");
         sendEnrollmentProgress("unknown_error", true);
         return -1;
     }
   }
-
-  // Convert second image (with retry)
-  retries = 0;
+  
+  // Convert second image
   p = finger.image2Tz(2);
   while (p != FINGERPRINT_OK && retries < MAX_RETRIES) {
     retries++;
@@ -1341,32 +1320,6 @@ void sendEnrollmentProgress(String progressStep, bool blocking) {
   serializeJson(doc, jsonString);
 
   Serial.printf("📤 Sending enrollment progress: %s\n", progressStep.c_str());
-  if (blocking) {
-    sendToServer(jsonString);
-  } else {
-    sendToServerAsync(jsonString);
-  }
-}
-
-// ==================== OTA UPDATE FUNCTIONS ====================
-void sendOTAStatusToServer(String status, String errorMsg) {
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-  
-  StaticJsonDocument<300> doc;
-  doc["deviceId"] = device_id;
-  doc["deviceType"] = "esp32_door_lock";
-  doc["event"] = "ota_update";
-  doc["status"] = status;
-  doc["timestamp"] = getISO8601Time();
-  doc["firmware_version"] = FIRMWARE_VERSION;
-  if (errorMsg.length() > 0) {
-    doc["error"] = errorMsg;
-  }
-  
-  String jsonString;
-  serializeJson(doc, jsonString);
   sendToServer(jsonString);
 }
 
@@ -1894,8 +1847,8 @@ void handleRemoteCommand() {
     webServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
     return;
   }
-
-  // Extract command details (with compatibility fallbacks)
+  
+  // Extract command details
   String command = doc["command"].as<String>();
   if (command.length() == 0 || command == "null") {
     command = doc["action"].as<String>();
@@ -1995,89 +1948,6 @@ void handleRemoteCommand() {
     } else {
       webServer.send(200, "application/json", "{\"success\":true,\"message\":\"No enrollment to cancel\"}");
     }
-    
-  } else if (command == "delete_fingerprint") {
-    // Delete a fingerprint slot from the sensor (called on member deactivation)
-    int slotId = doc["data"]["slotId"].as<int>();
-    if (slotId <= 0 || slotId >= finger.capacity) {
-      Serial.printf("❌ Invalid slot ID for delete_fingerprint: %d\n", slotId);
-      webServer.send(400, "application/json", "{\"error\":\"Invalid slot ID\"}");
-      return;
-    }
-    Serial.printf("🗑️ Deleting fingerprint slot %d\n", slotId);
-    uint8_t p = finger.deleteModel(slotId);
-    if (p == FINGERPRINT_OK) {
-      Serial.printf("✅ Fingerprint slot %d deleted\n", slotId);
-      webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Fingerprint deleted\"}");
-    } else {
-      Serial.printf("❌ Failed to delete fingerprint slot %d (error: %d)\n", slotId, p);
-      webServer.send(500, "application/json", "{\"error\":\"Failed to delete fingerprint\"}");
-    }
-
-  } else if (command == "restore_fingerprint") {
-    // Restore a stored template to a new sensor slot (called on member reactivation)
-    String templateHex = doc["data"]["template"].as<String>();
-    int memberId = doc["data"]["memberId"].as<int>();
-
-    if (templateHex.length() == 0 || templateHex == "null") {
-      Serial.println("❌ restore_fingerprint: no template provided");
-      webServer.send(400, "application/json", "{\"error\":\"No template provided\"}");
-      return;
-    }
-
-    int newSlot = getNextAvailableID();
-    if (newSlot < 0) {
-      Serial.println("❌ restore_fingerprint: no available sensor slots");
-      webServer.send(503, "application/json", "{\"error\":\"No available fingerprint slots\"}");
-      return;
-    }
-
-    Serial.printf("📥 Restoring fingerprint for member %d to slot %d\n", memberId, newSlot);
-    if (!uploadTemplate(templateHex)) {
-      Serial.println("❌ restore_fingerprint: template upload failed");
-      webServer.send(500, "application/json", "{\"error\":\"Template upload failed\"}");
-      return;
-    }
-
-    uint8_t p = finger.storeModel(newSlot);
-    if (p != FINGERPRINT_OK) {
-      Serial.printf("❌ restore_fingerprint: storeModel(%d) failed: %d\n", newSlot, p);
-      webServer.send(500, "application/json", "{\"error\":\"Failed to store restored fingerprint\"}");
-      return;
-    }
-
-    Serial.printf("✅ Fingerprint restored for member %d to slot %d\n", memberId, newSlot);
-
-    // Notify backend of the new sensor slot so it can update biometric_id
-    StaticJsonDocument<256> notify;
-    notify["userId"] = String(newSlot);
-    notify["memberId"] = String(memberId);
-    notify["status"] = "restore_success";
-    notify["deviceId"] = device_id;
-    notify["event"] = "Restore";
-    notify["deviceType"] = "esp32_door_lock";
-    notify["timestamp"] = getISO8601Time();
-    String notifyStr;
-    serializeJson(notify, notifyStr);
-    sendToServer(notifyStr);
-
-    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Fingerprint restored\"}");
-
-  } else if (command == "ota_update") {
-    String firmwareUrl = doc["data"]["url"].as<String>();
-    
-    if (firmwareUrl.length() == 0 || firmwareUrl == "null") {
-      webServer.send(400, "application/json", "{\"error\":\"Firmware URL is required\"}");
-      return;
-    }
-    
-    Serial.printf("📦 OTA update requested from: %s\n", firmwareUrl.c_str());
-    
-    webServer.send(200, "application/json", 
-      "{\"success\":true,\"message\":\"OTA update accepted, downloading firmware...\"}");
-    
-    otaPending = true;
-    otaFirmwareUrl = firmwareUrl;
     
   } else {
     Serial.printf("⚠️  Unknown command: %s\n", command.c_str());
