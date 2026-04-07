@@ -37,7 +37,14 @@ npx jest src/services/__tests__/
 npx jest src/services/__tests__/biometricIntegration.test.js
 ```
 
+Unit + integration tests are expected for all changes — run both `npx jest src/services/__tests__/` and `npm run esp32:test` before marking work done.
+
 No dedicated lint script exists. No Docker setup — runs directly with Node.js.
+
+## Git Workflow
+
+- Branch names: simple kebab-case descriptive names (e.g., `payment-fix`, `member-search`), no type prefix.
+- Commit messages: conventional format — `fix:`, `feat:`, `refactor:`, `docs:`, `test:` prefix followed by a short description.
 
 ## Architecture
 
