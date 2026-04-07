@@ -1,4 +1,4 @@
-const { pool } = require('../../config/sqlite');
+const { pool, runInTransaction } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
 const { uploadSingle } = require('../../config/multer');
 
@@ -449,10 +449,25 @@ exports.deleteMember = async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
-    if (existing.rowCount === 0) {
+    if (!existing.rows?.length) {
       return res.status(404).json({ message: 'Member not found' });
     }
-    await pool.query('DELETE FROM members WHERE id = $1', [id]);
+    await runInTransaction(async () => {
+      // access_logs references members without ON DELETE CASCADE — remove first or FK fails
+      await pool.query('DELETE FROM access_logs WHERE member_id = $1', [id]);
+      // Legacy DBs may have security_logs / biometric_events without CASCADE
+      await pool.query('DELETE FROM security_logs WHERE member_id = $1', [id]);
+      await pool.query('DELETE FROM biometric_events WHERE member_id = $1', [id]);
+      await pool.query('DELETE FROM members WHERE id = $1', [id]);
+    });
+    try {
+      const { invalidateESP32Cache } = require('./biometricController');
+      if (invalidateESP32Cache) {
+        await invalidateESP32Cache();
+      }
+    } catch (cacheErr) {
+      console.error('ESP32 cache invalidation after member delete:', cacheErr);
+    }
     res.json({ message: 'Member deleted successfully' });
   } catch (err) {
     res.status(500).json({ message: err.message });
