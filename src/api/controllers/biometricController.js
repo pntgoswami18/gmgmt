@@ -1329,12 +1329,15 @@ const esp32Webhook = async (req, res) => {
           // If device reported a firmware version, mark any pending OTA as completed
           if (firmwareVersion && deviceId) {
             try {
-              await pool.query(`
+              await pool.query(
+                `
                 UPDATE firmware_update_log
                 SET status = 'completed', completed_at = datetime('now')
                 WHERE device_id = ? AND status = 'pending'
                   AND firmware_id IN (SELECT id FROM firmware_versions WHERE version = ?)
-              `, [deviceId, firmwareVersion]);
+              `,
+                [deviceId, firmwareVersion]
+              );
             } catch (otaErr) {
               console.error('Error updating OTA log:', otaErr);
             }
