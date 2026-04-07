@@ -17,7 +17,6 @@ const reportRoutes = require('./api/routes/reports');
 const scheduleRoutes = require('./api/routes/schedules');
 const settingsRoutes = require('./api/routes/settings');
 const biometricRoutes = require('./api/routes/biometric');
-const firmwareRoutes = require('./api/routes/firmware');
 const referralRoutes = require('./api/routes/referrals');
 const paymentDeactivationRoutes = require('./api/routes/paymentDeactivation');
 
