@@ -64,6 +64,12 @@ exports.getAllMembers = async (req, res) => {
                 WHERE i.member_id = m.id 
                 AND date(p.payment_date) >= date('now','start of month')
             )`;
+    } else if (filter === 'everyone') {
+      // Active and inactive members (no is_active constraint)
+      filterCondition = '';
+    } else {
+      // Unknown filter: default to active-only (same as "all")
+      filterCondition = `AND is_active = 1`;
     }
 
     // Get total count
