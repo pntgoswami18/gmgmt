@@ -1,7 +1,5 @@
 const BiometricListener = require('./biometricListener');
 const { pool } = require('../config/sqlite');
-const path = require('path');
-const os = require('os');
 const whatsappService = require('./whatsappService');
 
 class BiometricIntegration {
