@@ -115,6 +115,12 @@ bool systemReady = false;
 bool enrollmentMode = false;
 int enrollmentID = 0;       // sensor slot (1–finger.capacity); passed to storeModel()
 int enrollmentMemberID = 0; // actual backend member ID; used for server reporting
+String enrollmentTemplate = ""; // hex-encoded raw template bytes captured after enrollment
+
+// Buffer for raw AS608 template packets (used for capture and restore)
+#define TEMPLATE_BUFFER_SIZE 700
+uint8_t templateBuffer[TEMPLATE_BUFFER_SIZE];
+int templateBufferLen = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastButtonCheck = 0;
 unsigned long lastNTPResync = 0;  // Track last NTP resync attempt
@@ -178,6 +184,8 @@ unsigned long accessDeniedStartTime = 0;
 // ==================== FUNCTION DECLARATIONS ====================
 void sendEnrollmentProgress(String progressStep, bool blocking = false);
 void sendEnrollmentData(int memberID, String status);
+void captureTemplateBytes();
+bool uploadTemplate(const String& templateHex);
 void sendBiometricData(int memberID, String status, String reason = "");
 void sendBiometricDataAsync(int memberID, String status, String reason = "");
 void sendHeartbeat();
@@ -914,6 +922,7 @@ void startEnrollmentMode() {
       sendEnrollmentData(0, "enrollment_failed");
       enrollmentID = 0;
       enrollmentMemberID = 0;
+      enrollmentTemplate = "";
       return;
     }
   }
@@ -948,6 +957,7 @@ void handleEnrollment() {
     // Reset enrollmentID for next enrollment
     enrollmentID = 0;
     enrollmentMemberID = 0;
+    enrollmentTemplate = "";
 
   } else if (result == -1) {
     // Enrollment failed
@@ -967,6 +977,7 @@ void handleEnrollment() {
     // Reset enrollmentID for next enrollment
     enrollmentID = 0;
     enrollmentMemberID = 0;
+    enrollmentTemplate = "";
   }
   // result == 0 means still in progress
 }
@@ -1119,6 +1130,14 @@ int enrollFingerprint() {
   p = finger.storeModel(enrollmentID);
   if (p == FINGERPRINT_OK) {
     Serial.println("Stored!");
+    // Download and store the template bytes so the backend can restore this
+    // fingerprint to a new slot without requiring re-enrollment
+    uint8_t gp = finger.getModel();
+    if (gp == FINGERPRINT_OK) {
+      captureTemplateBytes();
+    } else {
+      Serial.println("⚠️ Template download failed — slot restore will require re-enrollment");
+    }
     sendEnrollmentProgress("model_stored");
     return 1;
   } else {
@@ -1203,13 +1222,87 @@ void sendBiometricDataAsync(int memberID, String status, String reason) {
   sendToServerAsync(jsonString);
 }
 
+// ==================== TEMPLATE CAPTURE / RESTORE ====================
+
+// Captures the raw AS608 data packets from serial after finger.getModel() returns OK.
+// Stores raw bytes in templateBuffer / templateBufferLen and hex-encodes to enrollmentTemplate.
+void captureTemplateBytes() {
+  templateBufferLen = 0;
+  enrollmentTemplate = "";
+
+  // Wait up to 2s for the first byte of template data
+  unsigned long timeout = millis() + 2000;
+  while (!fingerprintSerial.available() && millis() < timeout) {
+    delay(1);
+  }
+
+  // Collect bytes; reset timeout on each received byte (100ms inter-byte gap)
+  timeout = millis() + 100;
+  while (millis() < timeout) {
+    if (fingerprintSerial.available()) {
+      if (templateBufferLen < TEMPLATE_BUFFER_SIZE) {
+        templateBuffer[templateBufferLen++] = (uint8_t)fingerprintSerial.read();
+      } else {
+        fingerprintSerial.read(); // discard overflow
+      }
+      timeout = millis() + 100;
+    }
+  }
+
+  // Hex-encode the captured bytes
+  enrollmentTemplate.reserve(templateBufferLen * 2);
+  for (int i = 0; i < templateBufferLen; i++) {
+    if (templateBuffer[i] < 0x10) enrollmentTemplate += '0';
+    enrollmentTemplate += String(templateBuffer[i], HEX);
+  }
+  Serial.printf("📋 Captured template: %d bytes (%d hex chars)\n",
+    templateBufferLen, enrollmentTemplate.length());
+}
+
+// Uploads a hex-encoded template to the sensor buffer via raw AS608 DownChar (0x09),
+// then stores it to the given slot. Returns true on success.
+bool uploadTemplate(const String& templateHex) {
+  if (templateHex.length() == 0 || templateHex.length() % 2 != 0) return false;
+
+  int dataLen = templateHex.length() / 2;
+  if (dataLen > TEMPLATE_BUFFER_SIZE) return false;
+
+  // Decode hex → bytes
+  for (int i = 0; i < dataLen; i++) {
+    templateBuffer[i] = (uint8_t)strtol(templateHex.substring(i * 2, i * 2 + 2).c_str(), nullptr, 16);
+  }
+
+  // Send DownChar command packet (instruction 0x09, char buffer 1)
+  // EF 01 FF FF FF FF 01 00 04 09 01 00 0F
+  uint8_t cmd[] = {0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x04, 0x09, 0x01, 0x00, 0x0F};
+  fingerprintSerial.write(cmd, sizeof(cmd));
+
+  // Wait for ACK from sensor (up to 1s, discard bytes)
+  unsigned long ackEnd = millis() + 1000;
+  int ackCount = 0;
+  while (millis() < ackEnd && ackCount < 12) {
+    if (fingerprintSerial.available()) {
+      fingerprintSerial.read();
+      ackCount++;
+    }
+  }
+
+  // Replay the captured data packets (already in AS608 packet format)
+  fingerprintSerial.write(templateBuffer, dataLen);
+
+  // Allow sensor to process the data
+  delay(500);
+  return true;
+}
+
 void sendEnrollmentData(int memberID, String status) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected - enrollment data not sent");
     return;
   }
   
-  StaticJsonDocument<300> doc;
+  // Use DynamicJsonDocument to accommodate the template hex string (~1200 chars)
+  DynamicJsonDocument doc(2048);
   doc["userId"] = String(memberID);
   doc["memberId"] = String(enrollmentMemberID > 0 ? enrollmentMemberID : memberID);
   doc["timestamp"] = getISO8601Time();
@@ -1218,6 +1311,9 @@ void sendEnrollmentData(int memberID, String status) {
   doc["event"] = "Enroll";
   doc["deviceType"] = "esp32_door_lock";
   doc["enrollmentStep"] = "complete";
+  if (status == "enrollment_success" && enrollmentTemplate.length() > 0) {
+    doc["template"] = enrollmentTemplate;
+  }
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -1789,15 +1885,16 @@ void handleRemoteCommand() {
     webServer.send(400, "application/json", "{\"error\":\"No JSON body provided\"}");
     return;
   }
-  
+
   String body = webServer.arg("plain");
-  StaticJsonDocument<500> doc;
-  
+  // DynamicJsonDocument to handle large restore_fingerprint template payloads (~2KB)
+  DynamicJsonDocument doc(3072);
+
   if (deserializeJson(doc, body)) {
     webServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
     return;
   }
-  
+
   // Extract command details (with compatibility fallbacks)
   String command = doc["command"].as<String>();
   if (command.length() == 0 || command == "null") {
@@ -1837,6 +1934,7 @@ void handleRemoteCommand() {
         sendEnrollmentData(0, "enrollment_failed");
         enrollmentID = 0;
         enrollmentMemberID = 0;
+        enrollmentTemplate = "";
         webServer.send(503, "application/json", "{\"error\":\"No available fingerprint slots\"}");
         return;
       }
@@ -1891,12 +1989,80 @@ void handleRemoteCommand() {
       // Reset enrollmentID for next enrollment
       enrollmentID = 0;
       enrollmentMemberID = 0;
+      enrollmentTemplate = "";
 
       webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment cancelled\"}");
     } else {
       webServer.send(200, "application/json", "{\"success\":true,\"message\":\"No enrollment to cancel\"}");
     }
     
+  } else if (command == "delete_fingerprint") {
+    // Delete a fingerprint slot from the sensor (called on member deactivation)
+    int slotId = doc["data"]["slotId"].as<int>();
+    if (slotId <= 0 || slotId >= finger.capacity) {
+      Serial.printf("❌ Invalid slot ID for delete_fingerprint: %d\n", slotId);
+      webServer.send(400, "application/json", "{\"error\":\"Invalid slot ID\"}");
+      return;
+    }
+    Serial.printf("🗑️ Deleting fingerprint slot %d\n", slotId);
+    uint8_t p = finger.deleteModel(slotId);
+    if (p == FINGERPRINT_OK) {
+      Serial.printf("✅ Fingerprint slot %d deleted\n", slotId);
+      webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Fingerprint deleted\"}");
+    } else {
+      Serial.printf("❌ Failed to delete fingerprint slot %d (error: %d)\n", slotId, p);
+      webServer.send(500, "application/json", "{\"error\":\"Failed to delete fingerprint\"}");
+    }
+
+  } else if (command == "restore_fingerprint") {
+    // Restore a stored template to a new sensor slot (called on member reactivation)
+    String templateHex = doc["data"]["template"].as<String>();
+    int memberId = doc["data"]["memberId"].as<int>();
+
+    if (templateHex.length() == 0 || templateHex == "null") {
+      Serial.println("❌ restore_fingerprint: no template provided");
+      webServer.send(400, "application/json", "{\"error\":\"No template provided\"}");
+      return;
+    }
+
+    int newSlot = getNextAvailableID();
+    if (newSlot < 0) {
+      Serial.println("❌ restore_fingerprint: no available sensor slots");
+      webServer.send(503, "application/json", "{\"error\":\"No available fingerprint slots\"}");
+      return;
+    }
+
+    Serial.printf("📥 Restoring fingerprint for member %d to slot %d\n", memberId, newSlot);
+    if (!uploadTemplate(templateHex)) {
+      Serial.println("❌ restore_fingerprint: template upload failed");
+      webServer.send(500, "application/json", "{\"error\":\"Template upload failed\"}");
+      return;
+    }
+
+    uint8_t p = finger.storeModel(newSlot);
+    if (p != FINGERPRINT_OK) {
+      Serial.printf("❌ restore_fingerprint: storeModel(%d) failed: %d\n", newSlot, p);
+      webServer.send(500, "application/json", "{\"error\":\"Failed to store restored fingerprint\"}");
+      return;
+    }
+
+    Serial.printf("✅ Fingerprint restored for member %d to slot %d\n", memberId, newSlot);
+
+    // Notify backend of the new sensor slot so it can update biometric_id
+    StaticJsonDocument<256> notify;
+    notify["userId"] = String(newSlot);
+    notify["memberId"] = String(memberId);
+    notify["status"] = "restore_success";
+    notify["deviceId"] = device_id;
+    notify["event"] = "Restore";
+    notify["deviceType"] = "esp32_door_lock";
+    notify["timestamp"] = getISO8601Time();
+    String notifyStr;
+    serializeJson(notify, notifyStr);
+    sendToServer(notifyStr);
+
+    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Fingerprint restored\"}");
+
   } else if (command == "ota_update") {
     String firmwareUrl = doc["data"]["url"].as<String>();
     

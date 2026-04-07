@@ -24,10 +24,10 @@ class PaymentDeactivationService {
 
     this.isRunning = true;
     this.deactivatedMembers = [];
-    
+
     try {
       console.log('🔄 Starting payment deactivation check...');
-      
+
       // Get grace period setting
       const gracePeriodDays = await getGracePeriodSetting(pool);
       console.log(`📅 Using grace period: ${gracePeriodDays} days`);
@@ -67,53 +67,61 @@ class PaymentDeactivationService {
 
       for (const member of members) {
         checkedCount++;
-        
+
         try {
           const paymentStatus = checkMemberPaymentStatus(
             member,
             {
-              duration_days: member.duration_days
+              duration_days: member.duration_days,
             },
             member.last_payment_date,
             gracePeriodDays
           );
 
           if (paymentStatus.error) {
-            console.warn(`⚠️ Error checking payment for member ${member.name} (ID: ${member.id}): ${paymentStatus.error}`);
+            console.warn(
+              `⚠️ Error checking payment for member ${member.name} (ID: ${member.id}): ${paymentStatus.error}`
+            );
             continue;
           }
 
           if (paymentStatus.isOverdue) {
             overdueCount++;
-            console.log(`📊 Member ${member.name} (ID: ${member.id}) is ${paymentStatus.daysOverdue} days overdue`);
+            console.log(
+              `📊 Member ${member.name} (ID: ${member.id}) is ${paymentStatus.daysOverdue} days overdue`
+            );
 
             if (paymentStatus.gracePeriodExpired) {
               // Deactivate the member
               await this.deactivateMember(member, paymentStatus);
               deactivatedCount++;
             } else {
-              console.log(`⏰ Member ${member.name} is overdue but within grace period (${gracePeriodDays - paymentStatus.daysOverdue} days remaining)`);
+              console.log(
+                `⏰ Member ${member.name} is overdue but within grace period (${gracePeriodDays - paymentStatus.daysOverdue} days remaining)`
+              );
             }
           }
         } catch (memberError) {
-          console.error(`❌ Error processing member ${member.name} (ID: ${member.id}):`, memberError);
+          console.error(
+            `❌ Error processing member ${member.name} (ID: ${member.id}):`,
+            memberError
+          );
         }
       }
 
       this.lastRun = new Date();
-      
+
       const summary = {
         timestamp: this.lastRun.toISOString(),
         gracePeriodDays,
         totalMembersChecked: checkedCount,
         overdueMembers: overdueCount,
         deactivatedMembers: deactivatedCount,
-        deactivatedMemberDetails: this.deactivatedMembers
+        deactivatedMemberDetails: this.deactivatedMembers,
       };
 
       console.log('✅ Payment deactivation check completed:', summary);
       return summary;
-
     } catch (error) {
       console.error('❌ Error in payment deactivation service:', error);
       throw error;
@@ -131,8 +139,10 @@ class PaymentDeactivationService {
     try {
       // Update member status to inactive
       await pool.query('UPDATE members SET is_active = 0 WHERE id = ?', [member.id]);
-      
-      console.log(`🔄 Deactivated member ${member.name} (ID: ${member.id}) - ${paymentStatus.daysOverdue} days overdue`);
+
+      console.log(
+        `🔄 Deactivated member ${member.name} (ID: ${member.id}) - ${paymentStatus.daysOverdue} days overdue`
+      );
 
       // Log the deactivation event
       await this.logDeactivationEvent(member, paymentStatus);
@@ -147,7 +157,7 @@ class PaymentDeactivationService {
         daysOverdue: paymentStatus.daysOverdue,
         lastPaymentDate: member.last_payment_date,
         deactivatedAt: new Date().toISOString(),
-        reason: 'payment_grace_period_expired'
+        reason: 'payment_grace_period_expired',
       });
 
       // Trigger ESP32 cache invalidation
@@ -161,6 +171,15 @@ class PaymentDeactivationService {
         console.error('❌ Error invalidating ESP32 cache:', cacheError);
       }
 
+      // Delete fingerprint slot from sensor to free capacity
+      try {
+        const { deleteFingerprint } = require('../api/controllers/biometricController');
+        if (deleteFingerprint) {
+          await deleteFingerprint(member.id);
+        }
+      } catch (deleteError) {
+        console.error(`❌ Error deleting fingerprint for member ${member.id}:`, deleteError);
+      }
     } catch (error) {
       console.error(`❌ Error deactivating member ${member.name} (ID: ${member.id}):`, error);
       throw error;
@@ -186,8 +205,8 @@ class PaymentDeactivationService {
           daysOverdue: paymentStatus.daysOverdue,
           lastPaymentDate: member.last_payment_date,
           planName: member.plan_name,
-          gracePeriodExpired: paymentStatus.gracePeriodExpired
-        })
+          gracePeriodExpired: paymentStatus.gracePeriodExpired,
+        }),
       };
 
       const query = `
@@ -196,7 +215,7 @@ class PaymentDeactivationService {
           timestamp, success, raw_data
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `;
-      
+
       await pool.query(query, [
         eventData.member_id,
         eventData.biometric_id,
@@ -204,7 +223,7 @@ class PaymentDeactivationService {
         eventData.device_id,
         eventData.timestamp,
         eventData.success ? 1 : 0,
-        eventData.raw_data
+        eventData.raw_data,
       ]);
 
       console.log(`📝 Logged deactivation event for member ${member.id}`);
@@ -223,7 +242,7 @@ class PaymentDeactivationService {
       lastRun: this.lastRun,
       lastRunFormatted: this.lastRun ? this.lastRun.toLocaleString() : 'Never',
       deactivatedMembersCount: this.deactivatedMembers.length,
-      deactivatedMembers: this.deactivatedMembers
+      deactivatedMembers: this.deactivatedMembers,
     };
   }
 
@@ -275,7 +294,7 @@ class PaymentDeactivationService {
               ...member,
               daysOverdue: paymentStatus.daysOverdue,
               daysRemainingInGracePeriod: gracePeriodDays - paymentStatus.daysOverdue,
-              paymentStatus
+              paymentStatus,
             });
           }
         } catch (error) {
