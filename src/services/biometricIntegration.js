@@ -1353,6 +1353,118 @@ class BiometricIntegration {
   }
 
   /**
+   * Delete ALL fingerprint slots for a member from every online device and wipe their
+   * biometric records. Used before re-enrollment so stale slots don't accumulate.
+   */
+  async deleteAllMemberFingerprints(memberId) {
+    try {
+      // Collect every slot ID ever associated with this member
+      const memberResult = await pool.query('SELECT biometric_id FROM members WHERE id = ?', [
+        memberId,
+      ]);
+      const biometricsResult = await pool.query(
+        'SELECT device_user_id FROM member_biometrics WHERE member_id = ?',
+        [memberId]
+      );
+
+      const slotIds = new Set();
+      const currentId = memberResult.rows[0]?.biometric_id;
+      if (currentId) {
+        const n = parseInt(currentId, 10);
+        if (!isNaN(n) && n > 0) slotIds.add(n);
+      }
+      for (const row of biometricsResult.rows) {
+        const n = parseInt(row.device_user_id, 10);
+        if (!isNaN(n) && n > 0) slotIds.add(n);
+      }
+
+      if (slotIds.size === 0) {
+        console.log(`ℹ️ Member ${memberId} has no fingerprint slots — nothing to delete`);
+        return;
+      }
+
+      const devicesResult = await pool.query(
+        `SELECT device_id FROM devices WHERE status = 'online'`
+      );
+      for (const slotId of slotIds) {
+        for (const device of devicesResult.rows) {
+          try {
+            await this.sendESP32Command(device.device_id, 'delete_fingerprint', { slotId });
+            console.log(`✅ Slot ${slotId} deleted from device ${device.device_id}`);
+          } catch (err) {
+            console.error(
+              `❌ Failed to delete slot ${slotId} from device ${device.device_id}:`,
+              err.message
+            );
+          }
+        }
+      }
+
+      // Clear DB records so the member starts fresh
+      await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', ['', memberId]);
+      await pool.query('DELETE FROM member_biometrics WHERE member_id = ?', [memberId]);
+      console.log(`✅ All ${slotIds.size} fingerprint slot(s) cleared for member ${memberId}`);
+    } catch (error) {
+      console.error(`❌ deleteAllMemberFingerprints failed for member ${memberId}:`, error);
+    }
+  }
+
+  /**
+   * Sync biometric data across all online devices:
+   * - Removes orphaned/duplicate slots from the ESP32 sensor(s) that don't match
+   *   the member's current biometric_id in the DB.
+   * - Cleans up stale member_biometrics rows (those without a template).
+   * Returns a summary object.
+   */
+  async syncBiometricData() {
+    const summary = { stale_slots_deleted: 0, db_rows_removed: 0, errors: 0, members_processed: 0 };
+    try {
+      // Find member_biometrics rows whose device_user_id no longer matches the member's biometric_id
+      const staleResult = await pool.query(`
+        SELECT mb.id AS mb_id, mb.member_id, mb.device_user_id, mb.template
+        FROM member_biometrics mb
+        JOIN members m ON m.id = mb.member_id
+        WHERE m.biometric_id != '' AND mb.device_user_id != m.biometric_id
+      `);
+
+      const devicesResult = await pool.query(
+        `SELECT device_id FROM devices WHERE status = 'online'`
+      );
+
+      for (const row of staleResult.rows) {
+        const slotId = parseInt(row.device_user_id, 10);
+        if (!isNaN(slotId) && slotId > 0) {
+          for (const device of devicesResult.rows) {
+            try {
+              await this.sendESP32Command(device.device_id, 'delete_fingerprint', { slotId });
+              summary.stale_slots_deleted++;
+            } catch (err) {
+              console.error(
+                `❌ Sync: failed to delete slot ${slotId} from ${device.device_id}:`,
+                err.message
+              );
+              summary.errors++;
+            }
+          }
+        }
+
+        // Remove the stale DB row only if it has no template worth keeping
+        if (!row.template) {
+          await pool.query('DELETE FROM member_biometrics WHERE id = ?', [row.mb_id]);
+          summary.db_rows_removed++;
+        }
+      }
+
+      summary.members_processed = new Set(staleResult.rows.map((r) => r.member_id)).size;
+      console.log(`✅ Biometric sync complete:`, summary);
+    } catch (error) {
+      console.error('❌ syncBiometricData failed:', error);
+      summary.errors++;
+    }
+    return summary;
+  }
+
+  /**
    * Restore a member's fingerprint from the stored template to a new sensor slot.
    * Called on member reactivation — no re-scan required if a template exists.
    * If no template is stored the member will need to re-enrol manually.

@@ -2160,6 +2160,33 @@ const invalidateESP32Cache = async () => {
   }
 };
 
+const syncBiometricData = async (_req, res) => {
+  try {
+    if (!biometricIntegration) {
+      return res.status(503).json({
+        success: false,
+        message: 'Biometric service not available',
+      });
+    }
+
+    console.log('🔄 Biometric data sync requested');
+    const summary = await biometricIntegration.syncBiometricData();
+
+    res.json({
+      success: true,
+      message: 'Biometric data sync complete',
+      data: summary,
+    });
+  } catch (error) {
+    console.error('❌ Error syncing biometric data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to sync biometric data',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   setBiometricIntegration,
   getMemberBiometricStatus,
