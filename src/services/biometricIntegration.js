@@ -895,8 +895,12 @@ class BiometricIntegration {
 
   async removeBiometricId(memberId) {
     try {
-      const query = 'UPDATE members SET biometric_id = NULL WHERE id = ?';
-      await pool.query(query, [memberId]);
+      // Delete all fingerprint slots from all online devices before clearing DB,
+      // so the sensor templates don't linger and cause stale-slot misidentification.
+      await this.deleteAllMemberFingerprints(memberId);
+
+      // Ensure biometric_id is NULL (deleteAllMemberFingerprints sets it to '').
+      await pool.query('UPDATE members SET biometric_id = NULL WHERE id = ?', [memberId]);
 
       // Log removal event
       await this.logBiometricEvent({
@@ -1147,6 +1151,10 @@ class BiometricIntegration {
     } catch (nameError) {
       console.warn('Could not fetch member name:', nameError.message);
     }
+
+    // Delete all existing fingerprint slots for this member before re-enrolling,
+    // so stale slots don't accumulate on the device and cause misidentification.
+    await this.deleteAllMemberFingerprints(memberId);
 
     // Activate server-side enrollment mode so webhook events can be processed
     this.startEnrollmentMode(memberId, memberName);
