@@ -578,12 +578,13 @@ class BiometricIntegration {
   }
 
   // Enrollment functionality
-  startEnrollmentMode(memberId, memberName) {
+  startEnrollmentMode(memberId, memberName, deviceId = null) {
     console.log(`🎯 Starting enrollment mode for ${memberName} (ID: ${memberId})`);
     this.enrollmentMode = {
       active: true,
       memberId,
       memberName,
+      deviceId,
       startTime: new Date(),
       attempts: 0,
       maxAttempts: 3,
@@ -698,9 +699,8 @@ class BiometricIntegration {
           this.stopEnrollmentMode('max_attempts');
           return false;
         } else {
-          this.listener.broadcast(
-            `ENROLL:RETRY:${this.enrollmentMode.maxAttempts - this.enrollmentMode.attempts}`
-          );
+          const remaining = this.enrollmentMode.maxAttempts - this.enrollmentMode.attempts;
+          this.listener.broadcast(`ENROLL:RETRY:${remaining}`);
           this.sendToWebSocketClients({
             type: 'enrollment_progress',
             status: 'retry',
@@ -708,8 +708,25 @@ class BiometricIntegration {
             memberName: this.enrollmentMode.memberName,
             attempts: this.enrollmentMode.attempts,
             maxAttempts: this.enrollmentMode.maxAttempts,
-            message: `Retry ${this.enrollmentMode.maxAttempts - this.enrollmentMode.attempts} attempts remaining`,
+            message: `Prints mismatch — try again (${remaining} attempt${remaining !== 1 ? 's' : ''} remaining)`,
           });
+
+          // Re-send start_enrollment to the ESP32 so it begins a new scan automatically
+          if (this.enrollmentMode.deviceId) {
+            try {
+              await this.sendESP32Command(this.enrollmentMode.deviceId, 'start_enrollment', {
+                memberId: targetMemberId,
+                userId: targetMemberId,
+                enrollmentId: targetMemberId,
+              });
+              console.log(
+                `🔄 Re-sent start_enrollment to ${this.enrollmentMode.deviceId} for retry`
+              );
+            } catch (cmdError) {
+              console.warn(`⚠️ Could not re-send start_enrollment on retry: ${cmdError.message}`);
+              // Don't stop enrollment — the user can manually retry from the UI
+            }
+          }
           return false;
         }
       } else if (status === 'enrollment_progress' || enrollmentStep) {
@@ -1157,7 +1174,7 @@ class BiometricIntegration {
     await this.deleteAllMemberFingerprints(memberId);
 
     // Activate server-side enrollment mode so webhook events can be processed
-    this.startEnrollmentMode(memberId, memberName);
+    this.startEnrollmentMode(memberId, memberName, deviceId);
 
     try {
       // Pass the member ID as the userId to the ESP32 device

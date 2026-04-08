@@ -196,6 +196,21 @@ exports.getMemberDetails = async (req, res) => {
         `;
     const latestInvoice = await pool.query(latestInvoiceQuery, [id]);
 
+    const pendingInvoicesQuery = `
+            SELECT 
+                i.id,
+                i.amount,
+                i.due_date,
+                i.status,
+                i.created_at,
+                mp.name as plan_name
+            FROM invoices i
+            LEFT JOIN membership_plans mp ON i.plan_id = mp.id
+            WHERE i.member_id = ? AND i.status = 'unpaid'
+            ORDER BY i.due_date ASC, i.id ASC
+        `;
+    const pendingInvoicesResult = await pool.query(pendingInvoicesQuery, [id]);
+
     // Get unused referral discount if referral system is enabled
     let unusedReferralDiscount = null;
     const referralSystemQuery = await pool.query('SELECT value FROM settings WHERE key = ?', [
@@ -227,6 +242,7 @@ exports.getMemberDetails = async (req, res) => {
       member,
       paymentHistory: paymentHistory.rows,
       latestInvoice: latestInvoice.rows[0] || null,
+      pendingInvoices: pendingInvoicesResult.rows || [],
       unusedReferralDiscount,
       referralSystemEnabled,
     });

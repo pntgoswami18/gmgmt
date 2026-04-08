@@ -1559,31 +1559,9 @@ const esp32Webhook = async (req, res) => {
 
         // Update enrollment status for failure
         try {
-          // Get member name for better user experience
-          let memberName = `Member ${canonicalMemberId || deviceUserId}`;
-          try {
-            const memberResult = await pool.query('SELECT name FROM members WHERE id = ?', [
-              canonicalMemberId,
-            ]);
-            if (memberResult.rows && memberResult.rows.length > 0) {
-              memberName = memberResult.rows[0].name;
-            }
-          } catch (nameError) {
-            console.warn('Could not fetch member name:', nameError.message);
-          }
-
-          // Send WebSocket update to frontend immediately
-          biometricIntegration.sendToWebSocketClients({
-            type: 'enrollment_complete',
-            status: 'failed',
-            memberId: canonicalMemberId,
-            memberName: memberName,
-            message: 'ESP32 enrollment failed',
-            deviceId: deviceId,
-            timestamp: timestamp,
-          });
-
-          // Also call handleEnrollmentData for consistency
+          // Delegate entirely to handleEnrollmentData — it manages retry counting,
+          // WebSocket messaging, re-commanding the ESP32, and stopping enrollment
+          // mode only when max attempts are exhausted.
           await biometricIntegration.handleEnrollmentData({
             userId: deviceUserId || null,
             memberId: canonicalMemberId || null,
@@ -1594,17 +1572,7 @@ const esp32Webhook = async (req, res) => {
             error: 'ESP32 enrollment failed',
           });
 
-          // IMPORTANT: Stop enrollment mode if it's active for this member
-          if (
-            biometricIntegration.enrollmentMode &&
-            biometricIntegration.enrollmentMode.active &&
-            biometricIntegration.enrollmentMode.memberId == canonicalMemberId
-          ) {
-            biometricIntegration.stopEnrollmentMode('failed');
-            console.log(`🛑 Enrollment mode stopped for member ${canonicalMemberId}`);
-          }
-
-          console.log(`❌ Enrollment failure status updated for member ${canonicalMemberId}`);
+          console.log(`❌ Enrollment failure handled for member ${canonicalMemberId}`);
         } catch (enrollmentError) {
           console.error('❌ Error updating enrollment failure status:', enrollmentError);
         }
