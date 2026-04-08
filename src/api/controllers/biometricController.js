@@ -10,6 +10,28 @@ const setBiometricIntegration = (integration) => {
   biometricIntegration = integration;
 };
 
+/** Single-line validation log (replaces separate request + result logs). */
+function logBiometricValidationOutcome({
+  biometricId,
+  deviceId,
+  authorized,
+  reason,
+  memberName,
+  detail,
+}) {
+  const parts = [
+    '🔐 validate:',
+    `biometricId=${biometricId}`,
+    `deviceId=${deviceId ?? '?'}`,
+    '->',
+    `authorized=${authorized}`,
+  ];
+  if (reason != null) parts.push(`reason=${reason}`);
+  if (memberName) parts.push(`name=${memberName}`);
+  if (detail) parts.push(detail);
+  console.log(parts.join(' '));
+}
+
 // Get biometric status for a member
 const getMemberBiometricStatus = async (req, res) => {
   try {
@@ -80,7 +102,10 @@ const startEnrollment = async (req, res) => {
       });
     }
 
-    // Start enrollment mode (allow re-enrollment so existing members can update their fingerprint)
+    // Delete all existing fingerprint slots for this member before re-enrolling,
+    // so stale slots don't accumulate on the device and cause misidentification.
+    await biometricIntegration.deleteAllMemberFingerprints(member.id);
+
     const enrollmentSession = biometricIntegration.startEnrollmentMode(member.id, member.name);
 
     res.json({
@@ -1110,21 +1135,13 @@ const esp32Webhook = async (req, res) => {
       });
     }
 
-    // Log the received data for debugging
-    console.log('📱 ESP32 webhook data received:', JSON.stringify(eventData, null, 2));
-    console.log('🔍 Request details:', {
-      method: req.method,
-      url: req.url,
-      headers: req.headers,
-      ip: req.ip,
-      userAgent: req.get('User-Agent'),
-    });
+    const debugWebhook = process.env.DEBUG_BIOMETRIC_WEBHOOK === '1';
+    const event = eventData.event;
 
-    // Extract common fields
+    // Extract common fields (used for routing and summary logging)
     const {
       deviceId,
       deviceType,
-      event,
       status,
       timestamp,
       userId,
@@ -1135,17 +1152,60 @@ const esp32Webhook = async (req, res) => {
       enrolled_prints,
     } = eventData;
 
-    // Log the extracted fields for debugging
-    console.log('🔍 Extracted fields:', {
-      deviceId,
-      deviceType,
-      event,
-      status,
-      timestamp,
-      userId,
-      memberId,
-      enrollmentStep: eventData.enrollmentStep,
-    });
+    // Verbose dumps only when DEBUG_BIOMETRIC_WEBHOOK=1
+    if (debugWebhook) {
+      console.debug('📱 ESP32 webhook [debug] body:', JSON.stringify(eventData, null, 2));
+      console.debug('📱 ESP32 webhook [debug] request:', {
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+      });
+    }
+
+    // Member name for logs: skip heartbeats/OTA (high-frequency or non-member events)
+    let memberNameForLog = null;
+    const skipMemberNameLookup = !event || event === 'heartbeat' || event === 'ota_update';
+    const rawMemberKey = eventData.userId ?? eventData.memberId;
+    if (!skipMemberNameLookup && rawMemberKey != null && String(rawMemberKey).trim() !== '') {
+      try {
+        const mid = parseInt(String(rawMemberKey).trim(), 10);
+        if (Number.isFinite(mid)) {
+          const nameRes = await pool.query('SELECT name FROM members WHERE id = ?', [mid]);
+          if (nameRes.rows?.[0]?.name) {
+            memberNameForLog = nameRes.rows[0].name;
+          }
+        }
+      } catch (_) {
+        /* ignore lookup errors for logging */
+      }
+    }
+
+    const clientIp = req.ip;
+    if (event === 'heartbeat') {
+      const fw = eventData.firmware_version != null ? eventData.firmware_version : '?';
+      const rssi = wifi_rssi != null ? wifi_rssi : '?';
+      const prints = eventData.enrolled_prints != null ? eventData.enrolled_prints : '?';
+      console.log(
+        `📱 ESP32 webhook: device=${deviceId || '?'} event=heartbeat status=${status ?? '?'} ip=${clientIp} fw=${fw} rssi=${rssi} prints=${prints}`
+      );
+    } else {
+      const parts = [
+        '📱 ESP32 webhook:',
+        `device=${deviceId || '?'}`,
+        `event=${event || '?'}`,
+        `status=${status != null ? status : '?'}`,
+        `ip=${clientIp}`,
+      ];
+      if (userId != null || memberId != null) {
+        parts.push(`user=${userId ?? memberId}`);
+      }
+      if (memberNameForLog) parts.push(`name=${memberNameForLog}`);
+      if (eventData.reason) parts.push(`reason=${eventData.reason}`);
+      if (eventData.enrollmentStep != null) parts.push(`step=${eventData.enrollmentStep}`);
+      console.log(parts.join(' '));
+    }
 
     if (!biometricIntegration) {
       console.warn('⚠️ Biometric integration not available, storing raw event');
@@ -1157,8 +1217,6 @@ const esp32Webhook = async (req, res) => {
         stored: false,
       });
     }
-
-    console.log(`✅ Biometric integration available, proceeding with event processing`);
 
     // Determine event type and handle accordingly
     let eventType = 'unknown';
@@ -1230,9 +1288,6 @@ const esp32Webhook = async (req, res) => {
           };
 
           await biometricIntegration.logBiometricEvent(biometricEvent);
-          console.log(
-            `✅ ESP32 heartbeat logged from device ${deviceId} (IP: ${deviceIP}, FW: ${firmwareVersion || 'unknown'})`
-          );
         } catch (error) {
           console.error(`❌ Error logging heartbeat from ${deviceId}:`, error);
         }
@@ -1289,8 +1344,6 @@ const esp32Webhook = async (req, res) => {
           console.error('Error updating OTA log:', otaErr);
         }
       }
-
-      console.log(`📦 OTA event from ${deviceId}: ${otaStatus}`);
     } else if (event === 'TimeLog') {
       if (status === 'authorized') {
         eventType = 'checkin'; // Could be checkin or checkout
@@ -1622,8 +1675,6 @@ const esp32Webhook = async (req, res) => {
 
     await biometricIntegration.logBiometricEvent(biometricEvent);
 
-    console.log(`✅ ESP32 event logged: ${eventType} from device ${deviceId}`);
-
     // Send acknowledgment
     res.json({
       success: true,
@@ -1646,9 +1697,13 @@ const validateBiometricId = async (req, res) => {
   try {
     const { biometricId, deviceId, timestamp } = req.body;
 
-    console.log(`🔍 Validation request: biometricId=${biometricId}, deviceId=${deviceId}`);
-
     if (!biometricId) {
+      logBiometricValidationOutcome({
+        biometricId: '(missing)',
+        deviceId,
+        authorized: false,
+        reason: 'missing_biometricId',
+      });
       return res.status(400).json({
         authorized: false,
         error: 'biometricId is required',
@@ -1691,7 +1746,23 @@ const validateBiometricId = async (req, res) => {
     const member = result.rows[0];
 
     if (!member) {
-      console.log(`❌ Member not found for biometric ID: ${biometricId}`);
+      let nameHint = '';
+      try {
+        const byId = await pool.query('SELECT id, name FROM members WHERE id = ?', [lookupId]);
+        const row = byId.rows?.[0];
+        if (row) {
+          nameHint = ` — member ${row.id} exists (${row.name}) but biometric_id does not match`;
+        }
+      } catch (_) {
+        /* ignore */
+      }
+      logBiometricValidationOutcome({
+        biometricId,
+        deviceId,
+        authorized: false,
+        reason: 'member_not_found',
+        detail: nameHint ? nameHint.replace(/^ — /, '').trim() : undefined,
+      });
       return res.json({
         authorized: false,
         memberId: null,
@@ -1701,7 +1772,13 @@ const validateBiometricId = async (req, res) => {
 
     // Check if member is active
     if (member.is_active !== 1) {
-      console.log(`❌ Member ${member.member_id} is inactive`);
+      logBiometricValidationOutcome({
+        biometricId,
+        deviceId,
+        authorized: false,
+        reason: 'member_inactive',
+        memberName: member.name,
+      });
       return res.json({
         authorized: false,
         memberId: member.member_id,
@@ -1752,7 +1829,13 @@ const validateBiometricId = async (req, res) => {
 
         // Check if current time is within allowed session windows
         if (!isInMorningSession && !isInEveningSession) {
-          console.log(`❌ Member ${member.member_id} attempted access outside session windows`);
+          logBiometricValidationOutcome({
+            biometricId,
+            deviceId,
+            authorized: false,
+            reason: 'outside_session_windows',
+            memberName: member.name,
+          });
           return res.json({
             authorized: false,
             memberId: member.member_id,
@@ -1796,9 +1879,14 @@ const validateBiometricId = async (req, res) => {
               const existingSession = existingWasMorning ? 'morning' : 'evening';
               const currentSession = currentIsMorning ? 'morning' : 'evening';
 
-              console.log(
-                `❌ Member ${member.member_id} cross-session access blocked: ${existingSession} → ${currentSession}`
-              );
+              logBiometricValidationOutcome({
+                biometricId,
+                deviceId,
+                authorized: false,
+                reason: 'cross_session_violation',
+                memberName: member.name,
+                detail: `${existingSession}->${currentSession}`,
+              });
               return res.json({
                 authorized: false,
                 memberId: member.member_id,
@@ -1831,16 +1919,9 @@ const validateBiometricId = async (req, res) => {
 
         // If grace period has expired, deny access
         if (paymentStatus.gracePeriodExpired) {
-          console.log(
-            `❌ Member ${member.member_id} payment grace period expired (${paymentStatus.daysOverdue} days overdue)`
-          );
-
           // Automatically deactivate the member
           try {
             await pool.query('UPDATE members SET is_active = 0 WHERE id = ?', [member.member_id]);
-            console.log(
-              `🔄 Automatically deactivated member ${member.member_id} due to expired grace period`
-            );
 
             // Trigger ESP32 cache invalidation
             try {
@@ -1863,6 +1944,14 @@ const validateBiometricId = async (req, res) => {
             console.error('❌ Error deactivating member:', deactivationError);
           }
 
+          logBiometricValidationOutcome({
+            biometricId,
+            deviceId,
+            authorized: false,
+            reason: 'payment_overdue_grace_expired',
+            memberName: member.name,
+            detail: `daysOverdue=${paymentStatus.daysOverdue} auto_deactivated=1`,
+          });
           return res.json({
             authorized: false,
             memberId: member.member_id,
@@ -1879,7 +1968,12 @@ const validateBiometricId = async (req, res) => {
 
     const isAuthorized = member.is_active === 1;
 
-    console.log(`✅ Validation result: memberId=${member.member_id}, authorized=${isAuthorized}`);
+    logBiometricValidationOutcome({
+      biometricId,
+      deviceId,
+      authorized: isAuthorized,
+      memberName: member.name,
+    });
 
     // Send minimal response for speed
     res.json({
@@ -2095,4 +2189,6 @@ module.exports = {
   // Slot management (called by deactivation / reactivation flows)
   deleteFingerprint: (memberId) => biometricIntegration?.deleteFingerprint(memberId),
   restoreFingerprint: (memberId) => biometricIntegration?.restoreFingerprint(memberId),
+  // Sync biometric data across all online devices
+  syncBiometricData,
 };
