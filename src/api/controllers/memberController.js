@@ -1,4 +1,4 @@
-const { pool } = require('../../config/sqlite');
+const { pool, runInTransaction } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
 const { uploadSingle } = require('../../config/multer');
 
@@ -64,6 +64,12 @@ exports.getAllMembers = async (req, res) => {
                 WHERE i.member_id = m.id 
                 AND date(p.payment_date) >= date('now','start of month')
             )`;
+    } else if (filter === 'everyone') {
+      // Active and inactive members (no is_active constraint)
+      filterCondition = '';
+    } else {
+      // Unknown filter: default to active-only (same as "all")
+      filterCondition = `AND is_active = 1`;
     }
 
     // Get total count
@@ -190,6 +196,21 @@ exports.getMemberDetails = async (req, res) => {
         `;
     const latestInvoice = await pool.query(latestInvoiceQuery, [id]);
 
+    const pendingInvoicesQuery = `
+            SELECT 
+                i.id,
+                i.amount,
+                i.due_date,
+                i.status,
+                i.created_at,
+                mp.name as plan_name
+            FROM invoices i
+            LEFT JOIN membership_plans mp ON i.plan_id = mp.id
+            WHERE i.member_id = ? AND i.status = 'unpaid'
+            ORDER BY i.due_date ASC, i.id ASC
+        `;
+    const pendingInvoicesResult = await pool.query(pendingInvoicesQuery, [id]);
+
     // Get unused referral discount if referral system is enabled
     let unusedReferralDiscount = null;
     const referralSystemQuery = await pool.query('SELECT value FROM settings WHERE key = ?', [
@@ -221,6 +242,7 @@ exports.getMemberDetails = async (req, res) => {
       member,
       paymentHistory: paymentHistory.rows,
       latestInvoice: latestInvoice.rows[0] || null,
+      pendingInvoices: pendingInvoicesResult.rows || [],
       unusedReferralDiscount,
       referralSystemEnabled,
     });
@@ -443,10 +465,25 @@ exports.deleteMember = async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
-    if (existing.rowCount === 0) {
+    if (!existing.rows?.length) {
       return res.status(404).json({ message: 'Member not found' });
     }
-    await pool.query('DELETE FROM members WHERE id = $1', [id]);
+    await runInTransaction(async () => {
+      // access_logs references members without ON DELETE CASCADE — remove first or FK fails
+      await pool.query('DELETE FROM access_logs WHERE member_id = $1', [id]);
+      // Legacy DBs may have security_logs / biometric_events without CASCADE
+      await pool.query('DELETE FROM security_logs WHERE member_id = $1', [id]);
+      await pool.query('DELETE FROM biometric_events WHERE member_id = $1', [id]);
+      await pool.query('DELETE FROM members WHERE id = $1', [id]);
+    });
+    try {
+      const { invalidateESP32Cache } = require('./biometricController');
+      if (invalidateESP32Cache) {
+        await invalidateESP32Cache();
+      }
+    } catch (cacheErr) {
+      console.error('ESP32 cache invalidation after member delete:', cacheErr);
+    }
     res.json({ message: 'Member deleted successfully' });
   } catch (err) {
     res.status(500).json({ message: err.message });

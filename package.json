@@ -4,6 +4,7 @@
   "description": "Gym Management Software",
   "main": "src/app.js",
   "scripts": {
+    "prepare": "husky",
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "biometric:start": "node src/startBiometricListener.js",
@@ -43,7 +44,16 @@
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.4.3",
     "nodemon": "^2.0.20",
     "prettier": "^3.8.1"
+  },
+  "lint-staged": {
+    "*.{js,cjs,mjs}": [
+      "node tools/check-node-syntax.cjs",
+      "prettier --write"
+    ],
+    "*.{jsx,json,css}": "prettier --write"
   }
 }

@@ -21,3 +21,4 @@ esp32_door_lock/config.h
 data/*
 .DS_Store
 data/data/gmgmt.sqlite
+esp32_door_lock/build/**

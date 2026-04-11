@@ -164,6 +164,8 @@ EMAIL_PASS=your_app_password
 ENABLE_BIOMETRIC=true
 BIOMETRIC_PORT=8080
 BIOMETRIC_HOST=0.0.0.0
+# Verbose ESP32 webhook logs (full JSON body + request headers). Omit in normal use.
+# DEBUG_BIOMETRIC_WEBHOOK=1
 ```
 
 **Note for Email Setup:** For Gmail, you'll need to use an "App Password" instead of your regular password. Enable 2-factor authentication and generate an app password in your Google Account settings.
@@ -323,6 +325,10 @@ The system implements a sophisticated hybrid caching strategy that dramatically 
 - **Database Optimization**: Performance indexes for fast member lookups
 - **Automatic Migration**: Existing installations automatically get cache optimization
 - **Cache Invalidation**: Server triggers immediate ESP32 cache refresh when member status changes via `/api/cache/invalidate` endpoint
+
+### Backend logs (biometric HTTP)
+
+Validation (`/api/biometric/validate`) and the ESP32 webhook (`/api/biometric/esp32-webhook`) emit one short line per request by default (device, event, outcome; member name when known). Heartbeats stay minimal. Set `DEBUG_BIOMETRIC_WEBHOOK=1` in `.env` to print full webhook bodies and headers again.
 
 ### What We Store
 

@@ -85,9 +85,6 @@ String device_id = "";
 // Mutex for thread-safe access to gym_server_ip/port (httpSendTask on Core 0 vs config saves on Core 1)
 SemaphoreHandle_t configMutex = NULL;
 
-// Mutex for thread-safe access to gym_server_ip/port (httpSendTask on Core 0 vs config saves on Core 1)
-SemaphoreHandle_t configMutex = NULL;
-
 // Pin Definitions
 #define FINGERPRINT_RX_PIN    16
 #define FINGERPRINT_TX_PIN    17
@@ -109,7 +106,6 @@ SemaphoreHandle_t configMutex = NULL;
 #define EMERGENCY_UNLOCK_TIME 5000    // 5 seconds for emergency unlock (longer than normal)
 
 // Cache Configuration
-#define MAX_CACHED_MEMBERS    500     // Maximum number of members to cache
 #define MAX_CACHED_MEMBERS    500     // Maximum number of members to cache
 #define CACHE_VALIDITY_TIME   300000  // 5 minutes cache validity
 #define CACHE_UPDATE_INTERVAL 300000  // 5 minutes between cache updates
@@ -201,43 +197,6 @@ bool accessDeniedActive = false;
 unsigned long accessDeniedStartTime = 0;
 #define ACCESS_DENIED_DISPLAY_TIME 2000  // 2s LED display for denied access
 
-// OTA update state
-bool otaPending = false;
-String otaFirmwareUrl = "";
-
-// FreeRTOS async HTTP queue
-#define HTTP_QUEUE_SIZE 10
-#define HTTP_MSG_MAX_LEN 1024
-QueueHandle_t httpQueue = NULL;
-TaskHandle_t httpTaskHandle = NULL;
-
-struct HttpMessage {
-  char jsonData[HTTP_MSG_MAX_LEN];
-};
-
-// Non-blocking tone queue
-#define MAX_TONE_QUEUE 8
-struct ToneEntry {
-  int frequency;        // 0 = silence (gap)
-  unsigned long duration;
-};
-ToneEntry toneQueue[MAX_TONE_QUEUE];
-int toneQueueHead = 0;
-int toneQueueTail = 0;
-int toneQueueCount = 0;
-bool toneActive = false;
-unsigned long toneStartTime = 0;
-unsigned long toneDuration = 0;
-
-// Non-blocking scan cooldown
-unsigned long lastScanTime = 0;
-#define SCAN_COOLDOWN 500  // 500ms between scans
-
-// Non-blocking access denied state
-bool accessDeniedActive = false;
-unsigned long accessDeniedStartTime = 0;
-#define ACCESS_DENIED_DISPLAY_TIME 2000  // 2s LED display for denied access
-
 // ==================== FUNCTION DECLARATIONS ====================
 void sendEnrollmentProgress(String progressStep, bool blocking = false);
 void sendEnrollmentData(int memberID, String status);
@@ -259,7 +218,6 @@ bool validateWithServer(int biometricId);
 void updateMemberCache();
 void handleCacheUpdate(String jsonResponse);
 int handleCacheUpdatePage(String jsonResponse, bool applyChanges = true);
-int handleCacheUpdatePage(String jsonResponse, bool applyChanges = true);
 void initializeCache();
 void clearCache();
 void updateCacheEntry(int biometricId, bool isAuthorized, int memberId);
@@ -280,21 +238,20 @@ void updateAccessDeniedState();
 void httpSendTask(void *parameter);
 bool enqueueHttpMessage(const String &jsonData);
 
-// OTA update functions
-void performOTAUpdate();
-void sendOTAStatusToServer(String status, String errorMsg = "");
-
-// Non-blocking tone functions
-void queueTone(int frequency, unsigned long duration);
-void updateToneState();
-void clearToneQueue();
-
-// Non-blocking access denied
-void updateAccessDeniedState();
-
-// FreeRTOS async HTTP task
-void httpSendTask(void *parameter);
-bool enqueueHttpMessage(const String &jsonData);
+// Web server handlers (referenced by initializeWebServer before their definitions)
+void initializeWebServer();
+void handleRoot();
+void handleStatus();
+void handleUnlock();
+void handleLock();
+void handleWebEnroll();
+void handleResyncTime();
+void handleRemoteCommand();
+void handleConfig();
+void handleConfigSave();
+void handleApiConfig();
+void handleApiConfigSave();
+void handleCacheInvalidation();
 
 // ==================== TIME FUNCTIONS ====================
 void waitForNTPTime() {
@@ -1100,10 +1057,6 @@ void handleEnrollment() {
     queueTone(300, 1000);
     accessDeniedActive = true;
     accessDeniedStartTime = millis();
-    // Error feedback (non-blocking -- LED reset via accessDenied state)
-    queueTone(300, 1000);
-    accessDeniedActive = true;
-    accessDeniedStartTime = millis();
     
     // Send enrollment failure status instead of just progress
     sendEnrollmentData(enrollmentID, "enrollment_failed");
@@ -1120,12 +1073,9 @@ int enrollFingerprint() {
   int p = -1;
   const int MAX_RETRIES = 3;
   int retries = 0;
-  const int MAX_RETRIES = 3;
-  int retries = 0;
   
   Serial.println("Place finger on sensor...");
   unsigned long startTime = millis();
-  const unsigned long ENROLLMENT_TIMEOUT = 30000;
   const unsigned long ENROLLMENT_TIMEOUT = 30000;
   
   sendEnrollmentProgress("scanning_first_finger");
@@ -1143,10 +1093,8 @@ int enrollFingerprint() {
         Serial.println("Image taken");
         sendEnrollmentProgress("first_finger_captured");
         retries = 0;
-        retries = 0;
         break;
       case FINGERPRINT_NOFINGER:
-        delay(50);
         delay(50);
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
@@ -1175,12 +1123,6 @@ int enrollFingerprint() {
     delay(100);
     p = finger.image2Tz(1);
   }
-  while (p != FINGERPRINT_OK && retries < MAX_RETRIES) {
-    retries++;
-    Serial.printf("Template creation retry %d/%d\n", retries, MAX_RETRIES);
-    delay(100);
-    p = finger.image2Tz(1);
-  }
   if (p != FINGERPRINT_OK) {
     Serial.println("Template creation failed");
     sendEnrollmentProgress("template_creation_failed", true);
@@ -1193,7 +1135,6 @@ int enrollFingerprint() {
   
   p = 0;
   startTime = millis();
-  startTime = millis();
   while (p != FINGERPRINT_NOFINGER) {
     if (millis() - startTime > ENROLLMENT_TIMEOUT) {
       Serial.println("Enrollment timeout - finger not removed");
@@ -1203,13 +1144,10 @@ int enrollFingerprint() {
     
     p = finger.getImage();
     delay(50);
-    delay(50);
   }
   
   Serial.println("Place same finger again...");
   sendEnrollmentProgress("scanning_second_finger");
-  startTime = millis();
-  retries = 0;
   startTime = millis();
   retries = 0;
   
@@ -1226,10 +1164,8 @@ int enrollFingerprint() {
         Serial.println("Image taken");
         sendEnrollmentProgress("second_finger_captured");
         retries = 0;
-        retries = 0;
         break;
       case FINGERPRINT_NOFINGER:
-        delay(50);
         delay(50);
         continue;
       case FINGERPRINT_PACKETRECIEVEERR:
@@ -1252,12 +1188,6 @@ int enrollFingerprint() {
   // Convert second image (with retry)
   retries = 0;
   p = finger.image2Tz(2);
-  while (p != FINGERPRINT_OK && retries < MAX_RETRIES) {
-    retries++;
-    Serial.printf("Second template creation retry %d/%d\n", retries, MAX_RETRIES);
-    delay(100);
-    p = finger.image2Tz(2);
-  }
   while (p != FINGERPRINT_OK && retries < MAX_RETRIES) {
     retries++;
     Serial.printf("Second template creation retry %d/%d\n", retries, MAX_RETRIES);
@@ -1297,7 +1227,6 @@ int enrollFingerprint() {
     }
     sendEnrollmentProgress("model_stored");
     return 1;
-    return 1;
   } else {
     Serial.println("Storage failed");
     sendEnrollmentProgress("storage_failed", true);
@@ -1310,12 +1239,8 @@ int getNextAvailableID() {
     uint8_t p = finger.loadModel(i);
     if (p != FINGERPRINT_OK) {
       return i;  // Slot is not occupied
-    if (p != FINGERPRINT_OK) {
-      return i;  // Slot is not occupied
     }
   }
-  Serial.println("⚠️ No available fingerprint slots!");
-  return -1;
   Serial.println("⚠️ No available fingerprint slots!");
   return -1;
 }
@@ -1577,51 +1502,6 @@ void performOTAUpdate() {
   otaFirmwareUrl = "";
 }
 
-void performOTAUpdate() {
-  Serial.println("========================================");
-  Serial.println("📦 Starting OTA firmware update...");
-  Serial.printf("   URL: %s\n", otaFirmwareUrl.c_str());
-  Serial.printf("   Current version: %s\n", FIRMWARE_VERSION);
-  Serial.println("========================================");
-  
-  sendOTAStatusToServer("ota_started");
-  
-  setStatusLED("enrollment");
-  
-  WiFiClient wifiClient;
-  httpUpdate.setLedPin(BLUE_LED_PIN, LOW);
-  httpUpdate.rebootOnUpdate(false);
-  
-  t_httpUpdate_return result = httpUpdate.update(wifiClient, otaFirmwareUrl);
-  
-  switch (result) {
-    case HTTP_UPDATE_FAILED:
-      Serial.printf("❌ OTA failed: (%d) %s\n",
-                    httpUpdate.getLastError(),
-                    httpUpdate.getLastErrorString().c_str());
-      sendOTAStatusToServer("ota_failed", httpUpdate.getLastErrorString().c_str());
-      setStatusLED("error");
-      delay(3000);
-      setStatusLED("ready");
-      break;
-      
-    case HTTP_UPDATE_NO_UPDATES:
-      Serial.println("ℹ️ OTA: No update available (binary identical)");
-      sendOTAStatusToServer("ota_no_update");
-      setStatusLED("ready");
-      break;
-      
-    case HTTP_UPDATE_OK:
-      Serial.println("✅ OTA update successful! Rebooting...");
-      sendOTAStatusToServer("ota_success");
-      delay(1000);
-      ESP.restart();
-      break;
-  }
-  
-  otaFirmwareUrl = "";
-}
-
 void sendHeartbeat() {
   if (WiFi.status() != WL_CONNECTED) {
     return;
@@ -1637,7 +1517,6 @@ void sendHeartbeat() {
   }
   
   StaticJsonDocument<300> doc;
-  StaticJsonDocument<300> doc;
   doc["deviceId"] = device_id;
   doc["deviceType"] = "esp32_door_lock";
   doc["status"] = deviceStatus;
@@ -1649,7 +1528,6 @@ void sendHeartbeat() {
   doc["free_heap"] = ESP.getFreeHeap();
   doc["enrolled_prints"] = finger.templateCount;
   doc["ip_address"] = WiFi.localIP().toString();
-  doc["firmware_version"] = FIRMWARE_VERSION;
   doc["firmware_version"] = FIRMWARE_VERSION;
   
   String jsonString;
@@ -1687,135 +1565,7 @@ void sendToServer(String jsonData) {
 }
 
 // Truly non-blocking: enqueue message for the FreeRTOS HTTP task on Core 0
-// Truly non-blocking: enqueue message for the FreeRTOS HTTP task on Core 0
 void sendToServerAsync(String jsonData) {
-  if (!enqueueHttpMessage(jsonData)) {
-    Serial.println("⚠️ Async HTTP queue full or unavailable, sending synchronously");
-    sendToServer(jsonData);
-  }
-}
-
-bool enqueueHttpMessage(const String &jsonData) {
-  if (httpQueue == NULL) return false;
-  
-  HttpMessage msg;
-  int len = jsonData.length();
-  if (len >= HTTP_MSG_MAX_LEN) {
-    Serial.printf("❌ HTTP message too long (%d bytes), dropped\n", len);
-    return false;
-  }
-  memcpy(msg.jsonData, jsonData.c_str(), len);
-  msg.jsonData[len] = '\0';
-  
-  return xQueueSend(httpQueue, &msg, 0) == pdTRUE;
-}
-
-// FreeRTOS task running on Core 0 -- processes queued HTTP messages
-void httpSendTask(void *parameter) {
-  HttpMessage msg;
-  HTTPClient asyncHttp;
-  
-  for (;;) {
-    if (xQueueReceive(httpQueue, &msg, portMAX_DELAY) == pdTRUE) {
-      if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("⚠️ WiFi not connected - async data dropped");
-        continue;
-      }
-      
-      // Copy config under mutex (Arduino String is not thread-safe for concurrent read/write)
-      String serverIp;
-      int serverPort = 8080;
-      if (configMutex != NULL && xSemaphoreTake(configMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        serverIp = gym_server_ip;
-        serverPort = gym_server_port;
-        xSemaphoreGive(configMutex);
-      }
-      if (serverIp.length() == 0) {
-        Serial.println("⚠️ No server IP - async data dropped");
-        continue;
-      }
-      String url = String("http://") + serverIp + ":" + serverPort + "/api/biometric/esp32-webhook";
-      
-      asyncHttp.begin(url);
-      asyncHttp.addHeader("Content-Type", "application/json");
-      asyncHttp.addHeader("User-Agent", "ESP32-DoorLock/1.0");
-      asyncHttp.setTimeout(3000);
-      
-      int httpResponseCode = asyncHttp.POST(String(msg.jsonData));
-      
-      if (httpResponseCode > 0) {
-        asyncHttp.getString();
-        if (httpResponseCode != 200) {
-          Serial.printf("Async HTTP response: %d\n", httpResponseCode);
-        }
-      } else {
-        Serial.printf("Async HTTP failed: %s\n", asyncHttp.errorToString(httpResponseCode).c_str());
-      }
-      
-      asyncHttp.end();
-    }
-  }
-}
-
-// ==================== NON-BLOCKING TONE SYSTEM ====================
-void queueTone(int frequency, unsigned long duration) {
-  if (toneQueueCount >= MAX_TONE_QUEUE) {
-    Serial.println("⚠️ Tone queue full, tone dropped");
-    return;
-  }
-  toneQueue[toneQueueTail] = {frequency, duration};
-  toneQueueTail = (toneQueueTail + 1) % MAX_TONE_QUEUE;
-  toneQueueCount++;
-}
-
-void clearToneQueue() {
-  if (toneActive) {
-    ledcWriteTone(BUZZER_PIN, 0);
-    ledcDetach(BUZZER_PIN);
-    toneActive = false;
-  }
-  toneQueueHead = 0;
-  toneQueueTail = 0;
-  toneQueueCount = 0;
-}
-
-void updateToneState() {
-  if (toneActive) {
-    if (millis() - toneStartTime >= toneDuration) {
-      ledcWriteTone(BUZZER_PIN, 0);
-      ledcDetach(BUZZER_PIN);
-      toneActive = false;
-    } else {
-      return;
-    }
-  }
-  
-  if (toneQueueCount > 0) {
-    ToneEntry entry = toneQueue[toneQueueHead];
-    toneQueueHead = (toneQueueHead + 1) % MAX_TONE_QUEUE;
-    toneQueueCount--;
-    
-    if (entry.frequency > 0) {
-      #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-        ledcAttach(BUZZER_PIN, entry.frequency, 8);
-        ledcWriteTone(BUZZER_PIN, entry.frequency);
-      #else
-        ledcSetup(0, entry.frequency, 8);
-        ledcAttachPin(BUZZER_PIN, 0);
-        ledcWrite(0, 128);
-      #endif
-    }
-    toneActive = true;
-    toneStartTime = millis();
-    toneDuration = entry.duration;
-  }
-}
-
-void updateAccessDeniedState() {
-  if (accessDeniedActive && millis() - accessDeniedStartTime >= ACCESS_DENIED_DISPLAY_TIME) {
-    setStatusLED("ready");
-    accessDeniedActive = false;
-  }
   if (!enqueueHttpMessage(jsonData)) {
     Serial.println("⚠️ Async HTTP queue full or unavailable, sending synchronously");
     sendToServer(jsonData);
@@ -1984,9 +1734,7 @@ void setStatusLED(String status) {
     digitalWrite(RED_LED_PIN, HIGH);
   } else if (status == "enrollment") {
     digitalWrite(BLUE_LED_PIN, HIGH); // Steady blue for enrollment mode (non-blocking)
-    digitalWrite(BLUE_LED_PIN, HIGH); // Steady blue for enrollment mode (non-blocking)
   } else if (status == "error") {
-    digitalWrite(RED_LED_PIN, HIGH);  // Steady red for error (non-blocking)
     digitalWrite(RED_LED_PIN, HIGH);  // Steady red for error (non-blocking)
   }
 }
@@ -2179,7 +1927,6 @@ void handleStatus() {
   doc["uptime"] = millis();
   doc["enrollment_mode"] = enrollmentMode;
   doc["firmware_version"] = FIRMWARE_VERSION;
-  doc["firmware_version"] = FIRMWARE_VERSION;
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -2241,10 +1988,6 @@ void handleRemoteCommand() {
     command = doc["action"].as<String>();
   }
 
-  if (command.length() == 0 || command == "null") {
-    command = doc["action"].as<String>();
-  }
-
   String deviceId = doc["deviceId"].as<String>();
   if (deviceId.length() == 0 || deviceId == "null") {
     deviceId = doc["device_id"].as<String>();
@@ -2253,18 +1996,7 @@ void handleRemoteCommand() {
 
   String localDeviceId = device_id;
   localDeviceId.trim();
-  if (deviceId.length() == 0 || deviceId == "null") {
-    deviceId = doc["device_id"].as<String>();
-  }
-  deviceId.trim();
 
-  String localDeviceId = device_id;
-  localDeviceId.trim();
-  
-  // Verify this command is for our device (case-insensitive for robustness)
-  if (!deviceId.isEmpty() && !deviceId.equalsIgnoreCase(localDeviceId)) {
-    Serial.printf("⚠️  Remote command rejected - target device mismatch (target: %s, local: %s)\n",
-                  deviceId.c_str(), localDeviceId.c_str());
   // Verify this command is for our device (case-insensitive for robustness)
   if (!deviceId.isEmpty() && !deviceId.equalsIgnoreCase(localDeviceId)) {
     Serial.printf("⚠️  Remote command rejected - target device mismatch (target: %s, local: %s)\n",
@@ -2303,7 +2035,6 @@ void handleRemoteCommand() {
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Enrollment mode started\"}");
     
   } else if (command == "unlock_door" || command == "unlock") {
-  } else if (command == "unlock_door" || command == "unlock") {
     Serial.printf("📡 Current relay state before remote unlock: %s (PIN %d)\n", 
                   digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW", RELAY_PIN);
     
@@ -2315,13 +2046,7 @@ void handleRemoteCommand() {
     
     // Perform unlock FIRST (before HTTP response) to ensure relay is actuated immediately.
     // Sending the response first can allow WebServer internals to delay/affect the handler.
-    // Perform unlock FIRST (before HTTP response) to ensure relay is actuated immediately.
-    // Sending the response first can allow WebServer internals to delay/affect the handler.
     emergencyUnlockWithReason(reason);
-    
-    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Door unlocked\"}");
-    
-    webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Door unlocked\"}");
     
     webServer.send(200, "application/json", "{\"success\":true,\"message\":\"Door unlocked\"}");
     
@@ -2485,9 +2210,7 @@ void handleConfigSave() {
   
   if (action == "reset") {
     if (configMutex != NULL) xSemaphoreTake(configMutex, pdMS_TO_TICKS(500));
-    if (configMutex != NULL) xSemaphoreTake(configMutex, pdMS_TO_TICKS(500));
     resetConfiguration();
-    if (configMutex != NULL) xSemaphoreGive(configMutex);
     if (configMutex != NULL) xSemaphoreGive(configMutex);
     webServer.send(200, "text/html", 
       "<html><body><h2>Configuration Reset</h2>"
@@ -2522,14 +2245,6 @@ void handleConfigSave() {
     needsRestart = true;
   }
   
-  if (configMutex == NULL || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-    device_id = new_device_id;
-    gym_server_ip = new_server_ip;
-    gym_server_port = new_server_port;
-    if (configMutex != NULL) xSemaphoreGive(configMutex);
-  } else {
-    Serial.println("⚠️ Config mutex timeout - skipping in-memory update (Preferences already saved)");
-  }
   if (configMutex == NULL || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
     device_id = new_device_id;
     gym_server_ip = new_server_ip;
@@ -2621,31 +2336,6 @@ void handleApiConfigSave() {
     }
   }
   
-  // Update server settings if provided (mutex protects gym_server_ip/port from httpSendTask on Core 0)
-  if (configMutex == NULL || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-    if (doc.containsKey("device_id")) {
-      device_id = doc["device_id"].as<String>();
-      configChanged = true;
-    }
-    if (doc.containsKey("gym_server_ip")) {
-      String new_ip = doc["gym_server_ip"].as<String>();
-      if (new_ip != gym_server_ip) {
-        gym_server_ip = new_ip;
-        needsRestart = true;
-        configChanged = true;
-      }
-    }
-    if (doc.containsKey("gym_server_port")) {
-      int new_port = doc["gym_server_port"].as<int>();
-      if (new_port != gym_server_port) {
-        gym_server_port = new_port;
-        needsRestart = true;
-        configChanged = true;
-      }
-    }
-    if (configMutex != NULL) xSemaphoreGive(configMutex);
-  } else {
-    Serial.println("⚠️ Config mutex timeout - skipping in-memory update (Preferences already saved)");
   // Update server settings if provided (mutex protects gym_server_ip/port from httpSendTask on Core 0)
   if (configMutex == NULL || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
     if (doc.containsKey("device_id")) {
@@ -2808,19 +2498,6 @@ bool validateWithServer(int biometricId) {
   }
   String url = String("http://") + serverIp + ":" + serverPort + "/api/biometric/validate";
 
-  // Copy config under mutex before building URL (gym_server_ip/port also written by web handlers)
-  String serverIp;
-  int serverPort = 8080;
-  if (configMutex != NULL && xSemaphoreTake(configMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-    serverIp = gym_server_ip;
-    serverPort = gym_server_port;
-    xSemaphoreGive(configMutex);
-  } else {
-    serverIp = gym_server_ip;   // fallback: tolerate possible torn read on rare config save
-    serverPort = gym_server_port;
-  }
-  String url = String("http://") + serverIp + ":" + serverPort + "/api/biometric/validate";
-
   StaticJsonDocument<200> doc;
   doc["biometricId"] = biometricId;
   doc["deviceId"] = device_id;
@@ -2844,8 +2521,6 @@ bool validateWithServer(int biometricId) {
     
     DeserializationError parseError = deserializeJson(responseDoc, response);
     if (!parseError) {
-    DeserializationError parseError = deserializeJson(responseDoc, response);
-    if (!parseError) {
       bool isAuthorized = responseDoc["authorized"];
       int memberId = responseDoc["memberId"] | 0;
       
@@ -2858,7 +2533,6 @@ bool validateWithServer(int biometricId) {
       http.end();
       return isAuthorized;
     } else {
-      Serial.printf("❌ Failed to parse server validation response: %s\n", parseError.c_str());
       Serial.printf("❌ Failed to parse server validation response: %s\n", parseError.c_str());
     }
   } else {
@@ -2982,133 +2656,10 @@ int handleCacheUpdatePage(String jsonResponse, bool applyChanges) {
   DynamicJsonDocument doc(docSize);
   
   Serial.printf("📋 Received cache page: %d bytes\n", jsonResponse.length());
-  Serial.println("🔄 Updating member cache from server (paginated)...");
-  // Do NOT clear cache here - only clear when we successfully receive valid data.
-  // If the server is unreachable, we keep the existing cache so the door remains
-  // operable during temporary outages.
-  
-  int page = 1;
-  const int pageSize = 100;
-  bool hasMore = true;
-  
-  while (hasMore && cacheSize < MAX_CACHED_MEMBERS) {
-    String url = String("http://") + gym_server_ip + ":" + gym_server_port + "/api/biometric/cache-update";
-    
-    StaticJsonDocument<256> doc;
-    doc["deviceId"] = device_id;
-    doc["event"] = "cache_update";
-    doc["timestamp"] = getISO8601Time();
-    doc["page"] = page;
-    doc["pageSize"] = pageSize;
-    
-    String jsonString;
-    serializeJson(doc, jsonString);
-    
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-    http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
-    http.setTimeout(HTTP_TIMEOUT);
-    
-    int httpResponseCode = http.POST(jsonString);
-    
-    if (httpResponseCode == 200) {
-      String response = http.getString();
-      int added = -1;
-      if (page == 1) {
-        // Validate page 1 first. Only clear/apply after successful parsing so
-        // existing cache is preserved when the first page is malformed.
-        int firstPageValidation = handleCacheUpdatePage(response, false);
-        if (firstPageValidation < 0) {
-          Serial.println("❌ First cache page invalid - keeping existing cache");
-          hasMore = false;
-        } else {
-          clearCache();
-          added = handleCacheUpdatePage(response, true);
-        }
-      } else {
-        added = handleCacheUpdatePage(response, true);
-      }
-
-      if (added < 0) {
-        hasMore = false;
-        http.end();
-        continue;
-      }
-      
-      if (added < pageSize) {
-        hasMore = false;
-      } else {
-        page++;
-      }
-    } else {
-      Serial.printf("❌ Cache update page %d failed with HTTP %d\n", page, httpResponseCode);
-      hasMore = false;
-    }
-    
-    http.end();
-  }
-  
-  Serial.printf("✅ Paginated cache update complete - %d members cached across %d page(s)\n", cacheSize, page);
-}
-
-// Returns count of members added from this page (-1 on error)
-int handleCacheUpdatePage(String jsonResponse, bool applyChanges) {
-  const size_t MAX_CACHE_PAGE_DOC_SIZE = 32768; // 32KB cap to prevent heap fragmentation
-  size_t docSize = min((size_t)(jsonResponse.length() + 1024), MAX_CACHE_PAGE_DOC_SIZE);
-  DynamicJsonDocument doc(docSize);
-  
-  Serial.printf("📋 Received cache page: %d bytes\n", jsonResponse.length());
   
   DeserializationError error = deserializeJson(doc, jsonResponse);
   
   if (error) {
-    Serial.printf("❌ Failed to parse cache response: %s\n", error.c_str());
-    return -1;
-  }
-  
-  if (!doc.is<JsonObject>()) {
-    Serial.println("❌ Response is not a valid JSON object");
-    return -1;
-  }
-  
-  if (!doc.containsKey("members") || !doc["members"].is<JsonArray>()) {
-    Serial.println("⚠️ No member data in cache page");
-    return 0;
-  }
-  
-  JsonArray members = doc["members"];
-  int added = 0;
-  
-  Serial.printf("📋 Processing %d members from page\n", members.size());
-  
-  for (JsonObject member : members) {
-    if (applyChanges && cacheSize >= MAX_CACHED_MEMBERS) {
-      Serial.println("⚠️ Cache full, stopping");
-      break;
-    }
-    if (applyChanges) {
-      memberCache[cacheSize].biometricId = member["biometricId"];
-      memberCache[cacheSize].isAuthorized = member["authorized"];
-      memberCache[cacheSize].lastUpdate = millis();
-      memberCache[cacheSize].expiryTime = millis() + CACHE_VALIDITY_TIME;
-      memberCache[cacheSize].memberId = member["memberId"];
-      cacheSize++;
-    }
-    added++;
-  }
-  
-  if (applyChanges) {
-    Serial.printf("✅ Page processed - %d members added (total cached: %d)\n", added, cacheSize);
-  } else {
-    Serial.printf("✅ Cache page validated - %d members parsed\n", added);
-  }
-  return added;
-}
-
-// Legacy single-call handler (used by cache invalidation endpoint)
-void handleCacheUpdate(String jsonResponse) {
-  clearCache();
-  handleCacheUpdatePage(jsonResponse);
     Serial.printf("❌ Failed to parse cache response: %s\n", error.c_str());
     return -1;
   }

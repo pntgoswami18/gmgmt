@@ -22,7 +22,8 @@ const {
   esp32Webhook,
   // Hybrid cache endpoints
   validateBiometricId,
-  updateMemberCache
+  updateMemberCache,
+  syncBiometricData,
 } = require('../controllers/biometricController');
 
 // System status and info
@@ -58,5 +59,8 @@ router.post('/esp32-webhook', esp32Webhook);
 // Hybrid cache endpoints for fast validation
 router.post('/validate', validateBiometricId);
 router.post('/cache-update', updateMemberCache);
+
+// Biometric data sync — cleans stale slots across all online devices
+router.post('/sync', syncBiometricData);
 
 module.exports = router;
