@@ -370,8 +370,8 @@ const getEnrollmentStatus = async (req, res) => {
 const getBiometricEvents = async (req, res) => {
   try {
     const { memberId, page = 1, limit = 50, search = '' } = req.query;
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
     const offset = (pageNum - 1) * limitNum;
 
     let query = `
@@ -389,7 +389,7 @@ const getBiometricEvents = async (req, res) => {
 
     // Add search condition
     if (search.trim()) {
-      query += ' AND (m.name ILIKE ? OR be.event_type ILIKE ? OR be.message ILIKE ?)';
+      query += ' AND (m.name LIKE ? OR be.event_type LIKE ? OR be.message LIKE ?)';
       const searchTerm = `%${search.trim()}%`;
       params.push(searchTerm, searchTerm, searchTerm);
     }
@@ -405,7 +405,7 @@ const getBiometricEvents = async (req, res) => {
     }
 
     if (search.trim()) {
-      countQuery += ' AND (m.name ILIKE ? OR be.event_type ILIKE ? OR be.message ILIKE ?)';
+      countQuery += ' AND (m.name LIKE ? OR be.event_type LIKE ? OR be.message LIKE ?)';
       const searchTerm = `%${search.trim()}%`;
       countParams.push(searchTerm, searchTerm, searchTerm);
     }
@@ -538,23 +538,23 @@ const getSystemStatus = async (req, res) => {
 const getMembersWithoutBiometric = async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
     const offset = (pageNum - 1) * limitNum;
 
     // Build search condition
     let searchCondition = '';
     let searchParams = [];
     if (search.trim()) {
-      searchCondition = `AND (name ILIKE $${searchParams.length + 1} OR email ILIKE $${searchParams.length + 2} OR phone ILIKE $${searchParams.length + 3})`;
+      searchCondition = `AND (name LIKE $${searchParams.length + 1} OR email LIKE $${searchParams.length + 2} OR phone LIKE $${searchParams.length + 3})`;
       const searchTerm = `%${search.trim()}%`;
       searchParams.push(searchTerm, searchTerm, searchTerm);
     }
 
     // Get total count
     const countQuery = `
-      SELECT COUNT(*) as total 
-      FROM members 
+      SELECT COUNT(*) as total
+      FROM members
       WHERE (biometric_id IS NULL OR biometric_id = '') AND is_active = 1 ${searchCondition}
     `;
     const countResult = await pool.query(countQuery, searchParams);
@@ -597,23 +597,23 @@ const getMembersWithoutBiometric = async (req, res) => {
 const getMembersWithBiometric = async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
     const offset = (pageNum - 1) * limitNum;
 
     // Build search condition
     let searchCondition = '';
     let searchParams = [];
     if (search.trim()) {
-      searchCondition = `AND (name ILIKE $${searchParams.length + 1} OR email ILIKE $${searchParams.length + 2} OR phone ILIKE $${searchParams.length + 3})`;
+      searchCondition = `AND (name LIKE $${searchParams.length + 1} OR email LIKE $${searchParams.length + 2} OR phone LIKE $${searchParams.length + 3})`;
       const searchTerm = `%${search.trim()}%`;
       searchParams.push(searchTerm, searchTerm, searchTerm);
     }
 
     // Get total count
     const countQuery = `
-      SELECT COUNT(*) as total 
-      FROM members 
+      SELECT COUNT(*) as total
+      FROM members
       WHERE biometric_id IS NOT NULL AND biometric_id != '' AND is_active = 1 ${searchCondition}
     `;
     const countResult = await pool.query(countQuery, searchParams);
@@ -666,6 +666,19 @@ const testConnection = async (req, res) => {
 
     // If host and port are provided, test specific ESP32 device connectivity
     if (host && port) {
+      // Validate port is a usable integer
+      const portNum = parseInt(port, 10);
+      if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535) {
+        return res.status(400).json({ success: false, message: 'Invalid port — must be 1–65535' });
+      }
+
+      // Reject loopback, link-local, and cloud metadata ranges to prevent SSRF
+      const BLOCKED_PREFIXES = ['127.', '0.', '169.254.', '::1', '[::1]'];
+      const hostStr = String(host || '');
+      if (!hostStr || BLOCKED_PREFIXES.some((p) => hostStr.startsWith(p))) {
+        return res.status(400).json({ success: false, message: 'Invalid host' });
+      }
+
       const net = require('net');
 
       return new Promise((resolve) => {
@@ -717,7 +730,7 @@ const testConnection = async (req, res) => {
           resolve();
         });
 
-        socket.connect(port, host);
+        socket.connect(portNum, host);
       });
     }
 
@@ -908,7 +921,6 @@ const getMemberBiometricDetails = async (req, res) => {
 
     // Get member details with all biometric fields
     const memberResult = await pool.query(
-      'SELECT id, name, email, phone, biometric_id FROM members WHERE id = ?',
       'SELECT id, name, email, phone, biometric_id FROM members WHERE id = ?',
       [memberId]
     );
@@ -1977,26 +1989,29 @@ const updateMemberCache = async (req, res) => {
     }
 
     const usePagination = page && pageSize;
-    const limit = usePagination ? parseInt(pageSize) : null;
-    const offset = usePagination ? (parseInt(page) - 1) * parseInt(pageSize) : 0;
+    const clampedLimit = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 50));
+    const clampedPage = Math.max(1, parseInt(page, 10) || 1);
+    const clampedOffset = usePagination ? (clampedPage - 1) * clampedLimit : 0;
 
     let query = `
-      SELECT 
+      SELECT
         m.id as member_id,
         m.biometric_id,
         m.is_active
       FROM members m
-      WHERE m.biometric_id IS NOT NULL 
+      WHERE m.biometric_id IS NOT NULL
         AND m.biometric_id != ''
         AND m.biometric_id != '0'
       ORDER BY m.id
     `;
 
+    const queryParams = [];
     if (usePagination) {
-      query += ` LIMIT ${limit} OFFSET ${offset}`;
+      query += ` LIMIT ? OFFSET ?`;
+      queryParams.push(clampedLimit, clampedOffset);
     }
 
-    const result = await pool.query(query);
+    const result = await pool.query(query, queryParams);
     const members = result.rows;
 
     const cacheMembers = members.map((member) => ({
@@ -2013,8 +2028,8 @@ const updateMemberCache = async (req, res) => {
     };
 
     if (usePagination) {
-      response.page = parseInt(page);
-      response.pageSize = parseInt(pageSize);
+      response.page = clampedPage;
+      response.pageSize = clampedLimit;
     }
 
     console.log(
@@ -2062,6 +2077,35 @@ const invalidateESP32Cache = async () => {
         console.log(
           `🔄 Invalidating cache for device: ${device.device_name} (${device.device_id}) at IP: ${device.ip_address}`
         );
+
+        // SSRF guard — block requests to loopback, link-local, and other internal addresses
+        const SSRF_BLOCKED_PREFIXES = ['127.', '0.', '169.254.', '::1', '[::1]'];
+        // RFC-1918 private ranges (10.*, 172.16-31.*, 192.168.*) are intentionally not blocked —
+        // ESP32 devices live on the LAN, so their IPs are in those ranges by design.
+        // Loopback and link-local (including AWS/GCP metadata endpoint) are blocked above.
+        const rawIp = String(device.ip_address || '');
+        if (!rawIp || SSRF_BLOCKED_PREFIXES.some((p) => rawIp.startsWith(p))) {
+          console.warn(
+            `[invalidateESP32Cache] Skipping device ${device.device_id} — blocked IP: ${rawIp}`
+          );
+          continue;
+        }
+        // Parse to catch user@host credential bypass (e.g. "10.0.0.1@127.0.0.1" → hostname "127.0.0.1")
+        let resolvedHostname;
+        try {
+          resolvedHostname = new URL('http://' + rawIp).hostname;
+        } catch (_) {
+          console.warn(
+            `[invalidateESP32Cache] Skipping device ${device.device_id} — malformed IP: ${rawIp}`
+          );
+          continue;
+        }
+        if (SSRF_BLOCKED_PREFIXES.some((p) => resolvedHostname.startsWith(p))) {
+          console.warn(
+            `[invalidateESP32Cache] Skipping device ${device.device_id} — blocked resolved host: ${resolvedHostname}`
+          );
+          continue;
+        }
 
         // Send cache invalidation request to ESP32 device (using built-in http, no axios dependency)
         const deviceUrl = `http://${device.ip_address}/api/cache/invalidate`;

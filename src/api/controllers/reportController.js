@@ -139,16 +139,23 @@ exports.getSummaryStats = async (req, res) => {
 exports.getFinancialSummary = async (req, res) => {
   try {
     const { startDate, endDate, page = 1, limit = 10, table = 'all', search = '' } = req.query;
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+    if (startDate && !ISO_DATE.test(startDate)) {
+      return res.status(400).json({ message: 'Invalid startDate — expected YYYY-MM-DD' });
+    }
+    if (endDate && !ISO_DATE.test(endDate)) {
+      return res.status(400).json({ message: 'Invalid endDate — expected YYYY-MM-DD' });
+    }
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
     const offset = (pageNum - 1) * limitNum;
 
-    // Build date filter condition for payment history
-    // Use date() function to compare only date portions, ensuring current day's payments are included
+    // Build date filter condition for payment history.
+    // Parameterized (bound) to prevent SQL injection — never interpolate user input.
+    // Use date() so only the date portion is compared, ensuring the current day is included.
     const dateFilter =
-      startDate && endDate
-        ? `AND date(p.payment_date) >= '${startDate}' AND date(p.payment_date) <= '${endDate}'`
-        : '';
+      startDate && endDate ? `AND date(p.payment_date) >= ? AND date(p.payment_date) <= ?` : '';
+    const dateParams = startDate && endDate ? [startDate, endDate] : [];
 
     // Build search filter using parameterized queries to prevent SQL injection
     const searchTerm = search ? `%${search}%` : null;
@@ -158,9 +165,10 @@ exports.getFinancialSummary = async (req, res) => {
     // Get outstanding invoices with pagination
     if (table === 'all' || table === 'outstanding') {
       const outstandingSearchFilter = searchTerm
-        ? `AND (m.name LIKE $1 OR CAST(i.id AS TEXT) LIKE $1)`
+        ? `AND (m.name LIKE ? OR CAST(i.id AS TEXT) LIKE ?)`
         : '';
-      const outstandingParams = searchTerm ? [searchTerm] : [];
+      // One bound value per placeholder in the filter above.
+      const outstandingParams = searchTerm ? [searchTerm, searchTerm] : [];
 
       const outstandingInvoices = await pool.query(
         `
@@ -171,9 +179,9 @@ exports.getFinancialSummary = async (req, res) => {
                   AND m.is_admin = 0
                   ${outstandingSearchFilter}
                 ORDER BY i.due_date ASC
-                LIMIT ${limitNum} OFFSET ${offset}
+                LIMIT ? OFFSET ?
             `,
-        outstandingParams
+        [...outstandingParams, limitNum, offset]
       );
 
       const outstandingCount = await pool.query(
@@ -197,9 +205,10 @@ exports.getFinancialSummary = async (req, res) => {
     // Get payment history with pagination
     if (table === 'all' || table === 'payments') {
       const paymentsSearchFilter = searchTerm
-        ? `AND (m.name LIKE $1 OR CAST(p.id AS TEXT) LIKE $1 OR CAST(p.invoice_id AS TEXT) LIKE $1)`
+        ? `AND (m.name LIKE ? OR CAST(p.id AS TEXT) LIKE ? OR CAST(p.invoice_id AS TEXT) LIKE ?)`
         : '';
-      const paymentsParams = searchTerm ? [searchTerm] : [];
+      // One bound value per placeholder in the filter above.
+      const paymentsParams = searchTerm ? [searchTerm, searchTerm, searchTerm] : [];
 
       const paymentHistory = await pool.query(
         `
@@ -216,9 +225,9 @@ exports.getFinancialSummary = async (req, res) => {
                 WHERE 1=1 ${dateFilter}
                   ${paymentsSearchFilter}
                 ORDER BY p.payment_date DESC
-                LIMIT ${limitNum} OFFSET ${offset}
+                LIMIT ? OFFSET ?
             `,
-        paymentsParams
+        [...dateParams, ...paymentsParams, limitNum, offset]
       );
 
       const paymentCount = await pool.query(
@@ -230,7 +239,7 @@ exports.getFinancialSummary = async (req, res) => {
                 WHERE 1=1 ${dateFilter}
                   ${paymentsSearchFilter}
             `,
-        paymentsParams
+        [...dateParams, ...paymentsParams]
       );
 
       result.paymentHistory = paymentHistory.rows;
@@ -241,7 +250,8 @@ exports.getFinancialSummary = async (req, res) => {
 
     // Get member payment status with pagination - Optimized query
     if (table === 'all' || table === 'members') {
-      const memberPaymentStatus = await pool.query(`
+      const memberPaymentStatus = await pool.query(
+        `
                 WITH member_payments AS (
                     SELECT 
                         i.member_id,
@@ -292,8 +302,10 @@ exports.getFinancialSummary = async (req, res) => {
                 LEFT JOIN member_invoices mi ON m.id = mi.member_id
                 WHERE m.is_admin = 0
                 ORDER BY m.name ASC
-                LIMIT ${limitNum} OFFSET ${offset}
-            `);
+                LIMIT ? OFFSET ?
+            `,
+        [...dateParams, limitNum, offset]
+      );
 
       const memberCount = await pool.query(`
                 SELECT COUNT(*) as total
@@ -360,7 +372,8 @@ exports.getPaymentReminders = async (_req, res) => {
     const settingResult = await pool.query(`
             SELECT value FROM settings WHERE key = 'payment_reminder_days_after_due'
         `);
-    const reminderDays = parseInt(settingResult.rows[0]?.value || '7', 10);
+    const rawDays = parseInt(settingResult.rows[0]?.value || '7', 10);
+    const reminderDays = Number.isFinite(rawDays) && rawDays >= 0 ? rawDays : 7;
 
     // Get overdue invoices - due date + reminder days <= today
     const result = await pool.query(

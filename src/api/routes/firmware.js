@@ -4,6 +4,9 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { pool } = require('../../config/sqlite');
+// Shared CSRF guard (also applied globally in app.js). Kept on these routes
+// explicitly so firmware mutations stay protected regardless of mount order.
+const requireSameOrigin = require('../middleware/requireSameOrigin');
 
 const FIRMWARE_DIR = path.join(__dirname, '../../../public/uploads/firmware');
 const ensureFirmwareDir = () => {
@@ -14,21 +17,6 @@ const ensureFirmwareDir = () => {
 
 ensureFirmwareDir();
 
-// Reject state-mutating requests that come from a different origin (C1/C3 CSRF guard).
-// GET /download is intentionally excluded — ESP32 fetches firmware without a browser Origin header.
-function requireSameOrigin(req, res, next) {
-  const origin = req.headers.origin;
-  const referer = req.headers.referer;
-  if (origin || referer) {
-    const host = req.headers.host;
-    const source = origin || referer;
-    if (!source.includes(host)) {
-      return res.status(403).json({ success: false, message: 'Forbidden' });
-    }
-  }
-  next();
-}
-
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     ensureFirmwareDir();
@@ -37,7 +25,7 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => {
     const unique = Date.now();
     cb(null, `firmware-${unique}${path.extname(file.originalname)}`);
-  }
+  },
 });
 
 const upload = multer({
@@ -49,16 +37,20 @@ const upload = multer({
     } else {
       cb(new Error('Only .bin firmware files are accepted'));
     }
-  }
+  },
 });
 
 let biometricIntegration = null;
-const OTA_PENDING_TIMEOUT_MINUTES = Number.parseInt(process.env.OTA_PENDING_TIMEOUT_MINUTES || '5', 10);
+const OTA_PENDING_TIMEOUT_MINUTES = Number.parseInt(
+  process.env.OTA_PENDING_TIMEOUT_MINUTES || '5',
+  10
+);
 
 async function markTimedOutFirmwareUpdates() {
-  const timeoutMinutes = Number.isFinite(OTA_PENDING_TIMEOUT_MINUTES) && OTA_PENDING_TIMEOUT_MINUTES > 0
-    ? OTA_PENDING_TIMEOUT_MINUTES
-    : 5;
+  const timeoutMinutes =
+    Number.isFinite(OTA_PENDING_TIMEOUT_MINUTES) && OTA_PENDING_TIMEOUT_MINUTES > 0
+      ? OTA_PENDING_TIMEOUT_MINUTES
+      : 5;
 
   // Auto-fail stale pending OTA jobs so UI never shows pending forever.
   return pool.query(
@@ -68,7 +60,10 @@ async function markTimedOutFirmwareUpdates() {
          completed_at = datetime('now')
      WHERE status = 'pending'
        AND started_at <= datetime('now', '-' || ? || ' minutes')`,
-    [`OTA timed out after ${timeoutMinutes} minutes without completion status`, String(timeoutMinutes)]
+    [
+      `OTA timed out after ${timeoutMinutes} minutes without completion status`,
+      String(timeoutMinutes),
+    ]
   );
 }
 
@@ -93,7 +88,14 @@ router.post('/upload', requireSameOrigin, upload.single('firmware'), async (req,
     const result = await pool.query(
       `INSERT INTO firmware_versions (version, filename, filepath, file_size, description, uploaded_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [version.trim(), req.file.filename, req.file.path, req.file.size, description || null, uploadedAt]
+      [
+        version.trim(),
+        req.file.filename,
+        req.file.path,
+        req.file.size,
+        description || null,
+        uploadedAt,
+      ]
     );
 
     res.json({
@@ -104,8 +106,8 @@ router.post('/upload', requireSameOrigin, upload.single('firmware'), async (req,
         version: version.trim(),
         filename: req.file.filename,
         file_size: req.file.size,
-        description: description || null
-      }
+        description: description || null,
+      },
     });
   } catch (error) {
     console.error('Error uploading firmware:', error);
@@ -119,9 +121,7 @@ router.post('/upload', requireSameOrigin, upload.single('firmware'), async (req,
 // List all uploaded firmware versions
 router.get('/list', async (_req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM firmware_versions ORDER BY uploaded_at DESC'
-    );
+    const result = await pool.query('SELECT * FROM firmware_versions ORDER BY uploaded_at DESC');
     res.json({ success: true, firmwares: result.rows || [] });
   } catch (error) {
     console.error('Error listing firmware:', error);
@@ -199,7 +199,7 @@ router.post('/update/:deviceId', requireSameOrigin, async (req, res) => {
       await biometricIntegration.sendESP32Command(deviceId, 'ota_update', {
         url: downloadUrl,
         version: firmware.version,
-        updateLogId
+        updateLogId,
       });
     } catch (cmdError) {
       console.error('OTA command failed:', cmdError);
@@ -209,7 +209,7 @@ router.post('/update/:deviceId', requireSameOrigin, async (req, res) => {
       );
       return res.status(500).json({
         success: false,
-        message: 'Failed to send OTA command to device'
+        message: 'Failed to send OTA command to device',
       });
     }
 
@@ -217,7 +217,7 @@ router.post('/update/:deviceId', requireSameOrigin, async (req, res) => {
       success: true,
       message: `OTA update triggered for device ${deviceId} with firmware v${firmware.version}`,
       updateLogId,
-      downloadUrl
+      downloadUrl,
     });
   } catch (error) {
     console.error('Error triggering OTA update:', error);
@@ -261,8 +261,12 @@ router.delete('/:id', requireSameOrigin, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Firmware not found' });
     }
 
-    if (fs.existsSync(firmware.filepath)) {
-      fs.unlinkSync(firmware.filepath);
+    const resolvedPath = path.resolve(firmware.filepath);
+    if (!resolvedPath.startsWith(path.resolve(FIRMWARE_DIR))) {
+      return res.status(400).json({ success: false, message: 'Invalid firmware file path' });
+    }
+    if (fs.existsSync(resolvedPath)) {
+      fs.unlinkSync(resolvedPath);
     }
 
     // Remove log entries first to satisfy the foreign key constraint
