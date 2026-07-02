@@ -284,8 +284,8 @@ exports.createMember = async (req, res) => {
     // Use provided join_date or default to current date
     const finalJoinDate = join_date || new Date().toISOString().split('T')[0];
 
-    await pool.query(
-      'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active, is_admin, join_date) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8)',
+    const newMember = await pool.query(
+      'INSERT INTO members (name, phone, membership_plan_id, address, birthday, photo_url, is_active, is_admin, join_date) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8) RETURNING *',
       [
         name,
         phone || null,
@@ -297,7 +297,6 @@ exports.createMember = async (req, res) => {
         finalJoinDate,
       ]
     );
-    const newMember = await pool.query('SELECT * FROM members ORDER BY id DESC LIMIT 1');
 
     // Send welcome email (do not block on failures)
     // Email removed from member; skip sending welcome email
@@ -308,7 +307,7 @@ exports.createMember = async (req, res) => {
     if (lowered.includes('unique')) {
       const msg = lowered.includes('phone')
         ? 'A member with this phone number already exists.'
-        : 'A member with this email already exists.';
+        : 'A member with these details already exists.';
       return res.status(409).json({ message: msg });
     }
     res.status(400).json({ message: err.message });
@@ -395,7 +394,7 @@ exports.updateMember = async (req, res) => {
     if (lowered.includes('unique')) {
       const msg = lowered.includes('phone')
         ? 'A member with this phone number already exists.'
-        : 'A member with this email already exists.';
+        : 'A member with these details already exists.';
       return res.status(409).json({ message: msg });
     }
     res.status(400).json({ message: err.message });

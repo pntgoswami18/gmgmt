@@ -107,22 +107,24 @@ Client-supplied `Content-Type` / file extension is spoofable. True validation re
 
 ---
 
-## Phase 2 — Data Integrity 🔲 Pending
+## Phase 2 — Data Integrity ✅ Complete
 
-### 5. `runInTransaction` serialization
-**File:** `src/config/sqlite.js` (~line 387)
+**Branch:** `phase2-data-integrity` (based on `phase1-security`)
 
-The `runInTransaction` helper issues `db.exec('BEGIN')` / `COMMIT` on the single shared connection but `await`s inside the body. Two concurrent requests can interleave: the second `BEGIN` throws (SQLite doesn't allow nested transactions) or the second `COMMIT` closes the first request's transaction. Fix: wrap the body in an async mutex/queue so only one transaction runs at a time.
+### 5. `runInTransaction` serialization ✅
+**File:** `src/config/sqlite.js`
 
-### 6. Replace `SELECT MAX(id)` after INSERT with `RETURNING *`
+The `runInTransaction` helper issues `db.exec('BEGIN')` / `COMMIT` on the single shared connection but `await`s inside the body. Two concurrent requests can interleave: the second `BEGIN` throws (SQLite doesn't allow nested transactions) or the second `COMMIT` closes the first request's transaction. Fixed by adding a module-level promise-chain mutex (`_txQueue`) — each caller chains onto the previous, so BEGIN/COMMIT pairs never overlap.
+
+### 6. Replace `SELECT MAX(id)` after INSERT with `RETURNING *` ✅
 **Files:** `memberController.js`, `paymentController.js` (×4), `classController.js`, `bookingController.js`, `attendanceController.js`, `scheduleController.js`, `planController.js`
 
-Ten locations follow the pattern: `INSERT INTO ...` then `SELECT ... ORDER BY id DESC LIMIT 1` to retrieve the new row. Under concurrent load, the `SELECT` can return a different request's row. `better-sqlite3`'s `execute()` already supports `RETURNING *` — use it to get the inserted row atomically.
+Ten locations followed the pattern: `INSERT INTO ...` then `SELECT ... ORDER BY id DESC LIMIT 1` to retrieve the new row. Under concurrent load, the `SELECT` could return a different request's row. Replaced all 10 with `INSERT ... RETURNING *` / `RETURNING id`, using the result directly. `execute()` in `sqlite.js` already routed `RETURNING` statements through `.all()`, so no infrastructure change was needed.
 
-### 7. Fix misleading UNIQUE-violation error message
-**File:** `src/api/controllers/memberController.js` (~line 311)
+### 7. Fix misleading UNIQUE-violation error message ✅
+**File:** `src/api/controllers/memberController.js`
 
-Any UNIQUE constraint violation when creating/updating a member surfaces as "email already exists". Email is no longer a unique field; phone is. The error branch should detect which constraint fired and return the appropriate message.
+Both `createMember` and `updateMember` catch blocks had an else-branch saying "email already exists" — but email is never included in the INSERT/UPDATE column lists, making it dead code. Changed the fallback to "A member with these details already exists." The phone-specific branch (`lowered.includes('phone')`) remains and fires correctly for the `ux_members_phone` partial unique index.
 
 ---
 
