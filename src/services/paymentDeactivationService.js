@@ -104,8 +104,8 @@ class PaymentDeactivationService {
           }
         } catch (memberError) {
           logger.error(
-            `❌ Error processing member ${member.name} (ID: ${member.id}):`,
-            memberError
+            { err: memberError, memberId: member.id, memberName: member.name },
+            'error processing member'
           );
         }
       }

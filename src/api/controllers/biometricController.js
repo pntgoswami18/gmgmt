@@ -503,8 +503,8 @@ const getSystemStatus = async (req, res) => {
         }
       } catch (dbError) {
         logger.warn(
-          'Could not query device count from database, falling back to TCP connections:',
-          dbError.message
+          { err: dbError },
+          'could not query device count from database, falling back to TCP connections'
         );
         // Fallback to TCP socket count for backward compatibility
         status.connectedDevices = biometricIntegration.listener.clients.size;
@@ -668,10 +668,21 @@ const testConnection = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid port — must be 1–65535' });
       }
 
-      // Reject loopback, link-local, and cloud metadata ranges to prevent SSRF
-      const BLOCKED_PREFIXES = ['127.', '0.', '169.254.', '::1', '[::1]'];
+      // Reject loopback, link-local, and cloud metadata ranges to prevent SSRF.
+      // '::ffff:' and '[::ffff:' cover IPv4-mapped IPv6 loopback (e.g. ::ffff:127.0.0.1).
+      const BLOCKED_PREFIXES = ['127.', '0.', '169.254.', '::1', '[::1]', '::ffff:', '[::ffff:'];
       const hostStr = String(host || '');
       if (!hostStr || BLOCKED_PREFIXES.some((p) => hostStr.startsWith(p))) {
+        return res.status(400).json({ success: false, message: 'Invalid host' });
+      }
+      // Parse to catch user@host credential bypass (e.g. "good@127.0.0.1" → hostname "127.0.0.1")
+      let resolvedHost;
+      try {
+        resolvedHost = new URL('http://' + hostStr).hostname;
+      } catch (_) {
+        return res.status(400).json({ success: false, message: 'Invalid host' });
+      }
+      if (!resolvedHost || BLOCKED_PREFIXES.some((p) => resolvedHost.startsWith(p))) {
         return res.status(400).json({ success: false, message: 'Invalid host' });
       }
 
@@ -774,8 +785,8 @@ const testConnection = async (req, res) => {
       });
     } catch (dbError) {
       logger.warn(
-        'Could not query device status from database, falling back to TCP connections:',
-        dbError.message
+        { err: dbError },
+        'could not query device status from database, falling back to TCP connections'
       );
 
       // Fallback to TCP socket test for backward compatibility
@@ -1160,14 +1171,10 @@ const esp32Webhook = async (req, res) => {
 
     // Verbose dumps only when DEBUG_BIOMETRIC_WEBHOOK=1
     if (debugWebhook) {
-      console.debug('📱 ESP32 webhook [debug] body:', JSON.stringify(eventData, null, 2));
-      console.debug('📱 ESP32 webhook [debug] request:', {
-        method: req.method,
-        url: req.url,
-        headers: req.headers,
-        ip: req.ip,
-        userAgent: req.get('User-Agent'),
-      });
+      logger.debug(
+        { body: eventData, method: req.method, url: req.url, ip: req.ip },
+        'ESP32 webhook debug'
+      );
     }
 
     // Member name for logs: skip heartbeats/OTA (high-frequency or non-member events)
@@ -2072,11 +2079,20 @@ const invalidateESP32Cache = async () => {
           `🔄 Invalidating cache for device: ${device.device_name} (${device.device_id}) at IP: ${device.ip_address}`
         );
 
-        // SSRF guard — block requests to loopback, link-local, and other internal addresses
-        const SSRF_BLOCKED_PREFIXES = ['127.', '0.', '169.254.', '::1', '[::1]'];
+        // SSRF guard — block requests to loopback, link-local, and other internal addresses.
+        // '::ffff:' and '[::ffff:' cover IPv4-mapped IPv6 loopback (e.g. ::ffff:127.0.0.1).
         // RFC-1918 private ranges (10.*, 172.16-31.*, 192.168.*) are intentionally not blocked —
         // ESP32 devices live on the LAN, so their IPs are in those ranges by design.
         // Loopback and link-local (including AWS/GCP metadata endpoint) are blocked above.
+        const SSRF_BLOCKED_PREFIXES = [
+          '127.',
+          '0.',
+          '169.254.',
+          '::1',
+          '[::1]',
+          '::ffff:',
+          '[::ffff:',
+        ];
         const rawIp = String(device.ip_address || '');
         if (!rawIp || SSRF_BLOCKED_PREFIXES.some((p) => rawIp.startsWith(p))) {
           logger.warn(
@@ -2150,11 +2166,9 @@ const invalidateESP32Cache = async () => {
         logger.info(`✅ Cache invalidation sent to device: ${device.device_name}`);
       } catch (deviceError) {
         logger.error(
-          `❌ Failed to invalidate cache for device ${device.device_name}:`,
-          deviceError.message
+          { err: deviceError, deviceId: device.device_id, deviceName: device.device_name },
+          'failed to invalidate cache for device'
         );
-        logger.error(`❌ Device URL was: http://${device.ip_address}/api/cache/invalidate`);
-        logger.error({ err: deviceError }, 'error details');
         // Continue with other devices even if one fails
       }
     }

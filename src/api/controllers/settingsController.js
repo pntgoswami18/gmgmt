@@ -1,4 +1,4 @@
-const { pool } = require('../../config/sqlite');
+const { pool, runInTransaction } = require('../../config/sqlite');
 const settingsCache = require('../../services/settingsCache');
 const logger = require('../../utils/logger').child({ service: 'settingsController' });
 
@@ -58,37 +58,31 @@ exports.getSetting = async (req, res) => {
 exports.updateAllSettings = async (req, res) => {
   const settings = req.body;
   try {
-    await pool.query('BEGIN');
+    await runInTransaction(async () => {
+      for (const key in settings) {
+        if (Object.hasOwnProperty.call(settings, key)) {
+          let value = settings[key];
 
-    for (const key in settings) {
-      if (Object.hasOwnProperty.call(settings, key)) {
-        let value = settings[key];
+          if (value === undefined || value === null) {
+            value = null;
+          } else if (Array.isArray(value)) {
+            value = JSON.stringify(value);
+          } else if (typeof value !== 'string' && typeof value !== 'number') {
+            value = String(value);
+          }
 
-        if (value === undefined || value === null) {
-          value = null;
-        } else if (Array.isArray(value)) {
-          // Store arrays as JSON strings
-          value = JSON.stringify(value);
-        } else if (typeof value !== 'string' && typeof value !== 'number') {
-          // Store booleans and other primitives as strings in TEXT column
-          value = String(value);
+          await pool.query('INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)', [
+            key,
+            value,
+          ]);
         }
-
-        const query = `
-                    INSERT OR REPLACE INTO settings (key, value)
-                    VALUES ($1, $2);
-                `;
-
-        await pool.query(query, [key, value]);
       }
-    }
+    });
 
-    await pool.query('COMMIT');
     await settingsCache.invalidate();
     res.json({ message: 'Settings updated successfully' });
   } catch (err) {
-    await pool.query('ROLLBACK');
-    logger.error({ err: err }, 'error updating all settings');
+    logger.error({ err }, 'error updating all settings');
     res.status(500).json({ message: 'Failed to update settings' });
   }
 };
