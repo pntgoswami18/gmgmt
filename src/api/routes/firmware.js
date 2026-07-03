@@ -7,6 +7,7 @@ const { pool } = require('../../config/sqlite');
 // Shared CSRF guard (also applied globally in app.js). Kept on these routes
 // explicitly so firmware mutations stay protected regardless of mount order.
 const requireSameOrigin = require('../middleware/requireSameOrigin');
+const logger = require('../../utils/logger').child({ service: 'firmware' });
 
 const FIRMWARE_DIR = path.join(__dirname, '../../../public/uploads/firmware');
 const ensureFirmwareDir = () => {
@@ -110,7 +111,7 @@ router.post('/upload', requireSameOrigin, upload.single('firmware'), async (req,
       },
     });
   } catch (error) {
-    console.error('Error uploading firmware:', error);
+    logger.error({ err: error }, 'error uploading firmware');
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -124,7 +125,7 @@ router.get('/list', async (_req, res) => {
     const result = await pool.query('SELECT * FROM firmware_versions ORDER BY uploaded_at DESC');
     res.json({ success: true, firmwares: result.rows || [] });
   } catch (error) {
-    console.error('Error listing firmware:', error);
+    logger.error({ err: error }, 'error listing firmware');
     res.status(500).json({ success: false, message: 'Failed to list firmware' });
   }
 });
@@ -143,7 +144,7 @@ router.get('/download/:id', async (req, res) => {
     // C2: Validate that filepath is within the expected firmware directory
     const resolvedPath = path.resolve(firmware.filepath);
     if (!resolvedPath.startsWith(path.resolve(FIRMWARE_DIR))) {
-      console.error('Path traversal attempt blocked for firmware id:', id);
+      logger.error({ id }, 'path traversal attempt blocked');
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
     if (!fs.existsSync(resolvedPath)) {
@@ -157,7 +158,7 @@ router.get('/download/:id', async (req, res) => {
     res.setHeader('Content-Length', firmware.file_size);
     fs.createReadStream(resolvedPath).pipe(res);
   } catch (error) {
-    console.error('Error downloading firmware:', error);
+    logger.error({ err: error }, 'error downloading firmware');
     res.status(500).json({ success: false, message: 'Failed to download firmware' });
   }
 });
@@ -202,7 +203,7 @@ router.post('/update/:deviceId', requireSameOrigin, async (req, res) => {
         updateLogId,
       });
     } catch (cmdError) {
-      console.error('OTA command failed:', cmdError);
+      logger.error({ err: cmdError }, 'OTA command failed');
       await pool.query(
         `UPDATE firmware_update_log SET status = 'failed', error_message = ?, completed_at = datetime('now') WHERE id = ?`,
         [cmdError.message, updateLogId]
@@ -220,7 +221,7 @@ router.post('/update/:deviceId', requireSameOrigin, async (req, res) => {
       downloadUrl,
     });
   } catch (error) {
-    console.error('Error triggering OTA update:', error);
+    logger.error({ err: error }, 'error triggering OTA update');
     res.status(500).json({ success: false, message: 'Failed to trigger OTA update' });
   }
 });
@@ -245,7 +246,7 @@ router.get('/log', async (req, res) => {
     const result = await pool.query(query, params);
     res.json({ success: true, logs: result.rows || [] });
   } catch (error) {
-    console.error('Error fetching update log:', error);
+    logger.error({ err: error }, 'error fetching update log');
     res.status(500).json({ success: false, message: 'Failed to fetch update log' });
   }
 });
@@ -274,7 +275,7 @@ router.delete('/:id', requireSameOrigin, async (req, res) => {
     await pool.query('DELETE FROM firmware_versions WHERE id = ?', [id]);
     res.json({ success: true, message: 'Firmware deleted successfully' });
   } catch (error) {
-    console.error('Error deleting firmware:', error);
+    logger.error({ err: error }, 'error deleting firmware');
     res.status(500).json({ success: false, message: 'Failed to delete firmware' });
   }
 });

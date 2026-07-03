@@ -1,5 +1,6 @@
 const { pool, runInTransaction } = require('../../config/sqlite');
 const { calculateDueDateForPlan } = require('../../utils/dateUtils');
+const logger = require('../../utils/logger').child({ service: 'paymentController' });
 
 // Helper to throw errors with HTTP status (for use inside runInTransaction)
 function httpError(message, statusCode = 400) {
@@ -111,6 +112,9 @@ exports.recordManualPayment = async (req, res) => {
           ensuredInvoiceId,
         ]);
         if (existing.rows.length === 0) {
+          if (!member_id) {
+            throw httpError(`Invoice #${ensuredInvoiceId} not found`, 404);
+          }
           let finalPlanId = plan_id;
           if (!finalPlanId && member_id) {
             const memberPlan = await pool.query(
@@ -203,7 +207,7 @@ exports.recordManualPayment = async (req, res) => {
           }
         }
       } catch (referralError) {
-        console.error('Error applying referral discount:', referralError);
+        logger.error({ err: referralError }, 'error applying referral discount');
         // Don't fail the payment if referral discount fails, but log it
       }
 

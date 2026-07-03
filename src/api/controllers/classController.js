@@ -1,4 +1,5 @@
 const { pool } = require('../../config/sqlite');
+const logger = require('../../utils/logger').child({ service: 'classController' });
 
 // Get all classes
 exports.getAllClasses = async (req, res) => {
@@ -6,7 +7,7 @@ exports.getAllClasses = async (req, res) => {
     const allClasses = await pool.query('SELECT * FROM classes ORDER BY id ASC');
     res.json(allClasses.rows);
   } catch (err) {
-    console.error('Error fetching all classes:', err);
+    logger.error({ err: err }, 'error fetching all classes');
     res.status(500).json({ message: err.message });
   }
 };
@@ -65,7 +66,7 @@ exports.createClass = async (req, res) => {
     );
     res.status(201).json(created.rows[0]);
   } catch (err) {
-    console.error('Error creating class:', err);
+    logger.error({ err: err }, 'error creating class');
     res.status(400).json({ message: err.message });
   }
 };
@@ -118,7 +119,7 @@ exports.updateClass = async (req, res) => {
     const updatedClass = await pool.query('SELECT * FROM classes WHERE id = $1', [id]);
     res.json(updatedClass.rows[0]);
   } catch (err) {
-    console.error('Error updating class:', err);
+    logger.error({ err: err }, 'error updating class');
     res.status(400).json({ message: err.message });
   }
 };

@@ -8,6 +8,7 @@ const { initializeDatabase } = require('./config/sqlite');
 const requireSameOrigin = require('./api/middleware/requireSameOrigin');
 const WebSocket = require('ws');
 const http = require('http');
+const logger = require('./utils/logger');
 const app = express();
 
 const attendanceRoutes = require('./api/routes/attendance');
@@ -40,7 +41,7 @@ const corsOrigins = (process.env.CORS_ORIGINS || '')
   .map((o) => o.trim())
   .filter(Boolean);
 if (corsOrigins.includes('*') && corsOrigins.length > 0) {
-  console.error(
+  logger.error(
     '❌ CORS_ORIGINS contains "*" — wildcards cannot be used with credentials. ' +
       'Set explicit origins or leave CORS_ORIGINS unset for dev.'
   );
@@ -118,26 +119,28 @@ const wss = new WebSocket.Server({
 
 // WebSocket connection handling
 wss.on('connection', (ws, req) => {
-  console.log('🔌 WebSocket client connected from:', req.socket.remoteAddress);
-  console.log('🔌 Biometric integration available:', !!app.biometricIntegration);
+  logger.info(
+    { remoteAddress: req.socket.remoteAddress, biometricAvailable: !!app.biometricIntegration },
+    'WebSocket client connected'
+  );
 
   // Add client to biometric integration if available
   if (app.biometricIntegration) {
-    console.log('🔌 Adding WebSocket client to biometric integration');
+    logger.info('🔌 Adding WebSocket client to biometric integration');
     app.biometricIntegration.addWebSocketClient(ws);
   } else {
-    console.log('⚠️ Biometric integration not available - WebSocket client not added');
+    logger.info('⚠️ Biometric integration not available - WebSocket client not added');
   }
 
   ws.on('close', () => {
-    console.log('🔌 WebSocket client disconnected');
+    logger.info('🔌 WebSocket client disconnected');
     if (app.biometricIntegration) {
       app.biometricIntegration.removeWebSocketClient(ws);
     }
   });
 
   ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
+    logger.error({ err: error }, 'webSocket error');
     if (app.biometricIntegration) {
       app.biometricIntegration.removeWebSocketClient(ws);
     }
@@ -156,21 +159,21 @@ wss.on('connection', (ws, req) => {
 const startServer = async () => {
   try {
     await initializeDatabase();
-    console.log('Database initialized successfully');
+    logger.info('Database initialized successfully');
 
     // Initialize settings cache for performance optimization
     const settingsCache = require('./services/settingsCache');
     await settingsCache.initialize();
-    console.log('✅ Settings cache initialized');
+    logger.info('✅ Settings cache initialized');
 
     server.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on port ${PORT} and accessible from all interfaces`);
-      console.log(`🔌 WebSocket server ready for real-time enrollment updates`);
+      logger.info(`Server running on port ${PORT} and accessible from all interfaces`);
+      logger.info(`🔌 WebSocket server ready for real-time enrollment updates`);
     });
 
     // Start biometric integration if enabled
     if (process.env.ENABLE_BIOMETRIC === 'true') {
-      console.log('🔐 ENABLE_BIOMETRIC is true, starting biometric integration...');
+      logger.info('🔐 ENABLE_BIOMETRIC is true, starting biometric integration...');
       try {
         const BiometricIntegration = require('./services/biometricIntegration');
         const { setBiometricIntegration } = require('./api/controllers/biometricController');
@@ -179,28 +182,28 @@ const startServer = async () => {
         } = require('./api/routes/firmware');
         const biometricPort = process.env.BIOMETRIC_PORT || 8080;
 
-        console.log('🔐 Creating biometric integration instance on port:', biometricPort);
+        logger.info({ port: biometricPort }, 'creating biometric integration instance');
         const biometricIntegration = new BiometricIntegration(biometricPort);
 
-        console.log('🔐 Starting biometric integration...');
+        logger.info('🔐 Starting biometric integration...');
         biometricIntegration.start();
 
-        console.log('🔐 Connecting integration with controller...');
+        logger.info('🔐 Connecting integration with controller...');
         setBiometricIntegration(biometricIntegration);
         setFirmwareBiometricIntegration(biometricIntegration);
 
         // Store reference for potential cleanup
         app.biometricIntegration = biometricIntegration;
-        console.log('✅ Biometric integration started successfully');
+        logger.info('✅ Biometric integration started successfully');
       } catch (error) {
-        console.error('❌ Failed to start biometric integration:', error);
+        logger.error({ err: error }, 'failed to start biometric integration');
       }
     } else {
-      console.log('⚠️ ENABLE_BIOMETRIC is not true, biometric integration disabled');
+      logger.info('⚠️ ENABLE_BIOMETRIC is not true, biometric integration disabled');
     }
 
     // Start automatic payment deactivation service
-    console.log('🔄 Starting automatic payment deactivation service...');
+    logger.info('🔄 Starting automatic payment deactivation service...');
     try {
       const PaymentDeactivationService = require('./services/paymentDeactivationService');
       const paymentDeactivationService = new PaymentDeactivationService();
@@ -211,22 +214,22 @@ const startServer = async () => {
       // Run initial check after 1 minute
       setTimeout(async () => {
         try {
-          console.log('🔄 Running initial payment deactivation check...');
+          logger.info('🔄 Running initial payment deactivation check...');
           const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-          console.log('✅ Initial payment deactivation check completed:', result);
+          logger.info({ result }, 'initial payment deactivation check completed');
         } catch (error) {
-          console.error('❌ Error in initial payment deactivation check:', error);
+          logger.error({ err: error }, 'error in initial payment deactivation check');
         }
       }, 60000); // 1 minute delay
 
       // Set up recurring deactivation checks every 6 hours
       setInterval(async () => {
         try {
-          console.log('🔄 Running scheduled payment deactivation check...');
+          logger.info('🔄 Running scheduled payment deactivation check...');
           const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-          console.log('✅ Scheduled payment deactivation check completed:', result);
+          logger.info({ result }, 'scheduled payment deactivation check completed');
         } catch (error) {
-          console.error('❌ Error in scheduled payment deactivation check:', error);
+          logger.error({ err: error }, 'error in scheduled payment deactivation check');
         }
       }, deactivationInterval);
 
@@ -244,11 +247,11 @@ const startServer = async () => {
         // Run daily check
         const runDailyCheck = async () => {
           try {
-            console.log('🔄 Running daily comprehensive payment deactivation check...');
+            logger.info('🔄 Running daily comprehensive payment deactivation check...');
             const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-            console.log('✅ Daily payment deactivation check completed:', result);
+            logger.info({ result }, 'daily payment deactivation check completed');
           } catch (error) {
-            console.error('❌ Error in daily payment deactivation check:', error);
+            logger.error({ err: error }, 'error in daily payment deactivation check');
           }
         };
 
@@ -258,14 +261,14 @@ const startServer = async () => {
         setInterval(runDailyCheck, dailyCheckInterval);
       }, timeUntil2AM);
 
-      console.log(
+      logger.info(
         `✅ Automatic payment deactivation service started (every 6 hours + daily at 2 AM)`
       );
     } catch (error) {
-      console.error('❌ Failed to start payment deactivation service:', error);
+      logger.error({ err: error }, 'failed to start payment deactivation service');
     }
   } catch (error) {
-    console.error('Failed to start server:', error);
+    logger.error({ err: error }, 'failed to start server');
     process.exit(1);
   }
 };

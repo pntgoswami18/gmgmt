@@ -1,3 +1,4 @@
+const logger = require('../utils/logger').child({ service: 'email' });
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
@@ -70,10 +71,10 @@ const sendEmail = async (template, data) => {
     try {
         const mailOptions = emailTemplates[template](...data);
         const info = await transporter.sendMail(mailOptions);
-        console.log('Email sent: ' + info.response);
+        logger.info('Email sent: ' + info.response);
         return { success: true, info };
     } catch (error) {
-        console.error('Error sending email:', error);
+        logger.error({ err: error }, 'error sending email');
         return { success: false, error };
     }
 };

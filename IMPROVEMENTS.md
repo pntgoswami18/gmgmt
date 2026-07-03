@@ -147,18 +147,20 @@ Replaced the narrow 2-key cache with a full `Map`-backed cache loading all setti
 
 ## Phase 4 — Code Quality 🔲 Pending
 
-### 10. Structured logging and error handling
-**Files:** across the codebase (~183 `console.log` calls)
+**Branch:** `phase4-code-quality` (based on `main`) | **Plan:** [`docs/phase4-plan.md`](docs/phase4-plan.md)
 
-Replace `console.log` / `console.error` calls with a level-gated logger (e.g. `pino` or `winston`) that can be silenced in tests and configured for production output format. Fix the silent `catch (_) {}` in `sqlite.js:369` which swallows errors invisibly. Remove dead Stripe and placeholder email-notification code.
+### 10. Structured logging and error handling
+**Files:** across the codebase (329 `console.*` calls across 19 files)
+
+Replace all `console.log/error/warn` calls with `pino` — a level-gated structured logger. `LOG_LEVEL=silent` in test env eliminates log noise; JSON output in production; `pino-pretty` for dev. Per-service child loggers carry `{ service }` context automatically. Fix the silent `catch (_) {}` in `sqlite.js:423` which swallows schema migration errors invisibly (change to `log.warn`). Add a comment to the intentional ROLLBACK swallow at `sqlite.js:459`.
 
 ### 11. Unit and integration test coverage
 **Directory:** `src/services/__tests__/`
 
-Only `biometricIntegration.test.js` exists, and it currently contains no active test cases. CLAUDE.md requires both unit and integration tests for all changes. Add tests for:
-- Payment flow: transaction creation, referral discount application
-- Member CRUD: create, update, UNIQUE constraint handling
-- Report queries: financial summary, payment reminders, member growth
+Only `biometricIntegration.test.js` exists with a single test. CLAUDE.md requires both unit and integration tests for all changes. Add tests using `node:test` against an in-memory SQLite DB (no mocks) for:
+- Payment flow: createInvoice, recordManualPayment, referral discount, deletePayment
+- Member CRUD: create, duplicate phone rejection, referral, update, delete, setActiveStatus
+- Report queries: financial summary date/search/pagination, payment reminders with NaN-safe setting
 
 ---
 

@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const logger = require('../utils/logger').child({ service: 'sqlite' });
 
 // Resolve data root (Windows-friendly default)
 const dataRoot =
@@ -359,9 +360,9 @@ function initializeDatabase() {
   // Run ANALYZE to update query planner statistics for optimal index usage
   try {
     db.exec('ANALYZE;');
-    console.log('✅ Database query planner statistics updated (ANALYZE completed)');
+    logger.info('database ANALYZE completed');
   } catch (analyzeError) {
-    console.error('⚠️  ANALYZE failed:', analyzeError.message);
+    logger.warn({ err: analyzeError }, 'ANALYZE failed');
   }
 
   // Ensure legacy databases have required columns with defaults
@@ -420,7 +421,11 @@ function initializeDatabase() {
     db.prepare(
       "UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL"
     ).run();
-  } catch (_) {}
+  } catch (migrationError) {
+    // Migration errors are non-fatal but must be visible — a silent failure here
+    // leaves the DB schema incomplete and causes runtime errors later.
+    logger.warn({ err: migrationError }, 'DB schema migration step failed');
+  }
 }
 
 const pool = {
@@ -456,7 +461,11 @@ async function runInTransaction(callback) {
   } catch (err) {
     try {
       db.exec('ROLLBACK');
-    } catch (_) {}
+    } catch (_) {
+      // Swallow ROLLBACK errors so the original error is what propagates.
+      // A failed ROLLBACK means the transaction was already rolled back or the
+      // connection is broken — either way the original error is what matters.
+    }
     throw err;
   } finally {
     releaseLock();

@@ -1,5 +1,6 @@
 const { pool } = require('../config/sqlite');
 const { checkMemberPaymentStatus, getGracePeriodSetting } = require('../utils/dateUtils');
+const logger = require('../utils/logger').child({ service: 'paymentDeactivation' });
 
 /**
  * Payment Deactivation Service
@@ -18,7 +19,7 @@ class PaymentDeactivationService {
    */
   async checkAndDeactivateOverdueMembers() {
     if (this.isRunning) {
-      console.log('⚠️ Payment deactivation service is already running');
+      logger.info('⚠️ Payment deactivation service is already running');
       return { error: 'Service already running' };
     }
 
@@ -26,11 +27,11 @@ class PaymentDeactivationService {
     this.deactivatedMembers = [];
 
     try {
-      console.log('🔄 Starting payment deactivation check...');
+      logger.info('🔄 Starting payment deactivation check...');
 
       // Get grace period setting
       const gracePeriodDays = await getGracePeriodSetting(pool);
-      console.log(`📅 Using grace period: ${gracePeriodDays} days`);
+      logger.info(`📅 Using grace period: ${gracePeriodDays} days`);
 
       // Get all active members with membership plans
       const membersQuery = `
@@ -59,7 +60,7 @@ class PaymentDeactivationService {
       const membersResult = await pool.query(membersQuery);
       const members = membersResult.rows;
 
-      console.log(`👥 Checking ${members.length} active members for payment status...`);
+      logger.info(`👥 Checking ${members.length} active members for payment status...`);
 
       let checkedCount = 0;
       let overdueCount = 0;
@@ -79,7 +80,7 @@ class PaymentDeactivationService {
           );
 
           if (paymentStatus.error) {
-            console.warn(
+            logger.warn(
               `⚠️ Error checking payment for member ${member.name} (ID: ${member.id}): ${paymentStatus.error}`
             );
             continue;
@@ -87,7 +88,7 @@ class PaymentDeactivationService {
 
           if (paymentStatus.isOverdue) {
             overdueCount++;
-            console.log(
+            logger.info(
               `📊 Member ${member.name} (ID: ${member.id}) is ${paymentStatus.daysOverdue} days overdue`
             );
 
@@ -96,13 +97,13 @@ class PaymentDeactivationService {
               await this.deactivateMember(member, paymentStatus);
               deactivatedCount++;
             } else {
-              console.log(
+              logger.info(
                 `⏰ Member ${member.name} is overdue but within grace period (${gracePeriodDays - paymentStatus.daysOverdue} days remaining)`
               );
             }
           }
         } catch (memberError) {
-          console.error(
+          logger.error(
             `❌ Error processing member ${member.name} (ID: ${member.id}):`,
             memberError
           );
@@ -120,10 +121,10 @@ class PaymentDeactivationService {
         deactivatedMemberDetails: this.deactivatedMembers,
       };
 
-      console.log('✅ Payment deactivation check completed:', summary);
+      logger.info({ summary }, 'payment deactivation check completed');
       return summary;
     } catch (error) {
-      console.error('❌ Error in payment deactivation service:', error);
+      logger.error({ err: error }, 'error in payment deactivation service');
       throw error;
     } finally {
       this.isRunning = false;
@@ -140,7 +141,7 @@ class PaymentDeactivationService {
       // Update member status to inactive
       await pool.query('UPDATE members SET is_active = 0 WHERE id = ?', [member.id]);
 
-      console.log(
+      logger.info(
         `🔄 Deactivated member ${member.name} (ID: ${member.id}) - ${paymentStatus.daysOverdue} days overdue`
       );
 
@@ -165,10 +166,10 @@ class PaymentDeactivationService {
         const { invalidateESP32Cache } = require('../api/controllers/biometricController');
         if (invalidateESP32Cache) {
           await invalidateESP32Cache();
-          console.log(`🔄 ESP32 cache invalidated for deactivated member ${member.id}`);
+          logger.info(`🔄 ESP32 cache invalidated for deactivated member ${member.id}`);
         }
       } catch (cacheError) {
-        console.error('❌ Error invalidating ESP32 cache:', cacheError);
+        logger.error({ err: cacheError }, 'error invalidating ESP32 cache');
       }
 
       // Delete fingerprint slot from sensor to free capacity
@@ -178,10 +179,16 @@ class PaymentDeactivationService {
           await deleteFingerprint(member.id);
         }
       } catch (deleteError) {
-        console.error(`❌ Error deleting fingerprint for member ${member.id}:`, deleteError);
+        logger.error(
+          { err: deleteError, memberId: member.id },
+          'error deleting fingerprint on deactivation'
+        );
       }
     } catch (error) {
-      console.error(`❌ Error deactivating member ${member.name} (ID: ${member.id}):`, error);
+      logger.error(
+        { err: error, memberId: member.id, memberName: member.name },
+        'error deactivating member'
+      );
       throw error;
     }
   }
@@ -226,9 +233,9 @@ class PaymentDeactivationService {
         eventData.raw_data,
       ]);
 
-      console.log(`📝 Logged deactivation event for member ${member.id}`);
+      logger.info(`📝 Logged deactivation event for member ${member.id}`);
     } catch (error) {
-      console.error('❌ Error logging deactivation event:', error);
+      logger.error({ err: error }, 'error logging deactivation event');
     }
   }
 
@@ -298,13 +305,13 @@ class PaymentDeactivationService {
             });
           }
         } catch (error) {
-          console.error(`Error checking member ${member.id}:`, error);
+          logger.error({ err: error, memberId: member.id }, 'error checking member payment status');
         }
       }
 
       return overdueMembers;
     } catch (error) {
-      console.error('Error getting overdue members:', error);
+      logger.error({ err: error }, 'error getting overdue members');
       return [];
     }
   }

@@ -1,13 +1,14 @@
 const { pool } = require('../../config/sqlite');
 const settingsCache = require('../../services/settingsCache');
+const logger = require('../../utils/logger').child({ service: 'settingsController' });
 
 // Get all settings
 exports.getAllSettings = async (req, res) => {
-  console.log('getAllSettings called');
+  logger.info('getAllSettings called');
   try {
-    console.log('Executing settings query...');
+    logger.info('Executing settings query...');
     const settingsResult = await pool.query('SELECT key, value FROM settings');
-    console.log('Settings query result:', settingsResult.rows);
+    logger.debug({ rowCount: settingsResult.rows.length }, 'settings query result');
 
     const settings = {};
     for (const { key, value: rawValue } of settingsResult.rows) {
@@ -30,10 +31,10 @@ exports.getAllSettings = async (req, res) => {
     settings.biometric_port_env = process.env.BIOMETRIC_PORT || '8080';
     settings.biometric_host_env = process.env.BIOMETRIC_HOST || '0.0.0.0';
 
-    console.log('Final settings object:', settings);
+    logger.debug({ keyCount: Object.keys(settings).length }, 'settings loaded');
     res.json(settings);
   } catch (err) {
-    console.error('Error getting all settings', err);
+    logger.error({ err: err }, 'error getting all settings');
     res.status(500).json({ message: 'Failed to get settings' });
   }
 };
@@ -87,7 +88,7 @@ exports.updateAllSettings = async (req, res) => {
     res.json({ message: 'Settings updated successfully' });
   } catch (err) {
     await pool.query('ROLLBACK');
-    console.error('Error updating all settings', err);
+    logger.error({ err: err }, 'error updating all settings');
     res.status(500).json({ message: 'Failed to update settings' });
   }
 };

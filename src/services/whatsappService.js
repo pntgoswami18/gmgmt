@@ -1,5 +1,6 @@
 const { pool } = require('../config/sqlite');
 const settingsCache = require('./settingsCache');
+const logger = require('../utils/logger').child({ service: 'whatsapp' });
 
 class WhatsAppService {
   constructor() {
@@ -16,13 +17,13 @@ class WhatsAppService {
    */
   async sendWelcomeMessage(memberId, memberName, memberPhone, customMessage = null) {
     try {
-      console.log(`📱 Sending WhatsApp welcome message to member ${memberId} (${memberName})`);
+      logger.info(`📱 Sending WhatsApp welcome message to member ${memberId} (${memberName})`);
 
       // Get WhatsApp settings from cache
       const isEnabled = settingsCache.getBoolean('whatsapp_welcome_enabled', false);
 
       if (!isEnabled) {
-        console.log('📱 WhatsApp welcome messages are disabled');
+        logger.info('📱 WhatsApp welcome messages are disabled');
         return { success: false, error: 'WhatsApp welcome messages are disabled' };
       }
 
@@ -35,7 +36,7 @@ class WhatsAppService {
 
       // Validate phone number
       if (!memberPhone || !this.isValidPhone(memberPhone)) {
-        console.log(`📱 Invalid phone number for member ${memberId}: ${memberPhone}`);
+        logger.info(`📱 Invalid phone number for member ${memberId}: ${memberPhone}`);
         return { success: false, error: 'Invalid phone number' };
       }
 
@@ -57,7 +58,7 @@ class WhatsAppService {
         'welcome'
       );
 
-      console.log(`📱 WhatsApp welcome message prepared for ${memberName}: ${whatsappUrl}`);
+      logger.info(`📱 WhatsApp welcome message prepared for ${memberName}: ${whatsappUrl}`);
 
       return {
         success: true,
@@ -66,7 +67,7 @@ class WhatsAppService {
         formattedMessage: personalizedMessage,
       };
     } catch (error) {
-      console.error('📱 Error sending WhatsApp welcome message:', error);
+      logger.error({ err: error }, 'error sending WhatsApp welcome message');
       return { success: false, error: error.message };
     }
   }
@@ -154,9 +155,9 @@ class WhatsAppService {
         [memberId, memberName, phone, message, type, logData.timestamp, 'prepared']
       );
 
-      console.log(`📱 WhatsApp message logged for member ${memberId}`);
+      logger.info(`📱 WhatsApp message logged for member ${memberId}`);
     } catch (error) {
-      console.error('📱 Error logging WhatsApp message:', error);
+      logger.error({ err: error }, 'error logging WhatsApp message');
     }
   }
 
@@ -179,7 +180,7 @@ class WhatsAppService {
 
       return result.rows;
     } catch (error) {
-      console.error('📱 Error getting WhatsApp history:', error);
+      logger.error({ err: error }, 'error getting WhatsApp history');
       return [];
     }
   }
@@ -197,7 +198,7 @@ class WhatsAppService {
           'Welcome to our gym! Your biometric enrollment is complete. You can now access the gym using your fingerprint. Enjoy your workouts!',
       };
     } catch (error) {
-      console.error('📱 Error getting WhatsApp settings:', error);
+      logger.error({ err: error }, 'error getting WhatsApp settings');
       return {
         enabled: false,
         message:
