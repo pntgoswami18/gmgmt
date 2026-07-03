@@ -451,7 +451,9 @@ async function runInTransaction(callback) {
     db.exec('COMMIT');
     return result;
   } catch (err) {
-    db.exec('ROLLBACK');
+    try {
+      db.exec('ROLLBACK');
+    } catch (_) {}
     throw err;
   } finally {
     releaseLock();
