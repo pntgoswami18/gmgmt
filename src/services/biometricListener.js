@@ -83,7 +83,7 @@ class BiometricListener extends EventEmitter {
 
         // ESP32 specific handling
         if (biometricData.deviceType === 'esp32_door_lock') {
-          logger.info(`📱 ESP32 Door Lock message from ${biometricData.deviceId}`);
+          logger.info({ deviceId: biometricData.deviceId }, 'ESP32 door lock message received');
           biometricData.isESP32Device = true;
         }
       }

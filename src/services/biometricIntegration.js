@@ -564,7 +564,7 @@ class BiometricIntegration {
   notifyUnknownUser(biometricData) {
     const message = 'UNKNOWN_USER';
     this.listener.broadcast(message);
-    logger.info(`❌ Unknown user: ${biometricData.userId}`);
+    logger.info({ userId: biometricData.userId }, 'unknown biometric user');
   }
 
   logFailedAttempt(biometricData) {
