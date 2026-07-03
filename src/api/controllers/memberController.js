@@ -1,6 +1,7 @@
 const { pool, runInTransaction } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
 const { uploadSingle } = require('../../config/multer');
+const settingsCache = require('../../services/settingsCache');
 
 const normalizePhone = (value) => {
   if (value === undefined || value === null) {
@@ -213,10 +214,7 @@ exports.getMemberDetails = async (req, res) => {
 
     // Get unused referral discount if referral system is enabled
     let unusedReferralDiscount = null;
-    const referralSystemQuery = await pool.query('SELECT value FROM settings WHERE key = ?', [
-      'referral_system_enabled',
-    ]);
-    const referralSystemEnabled = referralSystemQuery.rows[0]?.value === 'true';
+    const referralSystemEnabled = settingsCache.getBoolean('referral_system_enabled', false);
 
     if (referralSystemEnabled) {
       const referralDiscountQuery = `
@@ -495,7 +493,7 @@ exports.setActiveStatus = async (req, res) => {
   const { is_active } = req.body;
   try {
     const existing = await pool.query('SELECT id FROM members WHERE id = $1', [id]);
-    if (existing.rowCount === 0) {
+    if (existing.rows.length === 0) {
       return res.status(404).json({ message: 'Member not found' });
     }
     const val = String(is_active) === '0' || is_active === false ? 0 : 1;

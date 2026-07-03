@@ -1,4 +1,5 @@
 const { pool } = require('../../config/sqlite');
+const settingsCache = require('../../services/settingsCache');
 
 // This endpoint would be called by the biometric device
 const performCheckIn = async (resolvedMemberId, res) => {
@@ -17,12 +18,16 @@ const performCheckIn = async (resolvedMemberId, res) => {
   }
 
   // Enforce configured session windows
-  const settingsRes = await pool.query(`
-        SELECT key, value FROM settings WHERE key IN (
-            'morning_session_start','morning_session_end','evening_session_start','evening_session_end','cross_session_checkin_restriction'
-        )
-    `);
-  const settingsMap = Object.fromEntries(settingsRes.rows.map((r) => [r.key, r.value]));
+  const settingsMap = {
+    morning_session_start: settingsCache.get('morning_session_start', '05:00'),
+    morning_session_end: settingsCache.get('morning_session_end', '11:00'),
+    evening_session_start: settingsCache.get('evening_session_start', '16:00'),
+    evening_session_end: settingsCache.get('evening_session_end', '22:00'),
+    cross_session_checkin_restriction: settingsCache.get(
+      'cross_session_checkin_restriction',
+      'true'
+    ),
+  };
 
   // Check if cross-session restriction is enabled
   const crossSessionRestrictionEnabled =
@@ -67,7 +72,7 @@ const performCheckIn = async (resolvedMemberId, res) => {
       [resolvedMemberId]
     );
 
-    if (todayCheckIns.rowCount > 0) {
+    if (todayCheckIns.rows.length > 0) {
       // Check which session the existing check-in was in
       const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
       const existingMinutesSinceMidnight =
@@ -129,7 +134,7 @@ exports.checkIn = async (req, res) => {
         'SELECT member_id FROM member_biometrics WHERE device_user_id = $1',
         [device_user_id]
       );
-      if (map.rowCount > 0) {
+      if (map.rows.length > 0) {
         resolvedMemberId = map.rows[0].member_id;
       } else {
         return res.status(404).json({ message: 'No member linked to this device user id' });
@@ -158,7 +163,7 @@ exports.deviceWebhook = async (req, res) => {
       'SELECT member_id FROM member_biometrics WHERE device_user_id = $1',
       [deviceUserId]
     );
-    if (map.rowCount === 0) {
+    if (map.rows.length === 0) {
       return res.status(404).json({ message: 'No member linked to this device user id' });
     }
     const memberId = map.rows[0].member_id;

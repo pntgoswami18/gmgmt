@@ -1,6 +1,7 @@
 const BiometricListener = require('./biometricListener');
 const { pool } = require('../config/sqlite');
 const whatsappService = require('./whatsappService');
+const settingsCache = require('./settingsCache');
 
 class BiometricIntegration {
   constructor(port = 8080) {
@@ -159,13 +160,17 @@ class BiometricIntegration {
 
       // Enforce session windows and cross-session restrictions (unless admin)
       if (!isAdmin) {
-        // Get session settings
-        const settingsRes = await pool.query(`
-          SELECT key, value FROM settings WHERE key IN (
-            'morning_session_start','morning_session_end','evening_session_start','evening_session_end','cross_session_checkin_restriction'
-          )
-        `);
-        const settingsMap = Object.fromEntries(settingsRes.rows.map((r) => [r.key, r.value]));
+        // Get session settings from cache
+        const settingsMap = {
+          morning_session_start: settingsCache.get('morning_session_start', '05:00'),
+          morning_session_end: settingsCache.get('morning_session_end', '11:00'),
+          evening_session_start: settingsCache.get('evening_session_start', '16:00'),
+          evening_session_end: settingsCache.get('evening_session_end', '22:00'),
+          cross_session_checkin_restriction: settingsCache.get(
+            'cross_session_checkin_restriction',
+            'true'
+          ),
+        };
 
         // Check if cross-session restriction is enabled
         const crossSessionRestrictionEnabled =
@@ -234,7 +239,7 @@ class BiometricIntegration {
             [member.id, dateStr]
           );
 
-          if (todayCheckIns.rowCount > 0) {
+          if (todayCheckIns.rows.length > 0) {
             // Check which session the existing check-in was in
             const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
             const existingMinutesSinceMidnight =
@@ -441,7 +446,7 @@ class BiometricIntegration {
       // Check payment status if plan has duration
       if (plan.duration_days) {
         try {
-          const gracePeriodDays = await getGracePeriodSetting(pool);
+          const gracePeriodDays = getGracePeriodSetting();
           const paymentStatus = checkMemberPaymentStatus(
             member,
             plan,

@@ -15,6 +15,9 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
+// Supports both PostgreSQL-style positional placeholders ($1, $2, …) and SQLite
+// native (?) interchangeably — rewrites $N → ? before execution. This shim exists
+// for backward compatibility; new queries should use ? directly.
 function replacePgParamsWithQMarks(sql) {
   // Replace $1, $2 ... with ? for sqlite
   let text = sql.replace(/\$(\d+)/g, '?');

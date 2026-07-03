@@ -128,7 +128,7 @@ exports.deleteClass = async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query('SELECT id FROM classes WHERE id = $1', [id]);
-    if (existing.rowCount === 0) {
+    if (existing.rows.length === 0) {
       return res.status(404).json({ message: 'Class not found' });
     }
     await pool.query('DELETE FROM classes WHERE id = $1', [id]);

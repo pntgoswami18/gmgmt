@@ -48,7 +48,7 @@ exports.deletePlan = async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query('SELECT id FROM membership_plans WHERE id = $1', [id]);
-    if (existing.rowCount === 0) {
+    if (existing.rows.length === 0) {
       return res.status(404).json({ message: 'Plan not found' });
     }
     await pool.query('DELETE FROM membership_plans WHERE id = $1', [id]);

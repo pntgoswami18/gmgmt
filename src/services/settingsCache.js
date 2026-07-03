@@ -1,128 +1,75 @@
-// In-memory settings cache to reduce database queries during validation
 const { pool } = require('../config/sqlite');
 
 class SettingsCache {
   constructor() {
-    this.cache = {
-      gracePeriodDays: null,
-      crossSessionEnabled: null,
-      lastUpdate: null
-    };
-    this.updateInterval = 5 * 60 * 1000; // 5 minutes
-    this.intervalId = null;
+    this._map = new Map();
+    this._lastUpdate = null;
+    this._refreshInterval = 5 * 60 * 1000; // 5 minutes
+    this._intervalId = null;
   }
 
-  /**
-   * Initialize cache and start auto-refresh
-   */
   async initialize() {
-    console.log('🚀 Initializing settings cache...');
     await this.refresh();
-    this.startAutoRefresh();
-    console.log('✅ Settings cache initialized');
+    this._intervalId = setInterval(() => this.refresh(), this._refreshInterval);
   }
 
-  /**
-   * Refresh cache from database
-   */
   async refresh() {
     try {
-      const settings = await pool.query(`
-        SELECT key, value 
-        FROM settings 
-        WHERE key IN ('payment_grace_period_days', 'cross_session_checkin_restriction')
-      `);
-
-      const settingsMap = {};
-      settings.rows.forEach(row => {
-        settingsMap[row.key] = row.value;
-      });
-
-      this.cache = {
-        gracePeriodDays: parseInt(settingsMap.payment_grace_period_days || '3', 10),
-        crossSessionEnabled: settingsMap.cross_session_checkin_restriction === 'true',
-        lastUpdate: Date.now()
-      };
-
-      console.log('🔄 Settings cache refreshed:', {
-        gracePeriodDays: this.cache.gracePeriodDays,
-        crossSessionEnabled: this.cache.crossSessionEnabled,
-        lastUpdate: new Date(this.cache.lastUpdate).toISOString()
-      });
-
-      return this.cache;
-    } catch (error) {
-      console.error('❌ Error refreshing settings cache:', error);
-      // Return cached values if refresh fails
-      return this.cache;
+      const result = await pool.query('SELECT key, value FROM settings');
+      this._map = new Map(result.rows.map((r) => [r.key, r.value]));
+      this._lastUpdate = Date.now();
+    } catch (err) {
+      console.error('[settingsCache] refresh failed:', err.message);
     }
+    return this;
   }
 
-  /**
-   * Start automatic cache refresh
-   */
-  startAutoRefresh() {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-    }
-
-    this.intervalId = setInterval(async () => {
-      console.log('⏰ Auto-refreshing settings cache...');
-      await this.refresh();
-    }, this.updateInterval);
-
-    console.log(`✅ Auto-refresh started (every ${this.updateInterval / 1000 / 60} minutes)`);
+  async invalidate() {
+    return this.refresh();
   }
 
-  /**
-   * Stop automatic cache refresh
-   */
   stopAutoRefresh() {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-      console.log('⏹️  Auto-refresh stopped');
+    if (this._intervalId) {
+      clearInterval(this._intervalId);
+      this._intervalId = null;
     }
   }
 
-  /**
-   * Get grace period days (cached)
-   */
+  // Generic accessor — returns raw string value or defaultValue
+  get(key, defaultValue = null) {
+    return this._map.has(key) ? this._map.get(key) : defaultValue;
+  }
+
+  // Returns boolean: 'true' / true → true, anything else → false
+  getBoolean(key, defaultValue = false) {
+    if (!this._map.has(key)) return defaultValue;
+    const v = this._map.get(key);
+    return v === 'true' || v === true;
+  }
+
+  // Returns integer, or defaultValue if missing / non-finite
+  getInt(key, defaultValue = 0) {
+    const parsed = parseInt(this._map.get(key), 10);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
+  }
+
+  // Backward-compat wrappers used by biometricController
   getGracePeriodDays() {
-    return this.cache.gracePeriodDays || 3; // Default 3 days
+    return this.getInt('payment_grace_period_days', 3);
   }
 
-  /**
-   * Get cross-session enabled status (cached)
-   */
   getCrossSessionEnabled() {
-    return this.cache.crossSessionEnabled !== null 
-      ? this.cache.crossSessionEnabled 
-      : true; // Default true
+    return this.getBoolean('cross_session_checkin_restriction', true);
   }
 
-  /**
-   * Get cache statistics
-   */
   getStats() {
     return {
-      ...this.cache,
-      cacheAge: this.cache.lastUpdate ? Date.now() - this.cache.lastUpdate : null,
-      autoRefreshEnabled: !!this.intervalId
+      size: this._map.size,
+      lastUpdate: this._lastUpdate ? new Date(this._lastUpdate).toISOString() : null,
+      autoRefreshEnabled: !!this._intervalId,
     };
-  }
-
-  /**
-   * Manually invalidate cache (force refresh)
-   */
-  async invalidate() {
-    console.log('🔄 Manually invalidating settings cache...');
-    return await this.refresh();
   }
 }
 
-// Create singleton instance
 const settingsCache = new SettingsCache();
-
 module.exports = settingsCache;
-

@@ -128,17 +128,20 @@ Both `createMember` and `updateMember` catch blocks had an else-branch saying "e
 
 ---
 
-## Phase 3 — Performance & Consistency 🔲 Pending
+## Phase 3 — Performance & Consistency ✅ Complete
 
-### 8. Generalize `settingsCache`
-**File:** `src/services/settingsCache.js`
+**Branch:** `phase3-perf` (merged to `main`)
 
-The cache currently holds only two keys (`payment_grace_period_days`, `cross_session_checkin_restriction`). The attendance check-in path reads 5 settings per request; `whatsappService` and `getMemberDetails` also hit the DB for settings on every call. Expand to a full key/value cache with TTL or explicit invalidation triggered by the settings update endpoint.
+### 8. Generalize `settingsCache` ✅
+**Files:** `src/services/settingsCache.js`, `src/api/controllers/settingsController.js`, and 8 callers
 
-### 9. Standardize the DB result contract
-**File:** `src/config/sqlite.js`
+Replaced the narrow 2-key cache with a full `Map`-backed cache loading all settings rows on startup and every 5 minutes. Added `get(key, default)`, `getBoolean(key, default)`, `getInt(key, default)` accessors; kept `getGracePeriodDays()` / `getCrossSessionEnabled()` wrappers for backward compatibility. `settingsController.updateAllSettings` now calls `settingsCache.invalidate()` after commit so changes take effect immediately. Replaced direct `SELECT FROM settings WHERE key` queries in: `attendanceController` (5-key query per check-in), `biometricController` (4-key query per door scan), `biometricIntegration`, `reportController`, `referralController`, `memberController`, `dateUtils`, `whatsappService`.
 
-The `pool.query` wrapper rewrites `$N` → `?` and `ILIKE` → `LIKE` on every query — a leftover from a PostgreSQL migration. Code across the codebase mixes both placeholder styles inconsistently, and result access mixes `.rows`, `.rowCount`, `.rows.length`, and `.rows[0].count`. Decide on one style (`?` everywhere) and remove the shim, or document it clearly. Standardize all callers to use `.rows` and `.lastInsertId`.
+### 9. Standardize the DB result contract ✅
+**Files:** `src/config/sqlite.js`, `classController.js`, `paymentController.js` (×5), `planController.js`, `memberController.js`
+
+- Added comment to `replacePgParamsWithQMarks` documenting the `$N → ?` shim and its backward-compat purpose.
+- Replaced 8 occurrences of `result.rowCount === 0` on SELECT results with `result.rows.length === 0` (unambiguous; `rowCount` is now used only on UPDATE/DELETE to check rows affected).
 
 ---
 

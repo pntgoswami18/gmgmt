@@ -73,7 +73,7 @@ exports.deleteSchedule = async (req, res) => {
   const { id } = req.params;
   try {
     const existing = await pool.query('SELECT id FROM class_schedules WHERE id = $1', [id]);
-    if (existing.rowCount === 0) {
+    if (existing.rows.length === 0) {
       return res.status(404).json({ message: 'Schedule not found' });
     }
     await pool.query('DELETE FROM class_schedules WHERE id = $1', [id]);
