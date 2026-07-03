@@ -69,7 +69,7 @@ Cache-invalidation HTTP requests were sent to `device.ip_address` from the datab
 ### 8. Pagination NaN / full-table dump
 **Files:** `attendanceController.js`, `biometricController.js`, `memberController.js`, `reportController.js`
 
-`better-sqlite3` converts `NaN` parameters to `NULL`; `LIMIT NULL` in SQLite means no limit, so a non-numeric `?page` or `?limit` query parameter could dump the full table. Fixed by clamping across all 8 paginated endpoints:
+`better-sqlite3` converts `NaN` parameters to `NULL`; `LIMIT NULL` in SQLite means no limit, so a non-numeric `?page` or `?limit` query parameter could dump the full table. Fixed by clamping across all 7 paginated endpoints:
 
 ```js
 const pageNum = Math.max(1, parseInt(page, 10) || 1);
@@ -90,7 +90,7 @@ SQLite does not support `ILIKE`. The `pool.query` shim rewrites it, but inconsis
 ### 11. Runtime crash — duplicate SQL argument
 **File:** `src/api/controllers/biometricController.js`
 
-`getMemberBiometricDetails` passed the SQL string twice as arguments to `pool.query`, causing a runtime crash on every call to that endpoint. Removed the duplicate.
+`getMemberBiometricDetails` passed the same SQL string as both the query and (in place of) its parameters array — `pool.query(sql, sql)` instead of `pool.query(sql, [memberId])` — causing a runtime crash on every call to that endpoint. Fixed to pass the actual parameters array.
 
 ### 12. Node version pin
 **File:** `.nvmrc`
