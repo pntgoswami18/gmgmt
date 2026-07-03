@@ -2,6 +2,7 @@ const http = require('http');
 const { pool } = require('../../config/sqlite');
 const whatsappService = require('../../services/whatsappService');
 const settingsCache = require('../../services/settingsCache');
+const logger = require('../../utils/logger').child({ service: 'biometricController' });
 
 // Get reference to biometric integration instance
 let biometricIntegration = null;
@@ -37,37 +38,32 @@ const getMemberBiometricStatus = async (req, res) => {
   try {
     const { memberId } = req.params;
 
-    logger.info('🔍 getMemberBiometricStatus called for member:', memberId);
-    logger.info('🔍 biometricIntegration available:', !!biometricIntegration);
+    logger.debug(
+      { memberId, serviceAvailable: !!biometricIntegration },
+      'getMemberBiometricStatus'
+    );
 
     if (!biometricIntegration) {
-      logger.info('❌ Biometric service not available');
       return res.status(503).json({
         success: false,
         message: 'Biometric service not available',
       });
     }
 
-    logger.info('🔍 Calling biometricIntegration.getMemberBiometricStatus...');
     const status = await biometricIntegration.getMemberBiometricStatus(parseInt(memberId));
 
-    logger.info('🔍 Status result:', status);
-
     if (!status) {
-      logger.info('❌ Status is null, returning Member not found');
       return res.status(404).json({
         success: false,
         message: 'Member not found',
       });
     }
-
-    logger.info('✅ Successfully got biometric status');
     res.json({
       success: true,
       data: status,
     });
   } catch (error) {
-    logger.error('❌ Error getting member biometric status:', error);
+    logger.error({ err: error }, 'error getting member biometric status');
     res.status(500).json({
       success: false,
       message: 'Failed to get biometric status',
@@ -118,7 +114,7 @@ const startEnrollment = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error starting enrollment:', error);
+    logger.error({ err: error }, 'error starting enrollment');
     res.status(500).json({
       success: false,
       message: 'Failed to start enrollment',
@@ -172,7 +168,7 @@ const stopEnrollment = async (req, res) => {
         cancelsSent++;
         results.push({ deviceId: device.device_id, status: 'sent' });
       } catch (error) {
-        logger.error(`Failed to send cancel to ${device.device_id}:`, error.message);
+        logger.error({ err: error, deviceId: device.device_id }, 'failed to send cancel');
         results.push({ deviceId: device.device_id, status: 'failed', error: error.message });
       }
     }
@@ -209,7 +205,7 @@ const stopEnrollment = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error stopping enrollment:', error);
+    logger.error({ err: error }, 'error stopping enrollment');
     res.status(500).json({
       success: false,
       message: 'Failed to stop enrollment',
@@ -259,7 +255,7 @@ const cancelEnrollment = async (req, res) => {
         cancelsSent++;
         results.push({ deviceId: device.device_id, status: 'sent' });
       } catch (error) {
-        logger.error(`Failed to send cancel to ${device.device_id}:`, error.message);
+        logger.error({ err: error, deviceId: device.device_id }, 'failed to send cancel');
         results.push({ deviceId: device.device_id, status: 'failed', error: error.message });
       }
     }
@@ -292,7 +288,7 @@ const cancelEnrollment = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error cancelling enrollment:', error);
+    logger.error({ err: error }, 'error cancelling enrollment');
     res.status(500).json({
       success: false,
       message: 'Failed to cancel enrollment',
@@ -327,7 +323,7 @@ const removeBiometricData = async (req, res) => {
       });
     }
   } catch (error) {
-    logger.error('Error removing biometric data:', error);
+    logger.error({ err: error }, 'error removing biometric data');
     res.status(500).json({
       success: false,
       message: 'Failed to remove biometric data',
@@ -357,7 +353,7 @@ const getEnrollmentStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error getting enrollment status:', error);
+    logger.error({ err: error }, 'error getting enrollment status');
     res.status(500).json({
       success: false,
       message: 'Failed to get enrollment status',
@@ -431,7 +427,7 @@ const getBiometricEvents = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error getting biometric events:', error);
+    logger.error({ err: error }, 'error getting biometric events');
     res.status(500).json({
       success: false,
       message: 'Failed to get biometric events',
@@ -525,7 +521,7 @@ const getSystemStatus = async (req, res) => {
       data: status,
     });
   } catch (error) {
-    logger.error('Error getting system status:', error);
+    logger.error({ err: error }, 'error getting system status');
     res.status(500).json({
       success: false,
       message: 'Failed to get system status',
@@ -584,7 +580,7 @@ const getMembersWithoutBiometric = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error getting members without biometric:', error);
+    logger.error({ err: error }, 'error getting members without biometric');
     res.status(500).json({
       success: false,
       message: 'Failed to get members without biometric data',
@@ -643,7 +639,7 @@ const getMembersWithBiometric = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error getting members with biometric:', error);
+    logger.error({ err: error }, 'error getting members with biometric');
     res.status(500).json({
       success: false,
       message: 'Failed to get members with biometric data',
@@ -797,7 +793,7 @@ const testConnection = async (req, res) => {
       });
     }
   } catch (error) {
-    logger.error('Error testing connection:', error);
+    logger.error({ err: error }, 'error testing connection');
     res.status(500).json({
       success: false,
       message: 'Failed to test connection',
@@ -888,8 +884,8 @@ const manualEnrollment = async (req, res) => {
       }
     } catch (whatsappError) {
       logger.error(
-        '📱 Error sending WhatsApp welcome message (manual enrollment):',
-        whatsappError
+        { err: whatsappError },
+        'error sending WhatsApp welcome message (manual enrollment)'
       );
     }
 
@@ -903,7 +899,7 @@ const manualEnrollment = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error('Error in manual enrollment:', error);
+    logger.error({ err: error }, 'error in manual enrollment');
     res.status(500).json({
       success: false,
       message: 'Failed to assign device user ID',
@@ -967,7 +963,7 @@ const getMemberBiometricDetails = async (req, res) => {
       data: biometricDetails,
     });
   } catch (error) {
-    logger.error('Error getting member biometric details:', error);
+    logger.error({ err: error }, 'error getting member biometric details');
     res.status(500).json({
       success: false,
       message: 'Failed to get member biometric details',
@@ -1010,7 +1006,7 @@ const unlockDoorRemotely = async (req, res) => {
       commandResult,
     });
   } catch (error) {
-    logger.error('Error unlocking door remotely:', error);
+    logger.error({ err: error }, 'error unlocking door remotely');
     res.status(500).json({
       success: false,
       message: 'Failed to unlock door remotely',
@@ -1046,7 +1042,7 @@ const startRemoteEnrollment = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    logger.error('Error starting remote enrollment:', error);
+    logger.error({ err: error }, 'error starting remote enrollment');
     res.status(500).json({
       success: false,
       message: 'Failed to start remote enrollment',
@@ -1074,7 +1070,7 @@ const getDeviceStatus = async (req, res) => {
       status: status,
     });
   } catch (error) {
-    logger.error('Error getting device status:', error);
+    logger.error({ err: error }, 'error getting device status');
     res.status(500).json({
       success: false,
       message: 'Failed to get device status',
@@ -1124,7 +1120,7 @@ const getAllDevices = async (req, res) => {
       count: devicesWithStatus.length,
     });
   } catch (error) {
-    logger.error('Error getting all devices:', error);
+    logger.error({ err: error }, 'error getting all devices');
     res.status(500).json({
       success: false,
       message: 'Failed to get devices',
@@ -1218,9 +1214,9 @@ const esp32Webhook = async (req, res) => {
     }
 
     if (!biometricIntegration) {
-      logger.warn('⚠️ Biometric integration not available, storing raw event');
-      logger.warn('⚠️ This means WebSocket updates and enrollment status updates will not work');
-      logger.warn('⚠️ Check if biometricIntegration service is properly initialized');
+      logger.warn(
+        'biometric integration not available — WebSocket updates and enrollment will not work; check service initialization'
+      );
       return res.json({
         success: true,
         message: 'Event received but biometric integration not active',
@@ -1279,7 +1275,7 @@ const esp32Webhook = async (req, res) => {
                 [deviceId, firmwareVersion]
               );
             } catch (otaErr) {
-              logger.error('Error updating OTA log:', otaErr);
+              logger.error({ err: otaErr }, 'error updating OTA log');
             }
           }
 
@@ -1299,7 +1295,7 @@ const esp32Webhook = async (req, res) => {
 
           await biometricIntegration.logBiometricEvent(biometricEvent);
         } catch (error) {
-          logger.error(`❌ Error logging heartbeat from ${deviceId}:`, error);
+          logger.error({ err: error, deviceId }, 'error logging heartbeat');
         }
       });
 
@@ -1351,7 +1347,7 @@ const esp32Webhook = async (req, res) => {
             );
           }
         } catch (otaErr) {
-          logger.error('Error updating OTA log:', otaErr);
+          logger.error({ err: otaErr }, 'error updating OTA log');
         }
       }
     } else if (event === 'TimeLog') {
@@ -1370,7 +1366,7 @@ const esp32Webhook = async (req, res) => {
               try {
                 await biometricIntegration.logMemberAttendance(member, timestamp, eventData);
               } catch (logError) {
-                logger.error('❌ Error logging attendance (async):', logError);
+                logger.error({ err: logError }, 'error logging attendance (async)');
               }
             });
           }
@@ -1439,7 +1435,7 @@ const esp32Webhook = async (req, res) => {
             `✅ Enrollment progress updated for member ${canonicalMemberId}: ${enrollmentStep}`
           );
         } catch (progressError) {
-          logger.error('❌ Error updating enrollment progress:', progressError);
+          logger.error({ err: progressError }, 'error updating enrollment progress');
         }
       } else if (status === 'enrollment_success') {
         eventType = 'enrollment';
@@ -1464,7 +1460,7 @@ const esp32Webhook = async (req, res) => {
               memberName = memberResult.rows[0].name;
             }
           } catch (nameError) {
-            logger.warn('Could not fetch member name:', nameError.message);
+            logger.warn({ err: nameError }, 'could not fetch member name');
           }
 
           // Send WebSocket update to frontend immediately
@@ -1501,7 +1497,7 @@ const esp32Webhook = async (req, res) => {
 
           logger.info(`✅ Enrollment status updated for member ${canonicalMemberId}`);
         } catch (enrollmentError) {
-          logger.error('❌ Error updating enrollment status:', enrollmentError);
+          logger.error({ err: enrollmentError }, 'error updating enrollment status');
         }
       } else if (status === 'enrollment_cancelled') {
         eventType = 'enrollment_cancelled';
@@ -1522,7 +1518,7 @@ const esp32Webhook = async (req, res) => {
               memberName = memberResult.rows[0].name;
             }
           } catch (nameError) {
-            logger.warn('Could not fetch member name:', nameError.message);
+            logger.warn({ err: nameError }, 'could not fetch member name');
           }
 
           // Send WebSocket update to frontend immediately
@@ -1558,7 +1554,7 @@ const esp32Webhook = async (req, res) => {
 
           logger.info(`⏹️ Enrollment cancellation status updated for member ${canonicalMemberId}`);
         } catch (enrollmentError) {
-          logger.error('❌ Error updating enrollment cancellation status:', enrollmentError);
+          logger.error({ err: enrollmentError }, 'error updating enrollment cancellation status');
         }
       } else {
         eventType = 'enrollment_failed';
@@ -1584,7 +1580,7 @@ const esp32Webhook = async (req, res) => {
 
           logger.info(`❌ Enrollment failure handled for member ${canonicalMemberId}`);
         } catch (enrollmentError) {
-          logger.error('❌ Error updating enrollment failure status:', enrollmentError);
+          logger.error({ err: enrollmentError }, 'error updating enrollment failure status');
         }
       }
 
@@ -1597,7 +1593,7 @@ const esp32Webhook = async (req, res) => {
           ]);
           logger.info(`✅ Updated member ${memberIdToUse} with biometric_id ${biometricId}`);
         } catch (updateError) {
-          logger.error('❌ Failed to update member biometric_id:', updateError);
+          logger.error({ err: updateError }, 'failed to update member biometric_id');
         }
       }
     }
@@ -1612,7 +1608,7 @@ const esp32Webhook = async (req, res) => {
         await biometricIntegration.handleRestoreSuccess({ userId, memberId });
         logger.info(`✅ Fingerprint restore recorded: member ${memberId} → slot ${userId}`);
       } catch (restoreError) {
-        logger.error('❌ Error handling restore_success:', restoreError);
+        logger.error({ err: restoreError }, 'error handling restore_success');
       }
     }
 
@@ -1632,7 +1628,7 @@ const esp32Webhook = async (req, res) => {
         ]
       );
     } catch (deviceUpdateError) {
-      logger.error(`❌ Error updating device ${deviceId}:`, deviceUpdateError);
+      logger.error({ err: deviceUpdateError, deviceId }, 'error updating device');
     }
 
     // Log the biometric event
@@ -1661,7 +1657,7 @@ const esp32Webhook = async (req, res) => {
       timestamp: timestamp,
     });
   } catch (error) {
-    logger.error('❌ Error processing ESP32 webhook:', error);
+    logger.error({ err: error }, 'error processing ESP32 webhook');
     res.status(500).json({
       success: false,
       message: 'Failed to process ESP32 data',
@@ -1907,7 +1903,7 @@ const validateBiometricId = async (req, res) => {
                 await invalidateESP32Cache();
               }
             } catch (cacheError) {
-              logger.error('❌ Error invalidating ESP32 cache:', cacheError);
+              logger.error({ err: cacheError }, 'error invalidating ESP32 cache');
             }
 
             // Delete fingerprint slot to free sensor capacity
@@ -1916,10 +1912,10 @@ const validateBiometricId = async (req, res) => {
                 await biometricIntegration.deleteFingerprint(member.member_id);
               }
             } catch (deleteError) {
-              logger.error('❌ Error deleting fingerprint on auto-deactivation:', deleteError);
+              logger.error({ err: deleteError }, 'error deleting fingerprint on auto-deactivation');
             }
           } catch (deactivationError) {
-            logger.error('❌ Error deactivating member:', deactivationError);
+            logger.error({ err: deactivationError }, 'error deactivating member');
           }
 
           logBiometricValidationOutcome({
@@ -1939,7 +1935,7 @@ const validateBiometricId = async (req, res) => {
           });
         }
       } catch (paymentError) {
-        logger.error('❌ Error checking payment status:', paymentError);
+        logger.error({ err: paymentError }, 'error checking payment status');
         // Continue with authorization if payment check fails
       }
     }
@@ -1962,7 +1958,7 @@ const validateBiometricId = async (req, res) => {
       paymentStatus: paymentStatus,
     });
   } catch (error) {
-    logger.error('❌ Error validating biometric ID:', error);
+    logger.error({ err: error }, 'error validating biometric ID');
     res.status(500).json({
       authorized: false,
       error: 'validation_failed',
@@ -2035,7 +2031,7 @@ const updateMemberCache = async (req, res) => {
     );
     res.json(response);
   } catch (error) {
-    logger.error('❌ Error updating member cache:', error);
+    logger.error({ err: error }, 'error updating member cache');
     res.status(500).json({
       success: false,
       error: 'cache_update_failed',
@@ -2158,14 +2154,14 @@ const invalidateESP32Cache = async () => {
           deviceError.message
         );
         logger.error(`❌ Device URL was: http://${device.ip_address}/api/cache/invalidate`);
-        logger.error(`❌ Error details:`, deviceError);
+        logger.error({ err: deviceError }, 'error details');
         // Continue with other devices even if one fails
       }
     }
 
     logger.info('✅ ESP32 cache invalidation process completed');
   } catch (error) {
-    logger.error('❌ Error during ESP32 cache invalidation:', error);
+    logger.error({ err: error }, 'error during ESP32 cache invalidation');
     throw error;
   }
 };
@@ -2188,7 +2184,7 @@ const syncBiometricData = async (_req, res) => {
       data: summary,
     });
   } catch (error) {
-    logger.error('❌ Error syncing biometric data:', error);
+    logger.error({ err: error }, 'error syncing biometric data');
     res.status(500).json({
       success: false,
       message: 'Failed to sync biometric data',

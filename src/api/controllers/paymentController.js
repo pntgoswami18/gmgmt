@@ -204,7 +204,7 @@ exports.recordManualPayment = async (req, res) => {
           }
         }
       } catch (referralError) {
-        logger.error('Error applying referral discount:', referralError);
+        logger.error({ err: referralError }, 'error applying referral discount');
         // Don't fail the payment if referral discount fails, but log it
       }
 

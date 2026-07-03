@@ -20,7 +20,7 @@ class SettingsCache {
       this._map = new Map(result.rows.map((r) => [r.key, r.value]));
       this._lastUpdate = Date.now();
     } catch (err) {
-      logger.error('[settingsCache] refresh failed:', err.message);
+      logger.error({ err }, 'settingsCache refresh failed');
     }
     return this;
   }

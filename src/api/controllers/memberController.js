@@ -246,7 +246,7 @@ exports.getMemberDetails = async (req, res) => {
       referralSystemEnabled,
     });
   } catch (err) {
-    logger.error('Error fetching member details:', err);
+    logger.error({ err: err }, 'error fetching member details');
     res.status(500).json({ message: err.message });
   }
 };
@@ -480,7 +480,7 @@ exports.deleteMember = async (req, res) => {
         await invalidateESP32Cache();
       }
     } catch (cacheErr) {
-      logger.error('ESP32 cache invalidation after member delete:', cacheErr);
+      logger.error({ err: cacheErr }, 'eSP32 cache invalidation after member delete');
     }
     res.json({ message: 'Member deleted successfully' });
   } catch (err) {
@@ -511,7 +511,7 @@ exports.setActiveStatus = async (req, res) => {
         await invalidateESP32Cache();
       }
     } catch (cacheError) {
-      logger.error('❌ Error invalidating ESP32 cache:', cacheError);
+      logger.error({ err: cacheError }, 'error invalidating ESP32 cache');
     }
 
     // Manage fingerprint slot based on new status
@@ -526,7 +526,7 @@ exports.setActiveStatus = async (req, res) => {
         await restoreFingerprint(id);
       }
     } catch (fingerprintError) {
-      logger.error('❌ Error managing fingerprint slot:', fingerprintError);
+      logger.error({ err: fingerprintError }, 'error managing fingerprint slot');
       // Don't fail the main operation if fingerprint management fails
     }
 

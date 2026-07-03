@@ -74,7 +74,7 @@ const sendEmail = async (template, data) => {
         logger.info('Email sent: ' + info.response);
         return { success: true, info };
     } catch (error) {
-        logger.error('Error sending email:', error);
+        logger.error({ err: error }, 'error sending email');
         return { success: false, error };
     }
 };

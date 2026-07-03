@@ -119,8 +119,10 @@ const wss = new WebSocket.Server({
 
 // WebSocket connection handling
 wss.on('connection', (ws, req) => {
-  logger.info('🔌 WebSocket client connected from:', req.socket.remoteAddress);
-  logger.info('🔌 Biometric integration available:', !!app.biometricIntegration);
+  logger.info(
+    { remoteAddress: req.socket.remoteAddress, biometricAvailable: !!app.biometricIntegration },
+    'WebSocket client connected'
+  );
 
   // Add client to biometric integration if available
   if (app.biometricIntegration) {
@@ -138,7 +140,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('error', (error) => {
-    logger.error('WebSocket error:', error);
+    logger.error({ err: error }, 'webSocket error');
     if (app.biometricIntegration) {
       app.biometricIntegration.removeWebSocketClient(ws);
     }
@@ -180,7 +182,7 @@ const startServer = async () => {
         } = require('./api/routes/firmware');
         const biometricPort = process.env.BIOMETRIC_PORT || 8080;
 
-        logger.info('🔐 Creating biometric integration instance on port:', biometricPort);
+        logger.info({ port: biometricPort }, 'creating biometric integration instance');
         const biometricIntegration = new BiometricIntegration(biometricPort);
 
         logger.info('🔐 Starting biometric integration...');
@@ -194,7 +196,7 @@ const startServer = async () => {
         app.biometricIntegration = biometricIntegration;
         logger.info('✅ Biometric integration started successfully');
       } catch (error) {
-        logger.error('❌ Failed to start biometric integration:', error);
+        logger.error({ err: error }, 'failed to start biometric integration');
       }
     } else {
       logger.info('⚠️ ENABLE_BIOMETRIC is not true, biometric integration disabled');
@@ -214,9 +216,9 @@ const startServer = async () => {
         try {
           logger.info('🔄 Running initial payment deactivation check...');
           const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-          logger.info('✅ Initial payment deactivation check completed:', result);
+          logger.info({ result }, 'initial payment deactivation check completed');
         } catch (error) {
-          logger.error('❌ Error in initial payment deactivation check:', error);
+          logger.error({ err: error }, 'error in initial payment deactivation check');
         }
       }, 60000); // 1 minute delay
 
@@ -225,9 +227,9 @@ const startServer = async () => {
         try {
           logger.info('🔄 Running scheduled payment deactivation check...');
           const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-          logger.info('✅ Scheduled payment deactivation check completed:', result);
+          logger.info({ result }, 'scheduled payment deactivation check completed');
         } catch (error) {
-          logger.error('❌ Error in scheduled payment deactivation check:', error);
+          logger.error({ err: error }, 'error in scheduled payment deactivation check');
         }
       }, deactivationInterval);
 
@@ -247,9 +249,9 @@ const startServer = async () => {
           try {
             logger.info('🔄 Running daily comprehensive payment deactivation check...');
             const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-            logger.info('✅ Daily payment deactivation check completed:', result);
+            logger.info({ result }, 'daily payment deactivation check completed');
           } catch (error) {
-            logger.error('❌ Error in daily payment deactivation check:', error);
+            logger.error({ err: error }, 'error in daily payment deactivation check');
           }
         };
 
@@ -263,10 +265,10 @@ const startServer = async () => {
         `✅ Automatic payment deactivation service started (every 6 hours + daily at 2 AM)`
       );
     } catch (error) {
-      logger.error('❌ Failed to start payment deactivation service:', error);
+      logger.error({ err: error }, 'failed to start payment deactivation service');
     }
   } catch (error) {
-    logger.error('Failed to start server:', error);
+    logger.error({ err: error }, 'failed to start server');
     process.exit(1);
   }
 };

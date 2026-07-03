@@ -268,7 +268,7 @@ exports.getAllAttendance = async (req, res) => {
       },
     });
   } catch (err) {
-    logger.error('Error fetching all attendance:', err);
+    logger.error({ err: err }, 'error fetching all attendance');
     res.status(500).json({ message: err.message });
   }
 };

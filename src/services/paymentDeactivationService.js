@@ -121,10 +121,10 @@ class PaymentDeactivationService {
         deactivatedMemberDetails: this.deactivatedMembers,
       };
 
-      logger.info('✅ Payment deactivation check completed:', summary);
+      logger.info({ summary }, 'payment deactivation check completed');
       return summary;
     } catch (error) {
-      logger.error('❌ Error in payment deactivation service:', error);
+      logger.error({ err: error }, 'error in payment deactivation service');
       throw error;
     } finally {
       this.isRunning = false;
@@ -169,7 +169,7 @@ class PaymentDeactivationService {
           logger.info(`🔄 ESP32 cache invalidated for deactivated member ${member.id}`);
         }
       } catch (cacheError) {
-        logger.error('❌ Error invalidating ESP32 cache:', cacheError);
+        logger.error({ err: cacheError }, 'error invalidating ESP32 cache');
       }
 
       // Delete fingerprint slot from sensor to free capacity
@@ -179,10 +179,16 @@ class PaymentDeactivationService {
           await deleteFingerprint(member.id);
         }
       } catch (deleteError) {
-        logger.error(`❌ Error deleting fingerprint for member ${member.id}:`, deleteError);
+        logger.error(
+          { err: deleteError, memberId: member.id },
+          'error deleting fingerprint on deactivation'
+        );
       }
     } catch (error) {
-      logger.error(`❌ Error deactivating member ${member.name} (ID: ${member.id}):`, error);
+      logger.error(
+        { err: error, memberId: member.id, memberName: member.name },
+        'error deactivating member'
+      );
       throw error;
     }
   }
@@ -229,7 +235,7 @@ class PaymentDeactivationService {
 
       logger.info(`📝 Logged deactivation event for member ${member.id}`);
     } catch (error) {
-      logger.error('❌ Error logging deactivation event:', error);
+      logger.error({ err: error }, 'error logging deactivation event');
     }
   }
 
@@ -299,13 +305,13 @@ class PaymentDeactivationService {
             });
           }
         } catch (error) {
-          logger.error(`Error checking member ${member.id}:`, error);
+          logger.error({ err: error, memberId: member.id }, 'error checking member payment status');
         }
       }
 
       return overdueMembers;
     } catch (error) {
-      logger.error('Error getting overdue members:', error);
+      logger.error({ err: error }, 'error getting overdue members');
       return [];
     }
   }

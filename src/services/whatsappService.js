@@ -67,7 +67,7 @@ class WhatsAppService {
         formattedMessage: personalizedMessage,
       };
     } catch (error) {
-      logger.error('📱 Error sending WhatsApp welcome message:', error);
+      logger.error({ err: error }, 'error sending WhatsApp welcome message');
       return { success: false, error: error.message };
     }
   }
@@ -157,7 +157,7 @@ class WhatsAppService {
 
       logger.info(`📱 WhatsApp message logged for member ${memberId}`);
     } catch (error) {
-      logger.error('📱 Error logging WhatsApp message:', error);
+      logger.error({ err: error }, 'error logging WhatsApp message');
     }
   }
 
@@ -180,7 +180,7 @@ class WhatsAppService {
 
       return result.rows;
     } catch (error) {
-      logger.error('📱 Error getting WhatsApp history:', error);
+      logger.error({ err: error }, 'error getting WhatsApp history');
       return [];
     }
   }
@@ -198,7 +198,7 @@ class WhatsAppService {
           'Welcome to our gym! Your biometric enrollment is complete. You can now access the gym using your fingerprint. Enjoy your workouts!',
       };
     } catch (error) {
-      logger.error('📱 Error getting WhatsApp settings:', error);
+      logger.error({ err: error }, 'error getting WhatsApp settings');
       return {
         enabled: false,
         message:

@@ -8,7 +8,7 @@ exports.getAllSettings = async (req, res) => {
   try {
     logger.info('Executing settings query...');
     const settingsResult = await pool.query('SELECT key, value FROM settings');
-    logger.info('Settings query result:', settingsResult.rows);
+    logger.debug({ rowCount: settingsResult.rows.length }, 'settings query result');
 
     const settings = {};
     for (const { key, value: rawValue } of settingsResult.rows) {
@@ -31,10 +31,10 @@ exports.getAllSettings = async (req, res) => {
     settings.biometric_port_env = process.env.BIOMETRIC_PORT || '8080';
     settings.biometric_host_env = process.env.BIOMETRIC_HOST || '0.0.0.0';
 
-    logger.info('Final settings object:', settings);
+    logger.debug({ keyCount: Object.keys(settings).length }, 'settings loaded');
     res.json(settings);
   } catch (err) {
-    logger.error('Error getting all settings', err);
+    logger.error({ err: err }, 'error getting all settings');
     res.status(500).json({ message: 'Failed to get settings' });
   }
 };
@@ -88,7 +88,7 @@ exports.updateAllSettings = async (req, res) => {
     res.json({ message: 'Settings updated successfully' });
   } catch (err) {
     await pool.query('ROLLBACK');
-    logger.error('Error updating all settings', err);
+    logger.error({ err: err }, 'error updating all settings');
     res.status(500).json({ message: 'Failed to update settings' });
   }
 };

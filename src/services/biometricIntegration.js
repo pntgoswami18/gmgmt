@@ -14,30 +14,30 @@ class BiometricIntegration {
   setupEventHandlers() {
     // Handle successful access
     this.listener.on('accessGranted', async (biometricData) => {
-      logger.info('Access granted for:', biometricData);
+      logger.debug({ userId: biometricData?.userId }, 'accessGranted event received');
       await this.handleAccessGranted(biometricData);
     });
 
     // Handle denied access
     this.listener.on('accessDenied', (biometricData) => {
-      logger.info('Access denied for:', biometricData);
+      logger.debug({ userId: biometricData?.userId }, 'accessDenied event received');
       this.handleAccessDenied(biometricData);
     });
 
     // Handle enrollment data
     this.listener.on('enrollmentData', async (biometricData) => {
-      logger.info('Enrollment data received:', biometricData);
+      logger.debug({ userId: biometricData?.userId }, 'enrollmentData event received');
       await this.handleEnrollmentData(biometricData);
     });
 
     // Handle unknown messages
     this.listener.on('unknownMessage', (biometricData) => {
-      logger.info('Unknown biometric message:', biometricData);
+      logger.warn({ messageType: biometricData?.type }, 'unknown biometric message');
     });
 
     // Handle connection events
     this.listener.on('deviceConnected', (socket) => {
-      logger.info('Biometric device connected:', socket.remoteAddress);
+      logger.info({ remoteAddress: socket.remoteAddress }, 'biometric device connected');
     });
 
     this.listener.on('deviceDisconnected', () => {
@@ -46,7 +46,7 @@ class BiometricIntegration {
 
     // Handle errors
     this.listener.on('error', (error) => {
-      logger.error('Biometric listener error:', error);
+      logger.error({ err: error }, 'biometric listener error');
     });
   }
 
@@ -54,10 +54,7 @@ class BiometricIntegration {
     try {
       const { userId, memberId, timestamp } = biometricData;
 
-      logger.info(`🔓 Access granted - Biometric data received:`);
-      logger.info(`   - User ID: ${userId}`);
-      logger.info(`   - Member ID: ${memberId || 'Not provided'}`);
-      logger.info(`   - Raw data:`, JSON.stringify(biometricData, null, 2));
+      logger.debug({ userId, memberId }, 'access granted — biometric data received');
 
       // Find member using device user ID
       const member = await this.findMemberByBiometricId(userId);
@@ -89,12 +86,12 @@ class BiometricIntegration {
         this.notifyUnknownUser(biometricData);
       }
     } catch (error) {
-      logger.error('Error handling access granted:', error);
+      logger.error({ err: error }, 'error handling access granted');
     }
   }
 
   handleAccessDenied(biometricData) {
-    logger.info('Biometric authentication failed:', biometricData);
+    logger.info({ userId: biometricData?.userId }, 'biometric authentication failed');
 
     // Log failed attempt
     this.logFailedAttempt(biometricData);
@@ -113,7 +110,7 @@ class BiometricIntegration {
       const result = await pool.query(query, [lookupId]);
       return result.rows[0] || null;
     } catch (error) {
-      logger.error('Error finding member by biometric ID:', error);
+      logger.error({ err: error }, 'error finding member by biometric ID');
       return null;
     }
   }
@@ -204,10 +201,9 @@ class BiometricIntegration {
 
         // Check if current time is within allowed session windows
         if (!isInMorningSession && !isInEveningSession) {
-          logger.info(`❌ ${member.name} attempted check-in outside session windows`);
-          logger.info(`   Current time: ${now.toLocaleTimeString()}`);
           logger.info(
-            `   Allowed: Morning (${settingsMap.morning_session_start || '05:00'}-${settingsMap.morning_session_end || '11:00'}) or Evening (${settingsMap.evening_session_start || '16:00'}-${settingsMap.evening_session_end || '22:00'})`
+            { memberId: member.id, memberName: member.name, currentTime: now.toLocaleTimeString() },
+            'check-in outside session windows'
           );
 
           // Log biometric event for session violation
@@ -266,10 +262,16 @@ class BiometricIntegration {
               const currentSession = currentIsMorning ? 'morning' : 'evening';
 
               logger.info(
-                `❌ ${member.name} attempted cross-session check-in: ${existingSession} → ${currentSession}`
+                {
+                  memberId: member.id,
+                  memberName: member.name,
+                  existingSession,
+                  currentSession,
+                  existingTime: existingCheckInTime.toLocaleTimeString(),
+                  currentTime: now.toLocaleTimeString(),
+                },
+                'cross-session check-in blocked'
               );
-              logger.info(`   Existing check-in: ${existingCheckInTime.toLocaleTimeString()}`);
-              logger.info(`   Current attempt: ${now.toLocaleTimeString()}`);
 
               // Log biometric event for cross-session violation
               if (biometricData) {
@@ -303,8 +305,10 @@ class BiometricIntegration {
       if (existingCheckIn && !existingCheckIn.check_out_time) {
         // Member is checking out
         await this.checkOutMember(existingCheckIn.id, timeStr);
-        logger.info(`✅ ${member.name} checked OUT at ${now.toLocaleTimeString()}`);
-        logger.info(`   📊 Biometric ID - Device: ${deviceUserId}`);
+        logger.info(
+          { memberId: member.id, memberName: member.name, deviceUserId },
+          'member checked out'
+        );
         this.notifyCheckOut(member, now);
 
         // Log biometric event for checkout
@@ -331,8 +335,10 @@ class BiometricIntegration {
         };
 
         await this.createAttendanceRecord(attendanceData);
-        logger.info(`✅ ${member.name} checked IN at ${now.toLocaleTimeString()}`);
-        logger.info(`   📊 Biometric ID - Device: ${deviceUserId}`);
+        logger.info(
+          { memberId: member.id, memberName: member.name, deviceUserId },
+          'member checked in'
+        );
         this.notifyCheckIn(member, now);
 
         // Log biometric event for checkin
@@ -352,8 +358,10 @@ class BiometricIntegration {
         }
       } else {
         // Member already completed their session today
-        logger.info(`ℹ️ ${member.name} already completed their session today`);
-        logger.info(`   📊 Biometric ID - Device: ${deviceUserId}`);
+        logger.info(
+          { memberId: member.id, memberName: member.name, deviceUserId },
+          'member already completed session today'
+        );
         this.notifyAlreadyCompleted(member);
 
         // Log biometric event for already completed
@@ -373,7 +381,7 @@ class BiometricIntegration {
         }
       }
     } catch (error) {
-      logger.error('Error logging attendance:', error);
+      logger.error({ err: error }, 'error logging attendance');
     }
   }
 
@@ -384,7 +392,7 @@ class BiometricIntegration {
       const result = await pool.query(query, [memberId, date]);
       return result.rows[0] || null;
     } catch (error) {
-      logger.error('Error getting today check-in:', error);
+      logger.error({ err: error }, 'error getting today check-in');
       return null;
     }
   }
@@ -403,7 +411,7 @@ class BiometricIntegration {
       ]);
       return result.lastInsertId;
     } catch (error) {
-      logger.error('Error creating attendance record:', error);
+      logger.error({ err: error }, 'error creating attendance record');
       throw error;
     }
   }
@@ -414,7 +422,7 @@ class BiometricIntegration {
       await pool.query(query, [checkOutTime, attendanceId]);
       return;
     } catch (error) {
-      logger.error('Error checking out member:', error);
+      logger.error({ err: error }, 'error checking out member');
       throw error;
     }
   }
@@ -468,7 +476,7 @@ class BiometricIntegration {
                 `🔄 Automatically deactivated member ${member.id} due to expired grace period`
               );
             } catch (deactivationError) {
-              logger.error('❌ Error deactivating member:', deactivationError);
+              logger.error({ err: deactivationError }, 'error deactivating member');
             }
 
             return false;
@@ -481,14 +489,14 @@ class BiometricIntegration {
             );
           }
         } catch (paymentError) {
-          logger.error('❌ Error checking payment status:', paymentError);
+          logger.error({ err: paymentError }, 'error checking payment status');
           // Continue with plan check if payment validation fails
         }
       }
 
       return true; // Plan exists and payment status is valid
     } catch (error) {
-      logger.error('Error checking active plan:', error);
+      logger.error({ err: error }, 'error checking active plan');
       return false;
     }
   }
@@ -499,7 +507,7 @@ class BiometricIntegration {
       await pool.query(query, [new Date().toISOString(), member.id]);
       return;
     } catch (error) {
-      logger.error('Error updating last visit:', error);
+      logger.error({ err: error }, 'error updating last visit');
     }
   }
 
@@ -561,7 +569,7 @@ class BiometricIntegration {
 
   logFailedAttempt(biometricData) {
     // Log failed biometric attempts for security
-    logger.info('🔒 Failed biometric attempt:', biometricData);
+    logger.info({ userId: biometricData?.userId }, 'failed biometric attempt');
 
     // You could store this in a security log table
     const securityLog = {
@@ -774,7 +782,7 @@ class BiometricIntegration {
 
       return false;
     } catch (error) {
-      logger.error('Error handling enrollment data:', error);
+      logger.error({ err: error }, 'error handling enrollment data');
       this.listener.broadcast('ENROLL:ERROR');
       this.sendToWebSocketClients({
         type: 'enrollment_complete',
@@ -790,9 +798,7 @@ class BiometricIntegration {
 
   async saveBiometricEnrollment(memberId, biometricId, enrollmentData) {
     try {
-      logger.info(`📋 Storing biometric enrollment for member ${memberId}:`);
-      logger.info(`   - Device User ID (biometric_id): ${biometricId}`);
-      logger.info(`   - Raw enrollment data:`, JSON.stringify(enrollmentData, null, 2));
+      logger.info({ memberId, biometricId }, 'storing biometric enrollment');
 
       // Update member with biometric ID
       const updateMemberQuery = 'UPDATE members SET biometric_id = ? WHERE id = ?';
@@ -871,7 +877,7 @@ class BiometricIntegration {
           }
         }
       } catch (whatsappError) {
-        logger.error('📱 Error sending WhatsApp welcome message:', whatsappError);
+        logger.error({ err: whatsappError }, 'error sending WhatsApp welcome message');
         // Broadcast WhatsApp error to WebSocket clients
         this.sendToWebSocketClients({
           type: 'whatsapp_welcome_error',
@@ -885,7 +891,7 @@ class BiometricIntegration {
       logger.info(`💾 Biometric enrollment saved for member ${memberId}`);
       return true;
     } catch (error) {
-      logger.error('Error saving biometric enrollment:', error);
+      logger.error({ err: error }, 'error saving biometric enrollment');
       throw error;
     }
   }
@@ -911,7 +917,7 @@ class BiometricIntegration {
       ]);
       return result.lastInsertId;
     } catch (error) {
-      logger.error('Error logging biometric event:', error);
+      logger.error({ err: error }, 'error logging biometric event');
       throw error;
     }
   }
@@ -939,7 +945,7 @@ class BiometricIntegration {
       logger.info(`🗑️ Biometric ID removed for member ${memberId}`);
       return true;
     } catch (error) {
-      logger.error('Error removing biometric ID:', error);
+      logger.error({ err: error }, 'error removing biometric ID');
       throw error;
     }
   }
@@ -973,7 +979,7 @@ class BiometricIntegration {
         enrollmentHistory: history,
       };
     } catch (error) {
-      logger.error('Error getting member biometric status:', error);
+      logger.error({ err: error }, 'error getting member biometric status');
       return null;
     }
   }
@@ -1006,7 +1012,7 @@ class BiometricIntegration {
 
       return response;
     } catch (error) {
-      logger.error(`❌ Failed to send command to ${deviceId}:`, error.message);
+      logger.error({ err: error, deviceId }, 'failed to send ESP32 command');
       await this.logESP32Command(deviceId, command, data, error.message);
       throw error;
     }
@@ -1051,14 +1057,14 @@ class BiometricIntegration {
           logger.info(`📍 Found device IP in biometric_events: ${data.ip_address}`);
           return data.ip_address;
         } catch (parseError) {
-          logger.error('Error parsing heartbeat data:', parseError);
+          logger.error({ err: parseError }, 'error parsing heartbeat data');
           return null;
         }
       }
 
       return null;
     } catch (error) {
-      logger.error('Error getting device IP address:', error);
+      logger.error({ err: error }, 'error getting device IP address');
       return null;
     }
   }
@@ -1117,7 +1123,7 @@ class BiometricIntegration {
         });
 
         req.on('error', (error) => {
-          logger.error(`❌ HTTP request error:`, error.message);
+          logger.error({ err: error }, 'HTTP request error');
           finish(reject, new Error(`HTTP request error: ${error.message}`));
         });
 
@@ -1131,7 +1137,7 @@ class BiometricIntegration {
         req.end();
       });
     } catch (error) {
-      logger.error('Error sending HTTP command:', error);
+      logger.error({ err: error }, 'error sending HTTP command');
       // Don't throw - command might still work
       return { success: true, message: 'Command attempted', error: error.message };
     }
@@ -1147,7 +1153,7 @@ class BiometricIntegration {
         duration: 5000, // 5 seconds
       });
     } catch (err) {
-      logger.error(`❌ Remote unlock command failed for ${deviceId}:`, err.message);
+      logger.error({ err, deviceId }, 'remote unlock command failed');
       return { success: false, error: err.message };
     }
 
@@ -1172,7 +1178,7 @@ class BiometricIntegration {
         memberName = memberResult.rows[0].name;
       }
     } catch (nameError) {
-      logger.warn('Could not fetch member name:', nameError.message);
+      logger.warn({ err: nameError }, 'could not fetch member name');
     }
 
     // Delete all existing fingerprint slots for this member before re-enrolling,
@@ -1229,7 +1235,7 @@ class BiometricIntegration {
         raw_data: JSON.stringify({ command, data }),
       });
     } catch (logError) {
-      logger.error('Error logging ESP32 command:', logError);
+      logger.error({ err: logError }, 'error logging ESP32 command');
     }
   }
 
@@ -1271,7 +1277,7 @@ class BiometricIntegration {
         deviceData: parsedData,
       };
     } catch (error) {
-      logger.error('Error getting device status:', error);
+      logger.error({ err: error }, 'error getting device status');
       return { status: 'error', lastSeen: null };
     }
   }
@@ -1302,7 +1308,10 @@ class BiometricIntegration {
 
   sendToWebSocketClients(data) {
     const message = JSON.stringify(data);
-    logger.info(`📡 Sending WebSocket message to ${this.webSocketClients.size} clients:`, data);
+    logger.debug(
+      { clientCount: this.webSocketClients.size, type: data?.type },
+      'sending WebSocket message'
+    );
 
     this.webSocketClients.forEach((client) => {
       if (client.readyState === 1) {
@@ -1310,7 +1319,7 @@ class BiometricIntegration {
         try {
           client.send(message);
         } catch (error) {
-          logger.error('Error sending to WebSocket client:', error);
+          logger.error({ err: error }, 'error sending to WebSocket client');
           this.removeWebSocketClient(client);
         }
       } else {
@@ -1379,7 +1388,7 @@ class BiometricIntegration {
       await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', ['', memberId]);
       logger.info(`✅ biometric_id cleared for member ${memberId}`);
     } catch (error) {
-      logger.error(`❌ deleteFingerprint failed for member ${memberId}:`, error);
+      logger.error({ err: error, memberId }, 'deleteFingerprint failed');
     }
   }
 
@@ -1436,7 +1445,7 @@ class BiometricIntegration {
       await pool.query('DELETE FROM member_biometrics WHERE member_id = ?', [memberId]);
       logger.info(`✅ All ${slotIds.size} fingerprint slot(s) cleared for member ${memberId}`);
     } catch (error) {
-      logger.error(`❌ deleteAllMemberFingerprints failed for member ${memberId}:`, error);
+      logger.error({ err: error, memberId }, 'deleteAllMemberFingerprints failed');
     }
   }
 
@@ -1487,9 +1496,9 @@ class BiometricIntegration {
       }
 
       summary.members_processed = new Set(staleResult.rows.map((r) => r.member_id)).size;
-      logger.info(`✅ Biometric sync complete:`, summary);
+      logger.info({ summary }, 'biometric sync complete');
     } catch (error) {
-      logger.error('❌ syncBiometricData failed:', error);
+      logger.error({ err: error }, 'syncBiometricData failed');
       summary.errors++;
     }
     return summary;
@@ -1531,7 +1540,7 @@ class BiometricIntegration {
         `📤 restore_fingerprint command sent to device ${deviceId} for member ${memberId}`
       );
     } catch (error) {
-      logger.error(`❌ restoreFingerprint failed for member ${memberId}:`, error);
+      logger.error({ err: error, memberId }, 'restoreFingerprint failed');
     }
   }
 
@@ -1555,7 +1564,7 @@ class BiometricIntegration {
       ]);
       logger.info(`✅ Restore success: member ${memberId} assigned to new slot ${userId}`);
     } catch (error) {
-      logger.error(`❌ handleRestoreSuccess failed for member ${memberId}:`, error);
+      logger.error({ err: error, memberId }, 'handleRestoreSuccess failed');
     }
   }
 }

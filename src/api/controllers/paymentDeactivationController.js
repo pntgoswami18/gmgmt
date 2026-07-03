@@ -19,7 +19,7 @@ const triggerPaymentDeactivation = async (req, res) => {
       data: result
     });
   } catch (error) {
-    logger.error('❌ Error in manual payment deactivation:', error);
+    logger.error({ err: error }, 'error in manual payment deactivation');
     res.status(500).json({
       success: false,
       message: 'Failed to run payment deactivation check',
@@ -40,7 +40,7 @@ const getPaymentDeactivationStatus = async (req, res) => {
       data: status
     });
   } catch (error) {
-    logger.error('❌ Error getting payment deactivation status:', error);
+    logger.error({ err: error }, 'error getting payment deactivation status');
     res.status(500).json({
       success: false,
       message: 'Failed to get payment deactivation status',
@@ -64,7 +64,7 @@ const getOverdueMembersWithinGracePeriod = async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('❌ Error getting overdue members:', error);
+    logger.error({ err: error }, 'error getting overdue members');
     res.status(500).json({
       success: false,
       message: 'Failed to get overdue members',

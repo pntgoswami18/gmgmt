@@ -32,11 +32,11 @@ process.on('SIGTERM', () => {
 
 // Keep the process alive
 process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
+  logger.error({ err: error }, 'uncaught Exception');
   // Don't exit, just log the error
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.error({ reason, promise }, 'unhandled rejection');
   // Don't exit, just log the error
 });
