@@ -87,7 +87,7 @@ test('recordManualPayment — 404 when invoice not found and no member_id fallba
   // Without member_id, the controller should 400/404 — verify no payment was created
   const payments = db.prepare('SELECT COUNT(*) as c FROM payments WHERE amount = 500').get();
   // Status will be 400/404, not 200
-  assert.notEqual(res._status, 200);
+  assert.equal(res._status, 404);
 });
 
 test('recordManualPayment — rejects zero or negative amount', async () => {

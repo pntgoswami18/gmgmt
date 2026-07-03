@@ -1116,7 +1116,7 @@ class BiometricIntegration {
                 finish(resolve, { success: true, response: responseData });
               }
             } else {
-              logger.error(`❌ ESP32 command failed: HTTP ${res.statusCode}`);
+              logger.error({ statusCode: res.statusCode }, 'ESP32 command failed');
               finish(reject, new Error(`HTTP ${res.statusCode}: ${responseData}`));
             }
           });
@@ -1128,7 +1128,7 @@ class BiometricIntegration {
         });
 
         req.on('timeout', () => {
-          logger.error(`⏰ HTTP request timeout after ${options.timeout}ms`);
+          logger.error({ timeoutMs: options.timeout }, 'HTTP request timeout to ESP32 device');
           req.destroy();
           finish(reject, new Error(`HTTP timeout after ${options.timeout}ms`));
         });
@@ -1377,10 +1377,7 @@ class BiometricIntegration {
           await this.sendESP32Command(device.device_id, 'delete_fingerprint', { slotId });
           logger.info(`✅ Fingerprint slot ${slotId} deleted from device ${device.device_id}`);
         } catch (err) {
-          logger.error(
-            `❌ Failed to delete slot ${slotId} from device ${device.device_id}:`,
-            err.message
-          );
+          logger.error({ err, slotId }, 'failed to delete fingerprint slot');
         }
       }
 
@@ -1432,10 +1429,7 @@ class BiometricIntegration {
             await this.sendESP32Command(device.device_id, 'delete_fingerprint', { slotId });
             logger.info(`✅ Slot ${slotId} deleted from device ${device.device_id}`);
           } catch (err) {
-            logger.error(
-              `❌ Failed to delete slot ${slotId} from device ${device.device_id}:`,
-              err.message
-            );
+            logger.error({ err, slotId }, 'failed to delete fingerprint slot');
           }
         }
       }
@@ -1479,10 +1473,7 @@ class BiometricIntegration {
               await this.sendESP32Command(device.device_id, 'delete_fingerprint', { slotId });
               summary.stale_slots_deleted++;
             } catch (err) {
-              logger.error(
-                `❌ Sync: failed to delete slot ${slotId} from ${device.device_id}:`,
-                err.message
-              );
+              logger.error({ err, slotId }, 'failed to delete fingerprint slot');
               summary.errors++;
             }
           }

@@ -112,6 +112,9 @@ exports.recordManualPayment = async (req, res) => {
           ensuredInvoiceId,
         ]);
         if (existing.rows.length === 0) {
+          if (!member_id) {
+            throw httpError(`Invoice #${ensuredInvoiceId} not found`, 404);
+          }
           let finalPlanId = plan_id;
           if (!finalPlanId && member_id) {
             const memberPlan = await pool.query(
