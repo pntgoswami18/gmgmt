@@ -28,8 +28,8 @@ const isValidPhone = (value) => {
 exports.getAllMembers = async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', filter = 'all' } = req.query;
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
     const offset = (pageNum - 1) * limitNum;
 
     // Build search condition

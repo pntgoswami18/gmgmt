@@ -1,8 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const { initializeDatabase } = require('./config/sqlite');
+const requireSameOrigin = require('./api/middleware/requireSameOrigin');
 const WebSocket = require('ws');
 const http = require('http');
 const app = express();
@@ -20,9 +23,63 @@ const biometricRoutes = require('./api/routes/biometric');
 const referralRoutes = require('./api/routes/referrals');
 const paymentDeactivationRoutes = require('./api/routes/paymentDeactivation');
 
-app.use(cors());
+// Security headers. crossOriginResourcePolicy is relaxed so the React app on a
+// different port can still load uploaded images from /uploads.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false, // CSP is managed by the frontend build; avoid breaking it here
+  })
+);
+
+// Restrict CORS to configured origins. Set CORS_ORIGINS to a comma-separated list
+// (e.g. "http://localhost:3000,https://gym.example.com"). When unset, allow all —
+// preserves existing dev behaviour but lets production lock it down.
+const corsOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+if (corsOrigins.includes('*') && corsOrigins.length > 0) {
+  console.error(
+    '❌ CORS_ORIGINS contains "*" — wildcards cannot be used with credentials. ' +
+      'Set explicit origins or leave CORS_ORIGINS unset for dev.'
+  );
+  process.exit(1);
+}
+app.use(
+  cors(
+    corsOrigins.length > 0
+      ? {
+          origin: corsOrigins,
+          credentials: true,
+        }
+      : {}
+  )
+);
+
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
+
+// Throttle the API to blunt brute-force and abuse. Static assets and the SPA
+// fallback are not rate limited.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: Number(process.env.RATE_LIMIT_MAX) || 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests, please try again later.' },
+});
+app.use('/api', apiLimiter);
+
+// CSRF guard: block cross-origin browser requests that mutate state. Non-browser
+// clients (ESP32 devices, the biometric listener) send no Origin header and pass through.
+app.use('/api', (req, res, next) => {
+  const method = req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+  return requireSameOrigin(req, res, next);
+});
 
 app.use('/uploads', express.static('public/uploads'));
 
