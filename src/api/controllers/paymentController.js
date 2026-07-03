@@ -110,7 +110,7 @@ exports.recordManualPayment = async (req, res) => {
         const existing = await pool.query('SELECT id FROM invoices WHERE id = $1', [
           ensuredInvoiceId,
         ]);
-        if (existing.rowCount === 0) {
+        if (existing.rows.length === 0) {
           let finalPlanId = plan_id;
           if (!finalPlanId && member_id) {
             const memberPlan = await pool.query(
@@ -321,7 +321,7 @@ exports.getInvoiceByPaymentId = async (req, res) => {
       [paymentId]
     );
 
-    if (result.rowCount === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Payment not found' });
     }
 
@@ -375,7 +375,7 @@ exports.getInvoiceByInvoiceId = async (req, res) => {
       [invoiceId]
     );
 
-    if (result.rowCount === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Invoice not found' });
     }
     res.json(result.rows[0]);
@@ -396,7 +396,7 @@ exports.updateInvoice = async (req, res) => {
 
     // Check if invoice exists
     const existingInvoice = await pool.query('SELECT * FROM invoices WHERE id = $1', [invoiceId]);
-    if (existingInvoice.rowCount === 0) {
+    if (existingInvoice.rows.length === 0) {
       return res.status(404).json({ message: 'Invoice not found' });
     }
 
@@ -448,7 +448,7 @@ exports.deleteInvoice = async (req, res) => {
 
     // Check if invoice exists
     const existingInvoice = await pool.query('SELECT * FROM invoices WHERE id = $1', [invoiceId]);
-    if (existingInvoice.rowCount === 0) {
+    if (existingInvoice.rows.length === 0) {
       return res.status(404).json({ message: 'Invoice not found' });
     }
 

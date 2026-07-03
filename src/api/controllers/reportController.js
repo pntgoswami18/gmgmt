@@ -1,4 +1,5 @@
 const { pool } = require('../../config/sqlite');
+const settingsCache = require('../../services/settingsCache');
 
 // Get member growth statistics
 exports.getMemberGrowth = async (req, res) => {
@@ -369,11 +370,7 @@ exports.getBirthdaysToday = async (_req, res) => {
 exports.getPaymentReminders = async (_req, res) => {
   try {
     // Get payment reminder days setting
-    const settingResult = await pool.query(`
-            SELECT value FROM settings WHERE key = 'payment_reminder_days_after_due'
-        `);
-    const rawDays = parseInt(settingResult.rows[0]?.value || '7', 10);
-    const reminderDays = Number.isFinite(rawDays) && rawDays >= 0 ? rawDays : 7;
+    const reminderDays = settingsCache.getInt('payment_reminder_days_after_due', 7);
 
     // Get overdue invoices - due date + reminder days <= today
     const result = await pool.query(

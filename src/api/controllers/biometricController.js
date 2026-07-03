@@ -1774,13 +1774,13 @@ const validateBiometricId = async (req, res) => {
       const crossSessionRestrictionEnabled = settingsCache.getCrossSessionEnabled();
 
       if (crossSessionRestrictionEnabled) {
-        // Get session settings
-        const settingsRes = await pool.query(`
-          SELECT key, value FROM settings WHERE key IN (
-            'morning_session_start','morning_session_end','evening_session_start','evening_session_end'
-          )
-        `);
-        const settingsMap = Object.fromEntries(settingsRes.rows.map((r) => [r.key, r.value]));
+        // Get session settings from cache
+        const settingsMap = {
+          morning_session_start: settingsCache.get('morning_session_start', '05:00'),
+          morning_session_end: settingsCache.get('morning_session_end', '11:00'),
+          evening_session_start: settingsCache.get('evening_session_start', '16:00'),
+          evening_session_end: settingsCache.get('evening_session_end', '22:00'),
+        };
 
         const parseTimeToMinutes = (hhmm) => {
           const [h, m] = String(hhmm || '00:00')
