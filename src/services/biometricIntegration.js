@@ -239,7 +239,7 @@ class BiometricIntegration {
             [member.id, dateStr]
           );
 
-          if (todayCheckIns.rowCount > 0) {
+          if (todayCheckIns.rows.length > 0) {
             // Check which session the existing check-in was in
             const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
             const existingMinutesSinceMidnight =
@@ -446,7 +446,7 @@ class BiometricIntegration {
       // Check payment status if plan has duration
       if (plan.duration_days) {
         try {
-          const gracePeriodDays = await getGracePeriodSetting(pool);
+          const gracePeriodDays = getGracePeriodSetting();
           const paymentStatus = checkMemberPaymentStatus(
             member,
             plan,

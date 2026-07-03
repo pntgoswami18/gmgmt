@@ -72,7 +72,7 @@ const performCheckIn = async (resolvedMemberId, res) => {
       [resolvedMemberId]
     );
 
-    if (todayCheckIns.rowCount > 0) {
+    if (todayCheckIns.rows.length > 0) {
       // Check which session the existing check-in was in
       const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
       const existingMinutesSinceMidnight =
@@ -134,7 +134,7 @@ exports.checkIn = async (req, res) => {
         'SELECT member_id FROM member_biometrics WHERE device_user_id = $1',
         [device_user_id]
       );
-      if (map.rowCount > 0) {
+      if (map.rows.length > 0) {
         resolvedMemberId = map.rows[0].member_id;
       } else {
         return res.status(404).json({ message: 'No member linked to this device user id' });
@@ -163,7 +163,7 @@ exports.deviceWebhook = async (req, res) => {
       'SELECT member_id FROM member_biometrics WHERE device_user_id = $1',
       [deviceUserId]
     );
-    if (map.rowCount === 0) {
+    if (map.rows.length === 0) {
       return res.status(404).json({ message: 'No member linked to this device user id' });
     }
     const memberId = map.rows[0].member_id;

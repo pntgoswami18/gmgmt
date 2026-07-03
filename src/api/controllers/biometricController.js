@@ -876,8 +876,6 @@ const manualEnrollment = async (req, res) => {
       const whatsappResult = await whatsappService.sendWelcomeMessage(
         memberId,
         member.name,
-        memberId,
-        member.name,
         member.phone
       );
 
@@ -1834,7 +1832,7 @@ const validateBiometricId = async (req, res) => {
             [member.member_id]
           );
 
-          if (todayCheckIns.rowCount > 0) {
+          if (todayCheckIns.rows.length > 0) {
             // Check which session the existing check-in was in
             const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
             const existingMinutesSinceMidnight =
