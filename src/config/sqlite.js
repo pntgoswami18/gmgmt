@@ -453,8 +453,8 @@ async function runInTransaction(callback) {
   _txQueue = lockAcquired;
 
   await prev;
-  db.exec('BEGIN');
   try {
+    db.exec('BEGIN');
     const result = await callback();
     db.exec('COMMIT');
     return result;

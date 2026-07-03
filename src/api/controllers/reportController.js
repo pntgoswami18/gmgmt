@@ -1,5 +1,6 @@
 const { pool } = require('../../config/sqlite');
 const settingsCache = require('../../services/settingsCache');
+const logger = require('../../utils/logger').child({ service: 'report' });
 
 // Get member growth statistics
 exports.getMemberGrowth = async (req, res) => {
@@ -14,7 +15,8 @@ exports.getMemberGrowth = async (req, res) => {
         `);
     res.json(memberGrowth.rows);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -33,7 +35,8 @@ exports.getAttendanceStats = async (req, res) => {
         `);
     res.json(attendanceStats.rows);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -55,7 +58,8 @@ exports.getPopularClasses = async (req, res) => {
         `);
     res.json(popularClasses.rows);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -72,7 +76,8 @@ exports.getRevenueStats = async (req, res) => {
         `);
     res.json(revenueStats.rows);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -132,7 +137,8 @@ exports.getSummaryStats = async (req, res) => {
 
     res.json(summary);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -322,7 +328,8 @@ exports.getFinancialSummary = async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -346,7 +353,8 @@ exports.getUnpaidMembersThisMonth = async (_req, res) => {
         `);
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -362,7 +370,8 @@ exports.getBirthdaysToday = async (_req, res) => {
         `);
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -402,6 +411,7 @@ exports.getPaymentReminders = async (_req, res) => {
       overdue_invoices: result.rows,
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
