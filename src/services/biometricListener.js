@@ -1,5 +1,6 @@
 const net = require('net');
 const EventEmitter = require('events');
+const logger = require('../utils/logger').child({ service: 'biometricListener' });
 const os = require('os');
 
 class BiometricListener extends EventEmitter {
@@ -12,37 +13,37 @@ class BiometricListener extends EventEmitter {
   }
 
   start() {
-    console.log(`🖥️  Starting biometric listener on ${os.platform()} ${os.arch()}`);
+    logger.info(`🖥️  Starting biometric listener on ${os.platform()} ${os.arch()}`);
     
     this.server = net.createServer((socket) => {
-      console.log(`📱 Biometric device connected: ${socket.remoteAddress}:${socket.remotePort}`);
-      console.log(`🌐 Server platform: ${os.platform()}, Total connections: ${this.clients.size + 1}`);
+      logger.info(`📱 Biometric device connected: ${socket.remoteAddress}:${socket.remotePort}`);
+      logger.info(`🌐 Server platform: ${os.platform()}, Total connections: ${this.clients.size + 1}`);
       this.clients.add(socket);
 
       // Handle incoming data
       socket.on('data', (data) => {
         try {
           const message = data.toString().trim();
-          console.log('Received biometric data:', message);
+          logger.info('Received biometric data:', message);
           
           // Parse the message based on device protocol
           this.parseAndHandleBiometricData(message, socket);
         } catch (error) {
-          console.error('Error processing biometric data:', error);
+          logger.error('Error processing biometric data:', error);
           this.emit('error', error);
         }
       });
 
       // Handle client disconnection
       socket.on('close', () => {
-        console.log('Biometric device disconnected');
+        logger.info('Biometric device disconnected');
         this.clients.delete(socket);
         this.emit('deviceDisconnected');
       });
 
       // Handle socket errors
       socket.on('error', (error) => {
-        console.error('Socket error:', error);
+        logger.error('Socket error:', error);
         this.clients.delete(socket);
         this.emit('error', error);
       });
@@ -51,12 +52,12 @@ class BiometricListener extends EventEmitter {
     });
 
     this.server.listen(this.port, this.host, () => {
-      console.log(`Biometric listener started on ${this.host}:${this.port}`);
+      logger.info(`Biometric listener started on ${this.host}:${this.port}`);
       this.emit('serverStarted');
     });
 
     this.server.on('error', (error) => {
-      console.error('Server error:', error);
+      logger.error('Server error:', error);
       this.emit('error', error);
     });
   }
@@ -79,7 +80,7 @@ class BiometricListener extends EventEmitter {
         
         // ESP32 specific handling
         if (biometricData.deviceType === 'esp32_door_lock') {
-          console.log(`📱 ESP32 Door Lock message from ${biometricData.deviceId}`);
+          logger.info(`📱 ESP32 Door Lock message from ${biometricData.deviceId}`);
           biometricData.isESP32Device = true;
         }
       }
@@ -103,7 +104,7 @@ class BiometricListener extends EventEmitter {
         };
       }
 
-      console.log('Parsed biometric data:', biometricData);
+      logger.info('Parsed biometric data:', biometricData);
       
       // Emit events based on authorization status
       if (biometricData.status === 'authorized' || biometricData.status === '1') {
@@ -124,7 +125,7 @@ class BiometricListener extends EventEmitter {
       this.sendAcknowledgment(socket, biometricData);
       
     } catch (error) {
-      console.error('Error parsing biometric data:', error);
+      logger.error('Error parsing biometric data:', error);
       this.emit('parseError', message, error);
     }
   }
@@ -147,7 +148,7 @@ class BiometricListener extends EventEmitter {
       this.clients.clear();
 
       this.server.close(() => {
-        console.log('Biometric listener stopped');
+        logger.info('Biometric listener stopped');
         this.emit('serverStopped');
       });
     }

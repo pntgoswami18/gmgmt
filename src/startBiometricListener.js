@@ -2,14 +2,15 @@
 
 require('dotenv').config();
 const BiometricIntegration = require('./services/biometricIntegration');
+const logger = require('./utils/logger').child({ service: 'biometricListener' });
 
 // Configuration
 const PORT = process.env.BIOMETRIC_PORT || 8080;
 const HOST = process.env.BIOMETRIC_HOST || '0.0.0.0';
 
-console.log('🔐 Starting ESP32 Biometric Integration...');
-console.log(`📡 Listening on ${HOST}:${PORT}`);
-console.log('📋 Make sure your ESP32 devices are configured to send data to this address');
+logger.info('🔐 Starting ESP32 Biometric Integration...');
+logger.info(`📡 Listening on ${HOST}:${PORT}`);
+logger.info('📋 Make sure your ESP32 devices are configured to send data to this address');
 
 const biometricIntegration = new BiometricIntegration(PORT);
 
@@ -18,24 +19,24 @@ biometricIntegration.start();
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down biometric integration...');
+  logger.info('\n🛑 Shutting down biometric integration...');
   biometricIntegration.stop();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n🛑 Shutting down biometric integration...');
+  logger.info('\n🛑 Shutting down biometric integration...');
   biometricIntegration.stop();
   process.exit(0);
 });
 
 // Keep the process alive
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  logger.error('Uncaught Exception:', error);
   // Don't exit, just log the error
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
   // Don't exit, just log the error
 });

@@ -2,6 +2,7 @@ const { pool, runInTransaction } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
 const { uploadSingle } = require('../../config/multer');
 const settingsCache = require('../../services/settingsCache');
+const logger = require('../../utils/logger').child({ service: 'memberController' });
 
 const normalizePhone = (value) => {
   if (value === undefined || value === null) {
@@ -245,7 +246,7 @@ exports.getMemberDetails = async (req, res) => {
       referralSystemEnabled,
     });
   } catch (err) {
-    console.error('Error fetching member details:', err);
+    logger.error('Error fetching member details:', err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -479,7 +480,7 @@ exports.deleteMember = async (req, res) => {
         await invalidateESP32Cache();
       }
     } catch (cacheErr) {
-      console.error('ESP32 cache invalidation after member delete:', cacheErr);
+      logger.error('ESP32 cache invalidation after member delete:', cacheErr);
     }
     res.json({ message: 'Member deleted successfully' });
   } catch (err) {
@@ -504,13 +505,13 @@ exports.setActiveStatus = async (req, res) => {
     try {
       const { invalidateESP32Cache } = require('../controllers/biometricController');
       if (invalidateESP32Cache) {
-        console.log(
+        logger.info(
           `🔄 Member ${id} status changed to ${val === 1 ? 'active' : 'inactive'} - invalidating ESP32 cache`
         );
         await invalidateESP32Cache();
       }
     } catch (cacheError) {
-      console.error('❌ Error invalidating ESP32 cache:', cacheError);
+      logger.error('❌ Error invalidating ESP32 cache:', cacheError);
     }
 
     // Manage fingerprint slot based on new status
@@ -525,7 +526,7 @@ exports.setActiveStatus = async (req, res) => {
         await restoreFingerprint(id);
       }
     } catch (fingerprintError) {
-      console.error('❌ Error managing fingerprint slot:', fingerprintError);
+      logger.error('❌ Error managing fingerprint slot:', fingerprintError);
       // Don't fail the main operation if fingerprint management fails
     }
 

@@ -1,5 +1,6 @@
 const { pool } = require('../../config/sqlite');
 const settingsCache = require('../../services/settingsCache');
+const logger = require('../../utils/logger').child({ service: 'referralController' });
 
 // Create a new referral
 const createReferral = async (req, res) => {
@@ -67,7 +68,7 @@ const createReferral = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Error creating referral:', error);
+    logger.error('Error creating referral:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -78,7 +79,7 @@ const getReferrals = async (req, res) => {
     const result = await pool.query('SELECT * FROM referrals ORDER BY created_at DESC');
     res.json({ referrals: result.rows });
   } catch (error) {
-    console.error('Error fetching referrals:', error);
+    logger.error('Error fetching referrals:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
@@ -137,7 +138,7 @@ const applyReferralDiscount = async (req, res) => {
       discount_applied: referral.discount_amount,
     });
   } catch (error) {
-    console.error('Error applying referral discount:', error);
+    logger.error('Error applying referral discount:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

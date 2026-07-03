@@ -1,4 +1,5 @@
 const { pool } = require('../config/sqlite');
+const logger = require('../utils/logger').child({ service: 'settingsCache' });
 
 class SettingsCache {
   constructor() {
@@ -19,7 +20,7 @@ class SettingsCache {
       this._map = new Map(result.rows.map((r) => [r.key, r.value]));
       this._lastUpdate = Date.now();
     } catch (err) {
-      console.error('[settingsCache] refresh failed:', err.message);
+      logger.error('[settingsCache] refresh failed:', err.message);
     }
     return this;
   }

@@ -1,5 +1,6 @@
 const { pool, runInTransaction } = require('../../config/sqlite');
 const { calculateDueDateForPlan } = require('../../utils/dateUtils');
+const logger = require('../../utils/logger').child({ service: 'paymentController' });
 
 // Helper to throw errors with HTTP status (for use inside runInTransaction)
 function httpError(message, statusCode = 400) {
@@ -203,7 +204,7 @@ exports.recordManualPayment = async (req, res) => {
           }
         }
       } catch (referralError) {
-        console.error('Error applying referral discount:', referralError);
+        logger.error('Error applying referral discount:', referralError);
         // Don't fail the payment if referral discount fails, but log it
       }
 

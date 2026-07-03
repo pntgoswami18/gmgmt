@@ -1,5 +1,6 @@
 const { pool } = require('../../config/sqlite');
 const settingsCache = require('../../services/settingsCache');
+const logger = require('../../utils/logger').child({ service: 'attendance' });
 
 // This endpoint would be called by the biometric device
 const performCheckIn = async (resolvedMemberId, res) => {
@@ -267,7 +268,7 @@ exports.getAllAttendance = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('Error fetching all attendance:', err);
+    logger.error('Error fetching all attendance:', err);
     res.status(500).json({ message: err.message });
   }
 };
