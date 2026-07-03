@@ -686,6 +686,18 @@ const testConnection = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid host' });
       }
 
+      // Parse via URL to strip credential-bypass characters (e.g. user@127.0.0.1)
+      // and re-validate the canonical hostname against the blocked-prefix list.
+      let resolvedHost;
+      try {
+        resolvedHost = new URL('http://' + hostStr).hostname;
+      } catch {
+        return res.status(400).json({ success: false, message: 'Invalid host' });
+      }
+      if (!resolvedHost || BLOCKED_PREFIXES.some((p) => resolvedHost.startsWith(p))) {
+        return res.status(400).json({ success: false, message: 'Invalid host' });
+      }
+
       const net = require('net');
 
       return new Promise((resolve) => {
@@ -737,7 +749,7 @@ const testConnection = async (req, res) => {
           resolve();
         });
 
-        socket.connect(portNum, host);
+        socket.connect(portNum, resolvedHost);
       });
     }
 
