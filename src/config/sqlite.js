@@ -210,6 +210,17 @@ function initializeDatabase() {
        description TEXT,
        uploaded_at TEXT DEFAULT (datetime('now'))
      );`,
+    `CREATE TABLE IF NOT EXISTS staff (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       username TEXT UNIQUE NOT NULL,
+       password_hash TEXT NOT NULL,
+       role TEXT NOT NULL DEFAULT 'staff',
+       is_active INTEGER DEFAULT 1,
+       failed_attempts INTEGER DEFAULT 0,
+       locked_until TEXT,
+       last_login_at TEXT,
+       created_at TEXT DEFAULT (datetime('now'))
+     );`,
     `CREATE TABLE IF NOT EXISTS firmware_update_log (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        device_id TEXT NOT NULL,

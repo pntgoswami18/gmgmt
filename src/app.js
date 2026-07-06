@@ -4,13 +4,17 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
 const { initializeDatabase } = require('./config/sqlite');
 const requireSameOrigin = require('./api/middleware/requireSameOrigin');
+const requireAuth = require('./api/middleware/requireAuth');
+const requireDeviceSecret = require('./api/middleware/requireDeviceSecret');
 const WebSocket = require('ws');
 const http = require('http');
 const logger = require('./utils/logger');
 const app = express();
 
+const authRoutes = require('./api/routes/auth');
 const attendanceRoutes = require('./api/routes/attendance');
 const bookingRoutes = require('./api/routes/bookings');
 const classRoutes = require('./api/routes/classes');
@@ -59,6 +63,7 @@ app.use(
 );
 
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
 app.use(morgan('dev'));
 
 // Throttle the API to blunt brute-force and abuse. Static assets and the SPA
@@ -80,6 +85,30 @@ app.use('/api', (req, res, next) => {
     return next();
   }
   return requireSameOrigin(req, res, next);
+});
+
+if (!process.env.JWT_SECRET) {
+  logger.error('❌ JWT_SECRET is not set — required to sign staff session tokens.');
+  process.exit(1);
+}
+
+// Staff login (public — auth itself happens here; /me is protected inline in auth.js).
+app.use('/api/auth', authRoutes);
+
+// Auth guard for every other /api route, except the small set of endpoints ESP32
+// devices call directly with no login flow of their own — those get the device-secret
+// check instead (Phase 5 Part B; see requireDeviceSecret.js and DEVICE_SHARED_SECRET).
+const DEVICE_PATHS = new Set([
+  '/api/biometric/esp32-webhook',
+  '/api/biometric/validate',
+  '/api/biometric/cache-update',
+]);
+app.use('/api', (req, res, next) => {
+  const requestPath = req.originalUrl.split('?')[0];
+  if (DEVICE_PATHS.has(requestPath) || /^\/api\/firmware\/download\/[^/]+$/.test(requestPath)) {
+    return requireDeviceSecret(req, res, next);
+  }
+  return requireAuth(req, res, next);
 });
 
 app.use('/uploads', express.static('public/uploads'));
@@ -165,6 +194,9 @@ const startServer = async () => {
     const settingsCache = require('./services/settingsCache');
     await settingsCache.initialize();
     logger.info('✅ Settings cache initialized');
+
+    const { ensureBootstrapAdmin } = require('./services/authService');
+    await ensureBootstrapAdmin();
 
     server.listen(PORT, '0.0.0.0', () => {
       logger.info(`Server running on port ${PORT} and accessible from all interfaces`);
