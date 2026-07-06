@@ -63,6 +63,22 @@ test('login — rejects unknown username', async () => {
   assert.equal(res._body.success, false);
 });
 
+test('login — unknown username and known username/wrong password return identical bodies', async () => {
+  const hash = await authService.hashPassword('right-pass-carol');
+  db.prepare(`INSERT INTO staff (username, password_hash, role) VALUES ('carol', ?, 'staff')`).run(
+    hash
+  );
+
+  const unknownRes = mockRes();
+  await authController.login({ body: { username: 'nobody-at-all', password: 'x' } }, unknownRes);
+
+  const wrongPassRes = mockRes();
+  await authController.login({ body: { username: 'carol', password: 'wrong' } }, wrongPassRes);
+
+  assert.equal(unknownRes._status, wrongPassRes._status);
+  assert.deepEqual(unknownRes._body, wrongPassRes._body);
+});
+
 test('login — succeeds with correct credentials and sets session cookie', async () => {
   const hash = await authService.hashPassword('s3cret!');
   db.prepare(`INSERT INTO staff (username, password_hash, role) VALUES ('alice', ?, 'staff')`).run(
@@ -94,12 +110,13 @@ test('login — locks account after repeated failed attempts', async () => {
   assert.equal(lockedRes._status, 423);
 });
 
-test('requireAuth — 401s with no cookie, passes through with a valid one', () => {
-  const token = authService.signToken({ id: 1, username: 'alice', role: 'staff' });
+test('requireAuth — 401s with no cookie, passes through with a valid one', async () => {
+  const alice = db.prepare(`SELECT id FROM staff WHERE username = 'alice'`).get();
+  const token = authService.signToken({ id: alice.id, username: 'alice', role: 'staff' });
 
   const blocked = mockRes();
   let nextCalled = false;
-  requireAuth({ cookies: {} }, blocked, () => {
+  await requireAuth({ cookies: {} }, blocked, () => {
     nextCalled = true;
   });
   assert.equal(blocked._status, 401);
@@ -107,9 +124,56 @@ test('requireAuth — 401s with no cookie, passes through with a valid one', () 
 
   const allowed = mockRes();
   const req = { cookies: { [authService.TOKEN_COOKIE_NAME]: token } };
-  requireAuth(req, allowed, () => {
+  await requireAuth(req, allowed, () => {
     nextCalled = true;
   });
   assert.equal(nextCalled, true);
   assert.equal(req.staff.username, 'alice');
+});
+
+test('requireAuth — 401s for a valid token whose staff row is deactivated', async () => {
+  const hash = await authService.hashPassword('dana-pass');
+  const info = db
+    .prepare(
+      `INSERT INTO staff (username, password_hash, role, is_active) VALUES ('dana', ?, 'staff', 0)`
+    )
+    .run(hash);
+
+  const token = authService.signToken({
+    id: info.lastInsertRowid,
+    username: 'dana',
+    role: 'staff',
+  });
+  const res = mockRes();
+  let nextCalled = false;
+  await requireAuth({ cookies: { [authService.TOKEN_COOKIE_NAME]: token } }, res, () => {
+    nextCalled = true;
+  });
+
+  assert.equal(res._status, 401);
+  assert.equal(nextCalled, false);
+});
+
+test('requireAuth — 401s for a valid token whose staff row is currently locked', async () => {
+  const hash = await authService.hashPassword('erin-pass');
+  const futureLock = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const info = db
+    .prepare(
+      `INSERT INTO staff (username, password_hash, role, locked_until) VALUES ('erin', ?, 'staff', ?)`
+    )
+    .run(hash, futureLock);
+
+  const token = authService.signToken({
+    id: info.lastInsertRowid,
+    username: 'erin',
+    role: 'staff',
+  });
+  const res = mockRes();
+  let nextCalled = false;
+  await requireAuth({ cookies: { [authService.TOKEN_COOKIE_NAME]: token } }, res, () => {
+    nextCalled = true;
+  });
+
+  assert.equal(res._status, 401);
+  assert.equal(nextCalled, false);
 });

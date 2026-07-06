@@ -64,6 +64,18 @@ app.use(
 
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+
+// Redact query-param secrets from access logs. firmware.js embeds DEVICE_SHARED_SECRET
+// as ?device_secret= in the OTA download URL (the ESP32 update library can't send
+// custom headers) — keep this param name in sync with requireDeviceSecret.js's
+// req.query.device_secret check.
+morgan.token('url', (req) => {
+  const [path, query] = req.originalUrl.split('?');
+  if (!query) return path;
+  const params = new URLSearchParams(query);
+  if (params.has('device_secret')) params.set('device_secret', '[redacted]');
+  return `${path}?${params.toString()}`;
+});
 app.use(morgan('dev'));
 
 // Throttle the API to blunt brute-force and abuse. Static assets and the SPA

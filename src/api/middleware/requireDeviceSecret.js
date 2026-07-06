@@ -16,6 +16,8 @@ function requireDeviceSecret(req, res, next) {
     return next();
   }
 
+  // Param name kept in sync with the redaction in app.js's morgan `:url` token —
+  // update both if this ever changes.
   const provided = req.headers['x-device-secret'] || req.query.device_secret;
   if (!provided) {
     return res.status(401).json({ success: false, message: 'Missing device secret' });
