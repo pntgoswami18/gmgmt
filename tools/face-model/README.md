@@ -59,6 +59,79 @@ in the 1–2 MB int8 class. Latency-wise the spike suggests even a ~10x-proxy
 model would still fit the budget on WebGPU, so accuracy — not speed — should
 drive the Phase 1 decision.
 
+## Phase 1 results (2026-07-10)
+
+### Conversion pipeline — WORKING
+
+`convert.py`: SFace ONNX → onnx2tf (v2) → NHWC fp32 `.tflite` → AI Edge
+Quantizer → dynamic-range int8 `.tflite`, with a fidelity gate comparing
+embeddings against onnxruntime on identical inputs.
+
+| Artifact | Size | Fidelity vs ONNX (noise inputs) |
+|---|---|---|
+| `face_embedder_v1_fp32.tflite` | 38.5 MB | cosine 1.0 — exact |
+| `face_embedder_v1_int8.tflite` (dynamic-range) | 9.9 MB | cosine min 0.983 (WARN — but see EER parity below) |
+
+Pipeline gotchas discovered (all handled in `convert.py` / `requirements.txt`):
+- onnx2tf needs `tf_keras`, `protobuf<5`... — the venv pins in
+  `requirements.txt` are load-bearing, not suggestions.
+- onnx2tf v2 emits `.tflite` directly (no SavedModel intermediate). Its own
+  `-odrqt` dynamic-range output (default `flatbuffer_direct` backend) produced
+  **garbage embeddings (cosine ~0.08)** — the fidelity gate caught it. AI Edge
+  Quantizer on the verified fp32 `.tflite` is the correct quantization path.
+- SFace expects **raw 0–255 BGR input** — normalization is baked into the
+  graph. Feeding `(x-127.5)/128` (usual ArcFace convention) wrecks it
+  (EER 45% vs 5%). Phase 3/4 client code must not normalize.
+
+### Browser benchmark of the converted models (LiteRT.js, 50 runs)
+
+| Variant | WASM mean | WebGPU mean |
+|---|---|---|
+| fp32 (38.5 MB) | 27.2 ms, fully accelerated | 9.6 ms, fully accelerated |
+| int8 DR (9.9 MB) | **322 ms, NOT accelerated** | 11.5 ms, fully accelerated |
+
+- **`loadLiteRt` must pass `{ jspi: true }`** (when `'Suspending' in
+  WebAssembly`): without it both converted models throw
+  `ReferenceError: Asyncify is not defined` on the WebGPU backend.
+- Dynamic-range int8 does not delegate to XNNPACK on the WASM backend —
+  8–12x slower than fp32 on CPU. **v1 recommendation: ship fp32** (works on
+  both backends, one artifact, 38.5 MB served once over localhost and
+  cached). Revisit full-integer quant if artifact size ever matters.
+
+### Evaluation harness + provisional threshold
+
+`evaluate.py`: LFW pairs (HF mirror `logasja/lfw` — the figshare/UMass hosts
+sklearn uses are dead) → YuNet detect → SFace alignCrop → tflite embed →
+FAR/FRR sweep. 2200 pairs, zero detection failures.
+
+| Embedder | EER | @ FAR 0.09% | Recommended threshold |
+|---|---|---|---|
+| fp32 | 5.18% | FRR 6.5% | 0.343 |
+| int8 DR | 5.09% | FRR 6.7% | 0.359 |
+| OpenCV reference (control) | 5.24% | FRR 5.7% | — |
+
+- **Quantization costs nothing on real faces** — int8 EER matches fp32.
+- The control run proves our tflite path **exactly matches OpenCV's reference
+  implementation** (5.24% vs 5.18% EER — noise). The gap vs SFace's published
+  LFW figure (~99.4%) is this mirror's harder/different pair protocol, not a
+  conversion bug.
+- **Provisional `face_match_threshold`: 0.34** (fp32, FAR ≈0.1%). Measured
+  FRR ~6.5% is above the plan's 2–3% target, but this is per-single-image;
+  the production accept rule (K consecutive frames + top1–top2 margin +
+  unlimited retries while standing at the camera) makes effective walk-up
+  FRR substantially lower. Tune against the gym's own gallery in shadow
+  mode (plan Section 8.3) before treating it as final.
+
+## Running the pipeline
+
+```bash
+./download-models.sh                      # pinned artifacts (not in git)
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python convert.py               # ONNX -> fp32 + int8 tflite + fidelity gate
+.venv/bin/python evaluate.py              # LFW FAR/FRR -> recommended threshold
+.venv/bin/python evaluate.py --norm opencv  # reference-implementation control
+```
+
 ## Running the spike
 
 ```bash

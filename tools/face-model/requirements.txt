@@ -1,0 +1,17 @@
+# Phase 1 model pipeline (conversion + evaluation). Python 3.12.
+# Install: uv venv --python 3.12 .venv && uv pip install -r requirements.txt
+tensorflow>=2.21              # SavedModel -> .tflite conversion + tflite interpreter
+onnx>=1.16
+onnxruntime>=1.18             # reference embeddings for the fidelity check
+onnx2tf>=1.26                 # ONNX (NCHW) -> TF SavedModel (NHWC)
+onnx-graphsurgeon
+sng4onnx
+onnxsim
+psutil
+ml_dtypes
+opencv-python>=4.10           # YuNet detect + SFace alignCrop for the eval harness
+pandas                        # LFW pairs parquet loader
+numpy
+tf_keras                      # onnx2tf runtime dependency (Keras 2 shim)
+ai-edge-litert                # tflite interpreter (TF>=2.21 delegates to it)
+ai-edge-quantizer             # dynamic-range int8 quantization of the fp32 tflite

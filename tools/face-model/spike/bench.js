@@ -10,6 +10,17 @@ const MODELS = [
     url: '/models/blaze_face_short_range.tflite',
   },
   { name: 'mobilenet_v3_small (embedder proxy, 4.1 MB)', url: '/models/mobilenet_v3_small.tflite' },
+  // The real converted embedders — present once Phase 1's convert.py has run.
+  {
+    name: 'face_embedder_v1_fp32 (SFace, 38.5 MB)',
+    url: '/models/face_embedder_v1_fp32.tflite',
+    optional: true,
+  },
+  {
+    name: 'face_embedder_v1_int8 (SFace dynamic-range, 9.9 MB)',
+    url: '/models/face_embedder_v1_int8.tflite',
+    optional: true,
+  },
 ];
 const WARMUP = 5;
 const RUNS = 50;
@@ -80,7 +91,11 @@ async function main() {
     ` — WebGPU: ${'gpu' in navigator} — SharedArrayBuffer (threads): ${typeof SharedArrayBuffer !== 'undefined'}`;
 
   status('Initializing LiteRT.js WASM runtime…');
-  await loadLiteRt('/litert-wasm/');
+  // jspi: the converted SFace models hit an async execution path on the
+  // WebGPU backend that throws "Asyncify is not defined" without it.
+  const jspiOk = 'Suspending' in WebAssembly;
+  await loadLiteRt('/litert-wasm/', { jspi: jspiOk });
+  console.log(`loadLiteRt jspi=${jspiOk}`);
 
   const backends = ['wasm', ...('gpu' in navigator ? ['webgpu'] : [])];
   const results = [];
@@ -88,6 +103,13 @@ async function main() {
   $('results').hidden = false;
 
   for (const modelDef of MODELS) {
+    if (modelDef.optional) {
+      const head = await fetch(modelDef.url, { method: 'HEAD' });
+      if (!head.ok) {
+        console.log(`skipping ${modelDef.name} — ${modelDef.url} not present`);
+        continue;
+      }
+    }
     for (const backend of backends) {
       status(`Benchmarking ${modelDef.name} on ${backend}…`);
       let row;

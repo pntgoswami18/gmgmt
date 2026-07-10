@@ -19,6 +19,10 @@ PROXY_EMBEDDER_URL="https://storage.googleapis.com/mediapipe-models/image_embedd
 # checkpoint. Converted to .tflite in Phase 1; downloaded here to pin and hash it.
 SFACE_URL="https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
 
+# YuNet face detector (MIT, OpenCV Zoo) — used only by the offline evaluation
+# harness (evaluate.py) for detection + SFace alignCrop. Not shipped to browser.
+YUNET_URL="https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+
 fetch() {
   local url="$1" out="$2"
   if [ -f "$out" ]; then
@@ -32,7 +36,9 @@ fetch() {
 fetch "$DETECTOR_URL"       "blaze_face_short_range.tflite"
 fetch "$PROXY_EMBEDDER_URL" "mobilenet_v3_small.tflite"
 fetch "$SFACE_URL"          "face_recognition_sface_2021dec.onnx"
+fetch "$YUNET_URL"          "face_detection_yunet_2023mar.onnx"
 
 echo
 echo "SHA-256 sums (record in README.md if they change):"
-shasum -a 256 blaze_face_short_range.tflite mobilenet_v3_small.tflite face_recognition_sface_2021dec.onnx
+shasum -a 256 blaze_face_short_range.tflite mobilenet_v3_small.tflite \
+  face_recognition_sface_2021dec.onnx face_detection_yunet_2023mar.onnx
