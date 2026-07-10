@@ -7,6 +7,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@litertjs/core": "^2.5.2"
+    "@litertjs/core": "2.5.2",
+    "@litertjs/wasm-utils": "2.5.0"
   }
 }

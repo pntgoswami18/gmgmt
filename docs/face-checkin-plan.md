@@ -54,7 +54,7 @@ The gallery is tiny (one gym's active members, typically 100–2,000). Discrimin
 
 ### 1.4 Artifact hosting & versioning
 
-- **Serve from the gmgmt backend**: new static mount, e.g. `app.use('/models', express.static('public/models'))` in `src/app.js`, next to the existing `/uploads` mount. Files: `face_detector_v1.tflite`, `face_embedder_v1_int8.tflite`, plus LiteRT.js WASM assets copied into `client/public/litert-wasm/` (same-origin, required for threading).
+- **Serve from the gmgmt backend**: new static mount, e.g. `app.use('/models', express.static('public/models'))` in `src/app.js`, next to the existing `/uploads` mount. Files: `face_detector_v1.tflite`, `face_embedder_v1_int8.tflite`, plus LiteRT.js WASM assets copied into `client/public/litert-wasm/` (same-origin; the runtime resolves its `.wasm` build relative to this directory). Threading is opt-in via `loadLiteRt(path, {threads: true})` and Phase 0 measured it as unnecessary — see `tools/face-model/README.md`.
 - **Manifest endpoint**: `GET /api/biometric/face/model-manifest` returning `{ modelVersion, embedderUrl, detectorUrl, embeddingDim, sha256, threshold }`. Version stored as a `settings` row (`face_model_version`), managed through `settingsCache`.
 - **Client caching**: Cache API keyed by `sha256`; lazy-load only on the face-enrollment/check-in routes.
 - **Version discipline:** embeddings from different model versions are incompatible. Every stored embedding row carries `model_version`. A model upgrade is a migration event — treat it as such, not a config flip.
@@ -208,7 +208,7 @@ Every failure mode below resolves to **the door stays locked and the member is d
 1. Raw images never uploaded or stored; enrollment thumbnails in-memory only.
 2. Embeddings are still biometric personal data (relevant under India's DPDP Act). Consent captured at enrollment.
 3. At rest: SQLite is plaintext today (fingerprint templates already are). Optional AES-encryption of embedding BLOBs (`FACE_EMBEDDING_KEY` env) as defense-in-depth.
-4. In transit: HTTPS prerequisite (Section 0) covers this if the client isn't on localhost.
+4. In transit: nothing crosses a network — Section 0 confirmed the browser and the server are the same machine, reached over `localhost`, so no HTTPS work is needed. If a deployment ever splits them, HTTPS becomes a prerequisite and this line becomes load-bearing again.
 5. Deletion: mirrors existing biometric delete, tombstones for sync, `ON DELETE CASCADE` on member deletion.
 6. Authorization integrity: client never decides; `faceCheckIn` re-validates everything `validateBiometricId` validates.
 

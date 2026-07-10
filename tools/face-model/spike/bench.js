@@ -14,6 +14,9 @@ const MODELS = [
 const WARMUP = 5;
 const RUNS = 50;
 
+// Published immediately so automation can poll `done` rather than race the page.
+window.__benchResults = { done: false, fatal: null, rows: [] };
+
 const $ = (id) => document.getElementById(id);
 const status = (msg) => {
   $('status').textContent = msg;
@@ -47,15 +50,20 @@ async function benchOne(modelDef, accelerator) {
       const inputs = inputDetails.map(makeInput);
       const t1 = performance.now();
       const outputs = await model.run(inputs);
-      // Read one output back to CPU inside the timed region: without this,
+      // Read *every* output back to CPU inside the timed region: without this,
       // WebGPU timing measures command submission, not completion — the real
       // pipeline always reads the embedding/boxes back, so include the cost.
+      // BlazeFace emits two outputs; timing only the first undercounts it.
       const outs = Array.isArray(outputs) ? outputs : Object.values(outputs);
-      const cpu = await outs[0].moveTo('wasm');
-      cpu.toTypedArray();
+      const cpu = [];
+      for (const out of outs) {
+        // `moveTo` consumes its source: it copies, then deletes `out`.
+        const hostTensor = await out.moveTo('wasm');
+        hostTensor.toTypedArray();
+        cpu.push(hostTensor);
+      }
       const dt = performance.now() - t1;
-      cpu.delete();
-      outs.slice(1).forEach((t) => t.delete());
+      cpu.forEach((t) => t.delete());
       inputs.forEach((t) => t.delete());
       if (i >= WARMUP) times.push(dt);
     }
@@ -109,12 +117,14 @@ async function main() {
 
   status(`Done — ${WARMUP} warmup + ${RUNS} timed runs per cell.`);
   $('json').textContent = JSON.stringify(results, null, 2);
-  window.__benchResults = results;
+  // Automation reads this; keep the shape identical on success and failure so
+  // consumers never have to type-check it.
+  window.__benchResults = { done: true, fatal: null, rows: results };
 }
 
 main().catch((e) => {
   status(`FATAL: ${e}`);
   $('status').className = 'fail';
-  window.__benchResults = { fatal: String(e) };
+  window.__benchResults = { done: true, fatal: String(e), rows: [] };
   console.error(e);
 });
