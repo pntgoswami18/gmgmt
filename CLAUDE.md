@@ -30,14 +30,14 @@ npm run esp32:test:api      # Test REST API endpoints only
 
 ### Running tests
 ```bash
-# Backend unit tests (Jest)
-npx jest src/services/__tests__/
+# Backend unit tests (node:test — the repo does not use jest)
+node --test 'src/services/__tests__/*.test.js'
 
 # Single test file
-npx jest src/services/__tests__/biometricIntegration.test.js
+node --test src/services/__tests__/biometricIntegration.test.js
 ```
 
-Unit + integration tests are expected for all changes — run both `npx jest src/services/__tests__/` and `npm run esp32:test` before marking work done.
+Unit + integration tests are expected for all changes — run both `node --test 'src/services/__tests__/*.test.js'` and `npm run esp32:test` before marking work done. The ESP32 integration tests need the server running (`JWT_SECRET=<any> ENABLE_BIOMETRIC=true BIOMETRIC_PORT=5005 node src/app.js`).
 
 No dedicated lint script exists. No Docker setup — runs directly with Node.js.
 

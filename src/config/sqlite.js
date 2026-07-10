@@ -221,6 +221,21 @@ function initializeDatabase() {
        last_login_at TEXT,
        created_at TEXT DEFAULT (datetime('now'))
      );`,
+    `CREATE TABLE IF NOT EXISTS member_face_embeddings (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+       embedding BLOB NOT NULL,
+       model_version TEXT NOT NULL,
+       quality_score REAL,
+       pose_label TEXT,
+       consent_at TEXT,
+       created_at TEXT DEFAULT (datetime('now')),
+       updated_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS face_sync_tombstones (
+       member_id INTEGER PRIMARY KEY,
+       deleted_at TEXT DEFAULT (datetime('now'))
+     );`,
     `CREATE TABLE IF NOT EXISTS firmware_update_log (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        device_id TEXT NOT NULL,
@@ -269,6 +284,12 @@ function initializeDatabase() {
     ['membership_types', '["standard","premium","vip"]'],
     ['cross_session_checkin_restriction', 'true'],
     ['whatsapp_welcome_enabled', 'false'],
+    ['face_checkin_enabled', 'false'],
+    ['face_match_threshold', '0.55'],
+    ['face_liveness_mode', 'challenge'],
+    ['face_model_version', ''],
+    ['face_checkout_min_dwell_minutes', '15'],
+    ['face_door_device_id', ''],
     [
       'whatsapp_welcome_message',
       'Welcome to our gym! Your biometric enrollment is complete. You can now access the gym using your fingerprint. Enjoy your workouts!',
@@ -347,6 +368,14 @@ function initializeDatabase() {
     db.exec('CREATE INDEX IF NOT EXISTS idx_settings_key_lookup ON settings(key);');
     db.exec('CREATE INDEX IF NOT EXISTS idx_members_active_admin ON members(is_active, is_admin);');
 
+    // Face check-in indexes
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_face_embeddings_member ON member_face_embeddings(member_id);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_face_embeddings_updated ON member_face_embeddings(updated_at);'
+    );
+
     // Firmware table indexes
     db.exec(
       'CREATE INDEX IF NOT EXISTS idx_firmware_update_log_device_id ON firmware_update_log(device_id);'
@@ -405,6 +434,13 @@ function initializeDatabase() {
     if (!colNames.includes('biometric_id')) {
       db.prepare("ALTER TABLE members ADD COLUMN biometric_id TEXT DEFAULT ''").run();
       db.prepare("UPDATE members SET biometric_id = '' WHERE biometric_id IS NULL").run();
+    }
+
+    // Add last_visit column if missing — biometricIntegration.updateLastVisit
+    // (and now checkInService) have always written to it, but no migration ever
+    // created it; the UPDATE failed silently inside a try/catch.
+    if (!colNames.includes('last_visit')) {
+      db.prepare('ALTER TABLE members ADD COLUMN last_visit TEXT').run();
     }
 
     // Add biometric_sensor_member_id column if missing

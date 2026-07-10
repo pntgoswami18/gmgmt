@@ -45,7 +45,8 @@ function buildSchema(db) {
       is_active INTEGER DEFAULT 1,
       biometric_id TEXT DEFAULT '',
       biometric_sensor_member_id TEXT DEFAULT '',
-      is_admin INTEGER DEFAULT 0
+      is_admin INTEGER DEFAULT 0,
+      last_visit TEXT
     );
     CREATE UNIQUE INDEX IF NOT EXISTS ux_members_phone ON members(phone) WHERE phone IS NOT NULL;
 
@@ -126,6 +127,31 @@ function buildSchema(db) {
       timestamp TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS attendance (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+      check_in_time TEXT NOT NULL,
+      check_out_time TEXT,
+      date TEXT DEFAULT (date('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS member_face_embeddings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+      embedding BLOB NOT NULL,
+      model_version TEXT NOT NULL,
+      quality_score REAL,
+      pose_label TEXT,
+      consent_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS face_sync_tombstones (
+      member_id INTEGER PRIMARY KEY,
+      deleted_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
@@ -149,7 +175,13 @@ function buildSchema(db) {
       ('referral_system_enabled', 'false'),
       ('referral_discount_amount', '100'),
       ('cross_session_checkin_restriction', 'true'),
-      ('whatsapp_welcome_enabled', 'false');
+      ('whatsapp_welcome_enabled', 'false'),
+      ('face_checkin_enabled', 'false'),
+      ('face_match_threshold', '0.55'),
+      ('face_liveness_mode', 'challenge'),
+      ('face_model_version', ''),
+      ('face_checkout_min_dwell_minutes', '15'),
+      ('face_door_device_id', '');
   `);
 }
 

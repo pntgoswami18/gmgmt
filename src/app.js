@@ -114,6 +114,13 @@ const DEVICE_PATHS = new Set([
   '/api/biometric/esp32-webhook',
   '/api/biometric/validate',
   '/api/biometric/cache-update',
+  // Face check-in station routes: the kiosk browser runs unattended with no
+  // staff session, so it authenticates with the device secret instead. The
+  // sync endpoint hands out member names + embeddings — never leave it open.
+  '/api/biometric/face/sync',
+  '/api/biometric/face/check-in',
+  '/api/biometric/face/config',
+  '/api/biometric/face/model-manifest',
 ]);
 app.use('/api', (req, res, next) => {
   const requestPath = req.originalUrl.split('?')[0];
@@ -124,6 +131,8 @@ app.use('/api', (req, res, next) => {
 });
 
 app.use('/uploads', express.static('public/uploads'));
+// Face model binaries (.tflite + manifest) for the check-in/enrollment clients.
+app.use('/models', express.static('public/models'));
 
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/bookings', bookingRoutes);
@@ -235,6 +244,12 @@ const startServer = async () => {
         logger.info('🔐 Connecting integration with controller...');
         setBiometricIntegration(biometricIntegration);
         setFirmwareBiometricIntegration(biometricIntegration);
+        // Face check-in needs the integration only for the door-unlock command;
+        // everything else about face check-in works with this flag off.
+        const {
+          setBiometricIntegration: setFaceBiometricIntegration,
+        } = require('./api/controllers/faceBiometricController');
+        setFaceBiometricIntegration(biometricIntegration);
 
         // Store reference for potential cleanup
         app.biometricIntegration = biometricIntegration;
