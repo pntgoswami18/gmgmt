@@ -74,18 +74,27 @@ def run_onnx2tf(onnx_path: Path, out_dir: Path) -> Path:
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
-    # onnx2tf rewrites its -i input IN PLACE with the onnx-simplifier output
-    # (a weight-identical but re-serialized graph with a different SHA-256).
-    # Convert a disposable copy so the pinned, hash-verified checkpoint in
-    # spike/models/ is never mutated — otherwise every run silently drifts the
-    # artifact off its recorded hash. Keep the copy's name so onnx2tf's output
-    # filenames (derived from the input stem) stay {stem}_float32.tflite.
+    # onnx2tf rewrites its -i input IN PLACE — several internal stages (op-name
+    # auto-generation via sng4onnx, graph re-export, and onnxsim when reachable)
+    # each re-serialize the model back to the input path. The bytes are
+    # weight-identical to the input but have a different SHA-256. Convert a
+    # disposable copy so the pinned, hash-verified checkpoint in spike/models/
+    # is never mutated; keep the copy's name so onnx2tf's output filenames
+    # (derived from the input stem) stay {stem}_float32.tflite.
     work = out_dir / onnx_path.name
     shutil.copy2(onnx_path, work)
     log(f"onnx2tf: {onnx_path} (via disposable copy) -> {out_dir}")
+    # -n / --not_use_onnxsim: keep the conversion deterministic across
+    # environments. onnx2tf shells out to the `onnxsim` CLI, whose presence on
+    # PATH is environment-dependent (the venv is used by full path, not
+    # activated, so `.venv/bin/onnxsim` is not found). Whether onnxsim runs
+    # changes the output .tflite bytes; disabling it pins the build to the
+    # validated onnxsim-off artifacts (fp32 f2fde3b5…, int8 c74fc6be…) instead
+    # of silently depending on PATH. onnxsim's simplification is marginal here
+    # (SFace is already a clean graph) and fp32 fidelity vs the ONNX is 1.0.
     subprocess.run(
         [sys.executable, "-m", "onnx2tf", "-i", str(work),
-         "-o", str(out_dir)],
+         "-o", str(out_dir), "-n"],
         check=True,
     )
     if not fp32.exists():

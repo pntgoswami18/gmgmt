@@ -55,15 +55,28 @@ SHA-256 on each run (a mismatched local copy is re-fetched, then hard-fails if
 it still doesn't match).
 
 **SFace checkpoint drift (root cause + fix):** `onnx2tf` rewrites its `-i`
-input file **in place** with the onnx-simplifier output — a weight-identical
-but re-serialized graph with a different SHA-256 (`827d2b58…`, 38,692,565 B vs
-the pinned `0ba9fbfa…`, 38,696,353 B). Running `convert.py` therefore used to
-silently drift the pinned SFace checkpoint off its recorded hash on every run.
-Verified equivalent in onnxruntime (cosine 1.0, max|Δ| 2e-6 over 5 seeds), so
-no downstream artifact was wrong — but the on-disk checkpoint no longer matched
-its pin. `convert.py` now converts a disposable copy and never touches the
+input file **in place** — several internal stages (op-name auto-generation via
+sng4onnx, graph re-export, and onnxsim when its CLI is reachable) each
+re-serialize the model back to the input path. The result is weight-identical
+to the input but has a different SHA-256 (e.g. `827d2b58…`, 38,692,565 B vs the
+pinned `0ba9fbfa…`, 38,696,353 B; the exact re-serialized bytes are even
+environment-dependent). Running `convert.py` therefore used to silently drift
+the pinned SFace checkpoint off its recorded hash on every run. Verified
+equivalent in onnxruntime (cosine 1.0, max|Δ| 2e-6 over 5 seeds), so no
+downstream artifact was wrong — but the on-disk checkpoint no longer matched
+its pin. `convert.py` now converts a **disposable copy** and never touches the
 pinned file; `download-models.sh`'s verify-and-refetch is the backstop that
 catches any residual drift.
+
+**Build determinism (onnxsim):** onnx2tf shells out to the `onnxsim` CLI, and
+whether it runs changes the output `.tflite` bytes. Its presence on PATH is
+environment-dependent — the venv is used by full path, not activated, so
+`.venv/bin/onnxsim` isn't found and onnx2tf logged "Failed to optimize" while
+proceeding without it. `convert.py` now passes `-n` (`--not_use_onnxsim`) to
+pin the build to the validated onnxsim-off artifacts (fp32 `f2fde3b5…`, int8
+`c74fc6be…`) regardless of PATH, rather than depending on whether a console
+script happens to be reachable. onnxsim's simplification is marginal for SFace
+(already a clean graph) and fp32 fidelity vs the ONNX is 1.0.
 
 **⚠️ Phase 0 finding for Phase 1:** the SFace ONNX checkpoint is **36.9 MB
 fp32** — not the ~4–5 MB the plan's Section 1.2 table assumed for a
