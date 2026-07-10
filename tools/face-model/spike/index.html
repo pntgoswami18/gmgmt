@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Face check-in — LiteRT.js Phase 0 spike</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 60rem; }
+    table { border-collapse: collapse; margin-top: 1rem; }
+    td, th { border: 1px solid #999; padding: 0.4rem 0.8rem; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    #status { color: #555; }
+    .fail { color: #b00; }
+  </style>
+</head>
+<body>
+  <h1>LiteRT.js Phase 0 perf smoke test</h1>
+  <p id="env"></p>
+  <p id="status">Loading runtime…</p>
+  <table id="results" hidden>
+    <thead>
+      <tr><th>Model</th><th>Backend</th><th>Fully accelerated</th>
+          <th>Load+compile (ms)</th><th>Mean (ms)</th><th>p50 (ms)</th><th>p95 (ms)</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <pre id="json"></pre>
+  <script type="importmap">
+    { "imports": { "@litertjs/wasm-utils": "/litert-wasm-utils/index.js" } }
+  </script>
+  <script type="module" src="/bench.js"></script>
+</body>
+</html>
