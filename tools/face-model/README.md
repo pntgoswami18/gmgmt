@@ -93,10 +93,20 @@ Pipeline gotchas discovered (all handled in `convert.py` / `requirements.txt`):
 - **`loadLiteRt` must pass `{ jspi: true }`** (when `'Suspending' in
   WebAssembly`): without it both converted models throw
   `ReferenceError: Asyncify is not defined` on the WebGPU backend.
-- Dynamic-range int8 does not delegate to XNNPACK on the WASM backend —
-  8–12x slower than fp32 on CPU. **v1 recommendation: ship fp32** (works on
-  both backends, one artifact, 38.5 MB served once over localhost and
-  cached). Revisit full-integer quant if artifact size ever matters.
+- Dynamic-range int8 did not delegate to XNNPACK on the WASM backend in this
+  run — 8–12x slower than fp32 on CPU. **v1 recommendation: ship fp32**
+  (works on both backends, one artifact, 38.5 MB served once over localhost
+  and cached).
+  - **Caveat (confound):** `{ jspi: true }` selects a different WASM runtime
+    build (`litert_wasm_jspi_internal.js`) globally, for *both* backends — so
+    this int8-on-WASM number was measured on the JSPI build, not the plain
+    build the Phase 0 table used. Before treating "int8 is slow on WASM" as
+    settled, re-benchmark int8 on WASM with `{ jspi: false }` to rule out
+    that the JSPI build simply lacks the XNNPACK dynamic-range kernels. If
+    int8 delegates fine without JSPI, prefer per-backend runtime selection
+    (plain WASM + JSPI WebGPU) over abandoning quantization. The fp32
+    recommendation stands regardless (fp32 is within budget on both), but the
+    *reason* to drop int8 is not yet confirmed.
 
 ### Evaluation harness + provisional threshold
 
@@ -115,12 +125,26 @@ FAR/FRR sweep. 2200 pairs, zero detection failures.
   implementation** (5.24% vs 5.18% EER — noise). The gap vs SFace's published
   LFW figure (~99.4%) is this mirror's harder/different pair protocol, not a
   conversion bug.
-- **Provisional `face_match_threshold`: 0.34** (fp32, FAR ≈0.1%). Measured
-  FRR ~6.5% is above the plan's 2–3% target, but this is per-single-image;
-  the production accept rule (K consecutive frames + top1–top2 margin +
-  unlimited retries while standing at the camera) makes effective walk-up
-  FRR substantially lower. Tune against the gym's own gallery in shadow
-  mode (plan Section 8.3) before treating it as final.
+- **Provisional *verification* threshold: 0.34** (fp32). This is a 1:1
+  verification number from the LFW pairs protocol — **not** the 1:N
+  identification `face_match_threshold`. Check-in takes the top-1 match across
+  the whole gallery, so an impostor gets one shot per enrolled member and the
+  per-encounter FAR compounds with gallery size (at the measured ~0.09%
+  per-comparison FAR: ~9% at 100 members, ~36% at 500). Re-derive against the
+  gym's own gallery with a joint threshold + top1–top2 margin sweep before
+  adopting it (plan Sections 1.2 / 8.3).
+- **FAR resolution:** the "FAR ≈0.1%" above is a *single* false-accepting pair
+  out of 1100 — its exact 95% CI reaches ~0.5%. 1100 negatives cannot resolve
+  a 0.1% target; `evaluate.py` now reports the raw false-accept count, the
+  denominator, and a Wilson CI, and refuses to present a sub-resolution target
+  as "met."
+- **FRR caveat:** measured single-image FRR ~6.5% is above the plan's 2–3%
+  target. The production accept rule does **not** straightforwardly lower it:
+  requiring K consecutive frames to *all* match and adding a top1–top2 margin
+  both *raise* per-attempt FRR; only the retry loop (repeated attempts while
+  standing at the camera) lowers effective FRR — and it does so by granting an
+  impostor repeated independent attempts, which *raises* effective FAR in the
+  same motion. Both directions must be measured in shadow mode, not assumed.
 
 ## Running the pipeline
 
