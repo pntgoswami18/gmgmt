@@ -1,7 +1,8 @@
 # Face model tooling — browser face check-in
 
 Phase 0 (environment spike) artifacts for the browser-based face-embedding
-check-in feature. See the implementation plan for full context.
+check-in feature. See [docs/face-checkin-plan.md](../../docs/face-checkin-plan.md)
+for the full plan.
 
 ## Phase 0 results (2026-07-10)
 
