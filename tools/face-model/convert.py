@@ -25,6 +25,7 @@ Usage: .venv/bin/python convert.py [--onnx spike/models/face_recognition_sface_2
 """
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -42,12 +43,36 @@ def log(msg: str) -> None:
     print(f"[convert] {msg}", flush=True)
 
 
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def run_onnx2tf(onnx_path: Path, out_dir: Path) -> Path:
-    """ONNX (NCHW) -> NHWC float32 .tflite. Returns its path."""
+    """ONNX (NCHW) -> NHWC float32 .tflite. Returns its path.
+
+    Skips re-conversion only when a cached output exists AND its recorded
+    source hash matches the current ONNX. The cache key is the input's
+    SHA-256, not its filename: swapping the checkpoint for a different one
+    with the same name must not silently reuse the stale .tflite.
+    """
     fp32 = out_dir / f"{onnx_path.stem}_float32.tflite"
-    if fp32.exists():
-        log(f"{fp32.name} already exists, skipping onnx2tf")
+    stamp = out_dir / f"{onnx_path.stem}.onnx.sha256"
+    onnx_hash = sha256(onnx_path)
+    if fp32.exists() and stamp.exists() and stamp.read_text().strip() == onnx_hash:
+        log(f"{fp32.name} up to date for {onnx_path.name} (sha256 match), "
+            "skipping onnx2tf")
         return fp32
+    if fp32.exists():
+        log(f"{fp32.name} present but stale/unverified vs {onnx_path.name} — "
+            "re-running onnx2tf")
+    # Clear any stale output so a failed/partial run can't be mistaken for a
+    # good cache on the next invocation.
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
     log(f"onnx2tf: {onnx_path} -> {out_dir}")
     subprocess.run(
         [sys.executable, "-m", "onnx2tf", "-i", str(onnx_path),
@@ -56,6 +81,7 @@ def run_onnx2tf(onnx_path: Path, out_dir: Path) -> Path:
     )
     if not fp32.exists():
         raise FileNotFoundError(f"onnx2tf did not produce {fp32}")
+    stamp.write_text(onnx_hash)
     return fp32
 
 
@@ -166,12 +192,17 @@ def main() -> int:
     (build / "conversion_report.json").write_text(json.dumps(report, indent=2))
     log(f"report -> {build / 'conversion_report.json'}")
 
-    # Stage both embedders where the browser spike can benchmark them.
+    # Only publish to spike/models/ if the gated (fp32) conversion passed —
+    # a model that failed the fidelity gate must not reach the browser
+    # benchmark or anything else that reads spike/models/.
+    if not ok:
+        log("fidelity gate FAILED — not staging artifacts to spike/models/")
+        return 2
     for path in (fp32_path, int8_path):
         shutil.copy2(path, HERE / "spike/models" / path.name)
         log(f"copied {path.name} -> spike/models/ for the browser benchmark")
 
-    return 0 if ok else 2
+    return 0
 
 
 if __name__ == "__main__":
