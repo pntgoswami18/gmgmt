@@ -184,9 +184,16 @@ router.post('/update/:deviceId', requireSameOrigin, async (req, res) => {
     }
 
     // M7: Prefer SERVER_URL env var; fall back to auto-detected LAN IP
-    const downloadUrl = process.env.SERVER_URL
+    let downloadUrl = process.env.SERVER_URL
       ? `${process.env.SERVER_URL}/api/firmware/download/${firmwareId}`
       : `http://${getServerIP()}:${process.env.PORT || 3001}/api/firmware/download/${firmwareId}`;
+
+    // The ESP32 OTA library can't easily send custom headers, so when device-secret
+    // auth is enforced, embed it as a query param instead — the device just follows
+    // the URL it's given, no firmware change needed for this endpoint specifically.
+    if (process.env.DEVICE_SHARED_SECRET) {
+      downloadUrl += `?device_secret=${encodeURIComponent(process.env.DEVICE_SHARED_SECRET)}`;
+    }
 
     // Log the update attempt
     const logResult = await pool.query(

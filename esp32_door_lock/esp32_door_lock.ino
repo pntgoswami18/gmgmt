@@ -81,6 +81,7 @@ String wifi_password = "";
 String gym_server_ip = "";
 int gym_server_port = 8080;
 String device_id = "";
+String device_secret = ""; // Sent as X-Device-Secret header; empty = header omitted
 
 // Mutex for thread-safe access to gym_server_ip/port (httpSendTask on Core 0 vs config saves on Core 1)
 SemaphoreHandle_t configMutex = NULL;
@@ -116,6 +117,14 @@ Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerprintSerial);
 WebServer webServer(80);               // Web interface for configuration
 Preferences preferences;               // Non-volatile storage
 HTTPClient http;                       // HTTP client for server communication
+
+// Adds X-Device-Secret if one is configured; omitted otherwise so servers with
+// DEVICE_SHARED_SECRET unset (dev default) keep working unchanged.
+void addDeviceSecretHeader(HTTPClient &client) {
+  if (device_secret.length() > 0) {
+    client.addHeader("X-Device-Secret", device_secret);
+  }
+}
 
 // ==================== MEMBER CACHE STRUCTURE ====================
 struct MemberAuth {
@@ -388,7 +397,9 @@ void loadConfiguration() {
     gym_server_port = preferences.getInt("server_port", String(DEFAULT_GYM_SERVER_PORT).toInt());
     device_id = preferences.getString("device_id", DEFAULT_DEVICE_ID);
   #endif
-  
+  // Not part of config.h — always a runtime credential set via the config portal.
+  device_secret = preferences.getString("device_secret", "");
+
   // Allow preferences to override config.h ONLY if explicitly saved through web interface
   // Check if user has customized configuration via web interface
   if (preferences.getBool("user_configured", false)) {
@@ -450,7 +461,8 @@ void saveConfiguration() {
   preferences.putString("server_ip", gym_server_ip);
   preferences.putInt("server_port", gym_server_port);
   preferences.putString("device_id", device_id);
-  
+  preferences.putString("device_secret", device_secret);
+
   // Mark as user-configured to allow overriding config.h values
   preferences.putBool("user_configured", true);
   
@@ -1544,6 +1556,7 @@ void sendToServer(String jsonData) {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+  addDeviceSecretHeader(http);
   
   // Set timeout to handle slower server responses
   http.setTimeout(HTTP_TIMEOUT);
@@ -1616,6 +1629,7 @@ void httpSendTask(void *parameter) {
       asyncHttp.begin(url);
       asyncHttp.addHeader("Content-Type", "application/json");
       asyncHttp.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+      addDeviceSecretHeader(asyncHttp);
       asyncHttp.setTimeout(3000);
       
       int httpResponseCode = asyncHttp.POST(String(msg.jsonData));
@@ -2187,7 +2201,8 @@ void handleConfig() {
   html += "<p>Device ID: <br><input type='text' name='device_id' value='" + device_id + "' required></p>";
   html += "<p>Server IP: <br><input type='text' name='server_ip' value='" + gym_server_ip + "' required></p>";
   html += "<p>Server Port: <br><input type='number' name='server_port' value='" + String(gym_server_port) + "' min='1' max='65535' required></p>";
-  
+  html += "<p>Device Secret (optional, leave blank if server doesn't require one): <br><input type='password' name='device_secret' value='" + device_secret + "'></p>";
+
   html += "<p><button type='submit' name='action' value='save'>Save Configuration</button>";
   html += "<button type='submit' name='action' value='reset' onclick='return confirm(\"Reset to defaults?\")'>Reset to Defaults</button></p>";
   html += "</form>";
@@ -2245,10 +2260,13 @@ void handleConfigSave() {
     needsRestart = true;
   }
   
+  String new_device_secret = webServer.arg("device_secret");
+
   if (configMutex == NULL || xSemaphoreTake(configMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
     device_id = new_device_id;
     gym_server_ip = new_server_ip;
     gym_server_port = new_server_port;
+    device_secret = new_device_secret;
     if (configMutex != NULL) xSemaphoreGive(configMutex);
   } else {
     Serial.println("⚠️ Config mutex timeout - skipping in-memory update (Preferences already saved)");
@@ -2511,6 +2529,7 @@ bool validateWithServer(int biometricId) {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+  addDeviceSecretHeader(http);
   http.setTimeout(HTTP_VALIDATION_TIMEOUT);
   
   int httpResponseCode = http.POST(jsonString);
@@ -2605,6 +2624,7 @@ void updateMemberCache() {
     http.begin(url);
     http.addHeader("Content-Type", "application/json");
     http.addHeader("User-Agent", "ESP32-DoorLock/1.0");
+  addDeviceSecretHeader(http);
     http.setTimeout(HTTP_TIMEOUT);
     
     int httpResponseCode = http.POST(jsonString);

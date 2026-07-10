@@ -151,8 +151,21 @@ Copy the following into the `.env` file and replace the placeholder values with 
 # SQLite Database (automatically created)
 # No database configuration required
 
-# JSON Web Token Secret (for future authentication features)
+# JSON Web Token Secret — required. Signs staff login session cookies; the
+# server refuses to start without it.
 JWT_SECRET=your_super_secret_jwt_key
+
+# Seeds one staff/admin account on first boot if no staff accounts exist yet.
+# Only used once — ignored after any staff account exists. Log in and change
+# the password afterwards.
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=change_me_after_first_login
+
+# Shared secret ESP32 devices must send when calling the webhook/validate/
+# cache-update/firmware-download endpoints (since devices can't do a staff
+# login). Leave unset during initial setup — see "Authentication & Security"
+# below for the safe rollout sequence.
+# DEVICE_SHARED_SECRET=
 
 # Payment gateway configuration (disabled)
 
@@ -171,6 +184,12 @@ BIOMETRIC_HOST=0.0.0.0
 **Note for Email Setup:** For Gmail, you'll need to use an "App Password" instead of your regular password. Enable 2-factor authentication and generate an app password in your Google Account settings.
 
 **Note for JWT Secret:** It is critical to use a strong, randomly-generated secret for your JWT key. You can generate one from your terminal with the following command:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+**Note for Device Shared Secret:** Generate the same way:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -263,9 +282,24 @@ The backend provides the following REST API endpoints:
 
 ### Authentication & Security
 
-- JWT authentication is ready for future implementation
-- All endpoints are currently public (no authentication required)
-- CORS is configured for development and production use
+There are two independent layers of authentication: a staff login for the web dashboard, and a shared device secret for the ESP32 endpoints devices call directly.
+
+#### Staff login
+
+- All `/api/*` routes require a logged-in staff session **except** `/api/auth/login`, `/api/auth/logout`, and the ESP32 device endpoints listed below.
+- Login is `POST /api/auth/login` with `{ username, password }`. On success the server sets an `httpOnly`, `SameSite=Lax` session cookie (`gmgmt_token`, a JWT signed with `JWT_SECRET`, 12h expiry by default) — there is no token to store or attach manually, the browser sends it automatically on every request.
+- `GET /api/auth/me` returns the current staff identity (or `401`); `POST /api/auth/logout` clears the cookie.
+- Accounts are stored in the `staff` table (`username`, `password_hash`, `role`). Login is rate-limited to 5 attempts per 15 minutes per IP, and an account locks for 15 minutes after 5 failed password attempts.
+- **First-time login**: if the `staff` table is empty, the server seeds one admin account from `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD` on startup. Log in with those, then change the password. If those env vars aren't set and no staff account exists, nobody can log in — set them, restart once, then you can unset them again.
+- The frontend enforces this too: `client/src/context/AuthContext.js` gates the whole app behind a login screen and every API call goes through `client/src/api/client.js`, which sends the cookie and redirects to `/login` on a `401`.
+
+#### ESP32 device secret
+
+- Four endpoints are called directly by ESP32 devices, which can't do an interactive login: `POST /api/biometric/esp32-webhook`, `POST /api/biometric/validate`, `POST /api/biometric/cache-update`, and `GET /api/firmware/download/:id`. These are exempt from staff login but guarded separately by `DEVICE_SHARED_SECRET`.
+- If `DEVICE_SHARED_SECRET` is **unset**, these endpoints are open (dev default — matches how `CORS_ORIGINS` behaves when unset). Once set, requests must include a matching `X-Device-Secret` header (or, for the firmware-download URL specifically, a `?device_secret=` query parameter — the ESP32 OTA library doesn't make custom headers easy to send, so the backend embeds the secret directly in the download URL it hands the device when triggering an OTA update).
+- All devices currently share **one** secret — there's no per-device pairing flow, since devices already self-register on their first webhook/heartbeat.
+- **Safe rollout if you have devices already deployed**: don't just set `DEVICE_SHARED_SECRET` and restart — any device still running old firmware will be locked out immediately. Instead: (1) flash devices with firmware that sends the header/query param (it's a no-op if the backend doesn't enforce it yet), (2) confirm every device has checked in with the new firmware version, (3) only then set `DEVICE_SHARED_SECRET` and restart the backend.
+- CORS is configured for development and production use, independent of the above.
 
 ### Error Handling
 
@@ -963,6 +997,7 @@ The ESP32 supports dynamic, environment-driven configuration:
 2. **API Endpoints**: REST API for programmatic configuration
 3. **Remote Management**: Configure from gym management system
 4. **Development Defaults**: Optional `config.h` file for custom defaults
+5. **Device Secret**: Optional `Device Secret` field on the same config form — leave blank unless the backend enforces `DEVICE_SHARED_SECRET` (see [Authentication & Security](#api-endpoints)). Must match the backend's value exactly.
 
 #### 6. Critical Port Configuration
 
@@ -1472,8 +1507,15 @@ NODE_ENV=development
 # Database (SQLite - automatically created)
 # No additional configuration required
 
-# JWT Configuration
+# JWT Configuration — required, signs staff session cookies
 JWT_SECRET=your_super_secret_jwt_key
+
+# Bootstrap staff account — seeded once if the staff table is empty
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=change_me_after_first_login
+
+# ESP32 device secret — see "Authentication & Security" for the rollout sequence
+# DEVICE_SHARED_SECRET=
 
 # Email Configuration
 EMAIL_USER=your_email@gmail.com
