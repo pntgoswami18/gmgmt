@@ -46,7 +46,24 @@ Per plan Section 1.1: **SFace (OpenCV Zoo, Apache-2.0)** primary,
 |---|---|---|
 | `blaze_face_short_range.tflite` (float16 v1, MediaPipe, Apache-2.0) | 224 KB | `b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f` |
 | `mobilenet_v3_small.tflite` (float32 v1, MediaPipe, Apache-2.0 — spike proxy only) | 4.1 MB | `bbbb4c51a55a53905af1daec995ca1aae355046f8839bb8c9f5ce9271394bc40` |
-| `face_recognition_sface_2021dec.onnx` (OpenCV Zoo `main`, Apache-2.0) | 36.9 MB | `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79` |
+| `face_recognition_sface_2021dec.onnx` (OpenCV Zoo, Apache-2.0) | 36.9 MB | `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79` |
+| `face_detection_yunet_2023mar.onnx` (OpenCV Zoo, MIT — eval harness only) | 227 KB | `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4` |
+
+The two OpenCV Zoo ONNX files are pinned to opencv_zoo commit `47534e2`, not
+the moving `main` branch, and `download-models.sh` re-verifies every artifact's
+SHA-256 on each run (a mismatched local copy is re-fetched, then hard-fails if
+it still doesn't match).
+
+**SFace checkpoint drift (root cause + fix):** `onnx2tf` rewrites its `-i`
+input file **in place** with the onnx-simplifier output — a weight-identical
+but re-serialized graph with a different SHA-256 (`827d2b58…`, 38,692,565 B vs
+the pinned `0ba9fbfa…`, 38,696,353 B). Running `convert.py` therefore used to
+silently drift the pinned SFace checkpoint off its recorded hash on every run.
+Verified equivalent in onnxruntime (cosine 1.0, max|Δ| 2e-6 over 5 seeds), so
+no downstream artifact was wrong — but the on-disk checkpoint no longer matched
+its pin. `convert.py` now converts a disposable copy and never touches the
+pinned file; `download-models.sh`'s verify-and-refetch is the backstop that
+catches any residual drift.
 
 **⚠️ Phase 0 finding for Phase 1:** the SFace ONNX checkpoint is **36.9 MB
 fp32** — not the ~4–5 MB the plan's Section 1.2 table assumed for a

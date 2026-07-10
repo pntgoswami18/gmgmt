@@ -73,9 +73,18 @@ def run_onnx2tf(onnx_path: Path, out_dir: Path) -> Path:
     # good cache on the next invocation.
     if out_dir.exists():
         shutil.rmtree(out_dir)
-    log(f"onnx2tf: {onnx_path} -> {out_dir}")
+    out_dir.mkdir(parents=True)
+    # onnx2tf rewrites its -i input IN PLACE with the onnx-simplifier output
+    # (a weight-identical but re-serialized graph with a different SHA-256).
+    # Convert a disposable copy so the pinned, hash-verified checkpoint in
+    # spike/models/ is never mutated — otherwise every run silently drifts the
+    # artifact off its recorded hash. Keep the copy's name so onnx2tf's output
+    # filenames (derived from the input stem) stay {stem}_float32.tflite.
+    work = out_dir / onnx_path.name
+    shutil.copy2(onnx_path, work)
+    log(f"onnx2tf: {onnx_path} (via disposable copy) -> {out_dir}")
     subprocess.run(
-        [sys.executable, "-m", "onnx2tf", "-i", str(onnx_path),
+        [sys.executable, "-m", "onnx2tf", "-i", str(work),
          "-o", str(out_dir)],
         check=True,
     )
