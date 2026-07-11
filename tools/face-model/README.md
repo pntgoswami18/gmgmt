@@ -21,12 +21,28 @@ reality).
 | mobilenet_v3_small (embedder-size proxy, 4.1 MB) | wasm | true | 41.0 | 19.5 | 19.3 | 25.2 |
 | mobilenet_v3_small (embedder-size proxy, 4.1 MB) | webgpu | true | 143.9 | 4.7 | 4.7 | 6.2 |
 
+> **⚠️ These numbers predate a `bench.js` correction and are a lower bound.**
+> The run above read only the *first* output tensor back to CPU inside the timed
+> region. BlazeFace emits two, so its detector row undercounts readback cost.
+> `bench.js` now reads every output back. Re-run and replace this table (paste
+> `window.__benchResults` verbatim) before treating these as the Phase 0 record.
+> The verdict below has enough headroom that the conclusion is not in question,
+> but the exact figures are.
+
 **Verdict:** detector + embedder-class inference is ~24 ms/frame on plain
 single-threaded WASM and ~7 ms/frame on WebGPU — comfortably within the
 continuous-scanning budget on both backends. No COOP/COEP/threaded-WASM
 escalation needed (plan Section 6.1): single-thread XNNPACK is sufficient.
 
 Notes:
+- **The WASM rows really are single-threaded.** LiteRT.js only loads its
+  `litert_wasm_threaded_internal.js` build when `loadLiteRt` is passed
+  `{threads: true}`; `bench.js` passes no options, so it always gets the
+  single-threaded `litert_wasm_internal.js` regardless of whether
+  `SharedArrayBuffer` happens to be available. The spike server therefore sends
+  no COOP/COEP headers — cross-origin isolation would not change what is
+  measured, and omitting it keeps the spike a faithful mirror of the production
+  backend, which also won't set them.
 - The embedder measured here is a **size-class proxy** (MediaPipe MobileNetV3-small
   image embedder), not the production embedder — the real SFace → `.tflite`
   conversion is Phase 1. MobileNet-class conv workload at similar parameter
@@ -35,6 +51,8 @@ Notes:
   imports the bare specifier `@litertjs/wasm-utils`. Outside a bundler (CRA
   will handle it in `client/`), it needs an import map. The runtime's `wasm/`
   directory must be served same-origin (`loadLiteRt('/litert-wasm/')`).
+- `Tensor.moveTo(...)` **consumes its source** — it copies, then deletes the
+  original. Do not `delete()` a tensor you have already moved.
 
 ### Model checkpoint pick
 
@@ -189,18 +207,27 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 ## Running the spike
 
 ```bash
-./download-models.sh          # fetch pinned model artifacts (not in git)
-cd spike && npm install
+./download-models.sh          # fetch + verify pinned model artifacts (not in git)
+cd spike && npm ci
 npm start                     # http://localhost:4173 — benchmark auto-runs
 ```
 
-Results render as a table and are exposed as `window.__benchResults` for
-automation. Run it on the actual front-desk machine to validate
-representative hardware, not just dev hardware.
+The server binds loopback only — it serves `node_modules/`, so it must not be
+reachable on the LAN.
+
+Results render as a table and are exposed as
+`window.__benchResults = { done, fatal, rows }` for automation (same shape on
+success and failure; poll `done`). Run it on the actual front-desk machine to
+validate representative hardware, not just dev hardware, and paste the resulting
+`rows` JSON into the results table above so the decision record has provenance
+rather than transcribed numbers.
 
 ## Layout
 
-- `download-models.sh` — pinned artifact fetcher (writes to `spike/models/`)
+- `download-models.sh` — pinned artifact fetcher + SHA-256 verifier (writes to `spike/models/`)
 - `spike/` — self-contained LiteRT.js benchmark (static server + page);
-  `node_modules/` and `models/` are git-ignored
-- (Phase 1 will add conversion scripts + the evaluation harness here)
+  `node_modules/` and `models/` are git-ignored, `package-lock.json` is committed
+  so the measured runtime version is reproducible
+- `convert.py` — Phase 1 SFace ONNX → `.tflite` conversion + fidelity gate
+- `evaluate.py` — Phase 1 LFW FAR/FRR evaluation harness
+- `requirements.txt` — pinned Python env for the Phase 1 pipeline

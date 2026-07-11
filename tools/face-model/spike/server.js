@@ -26,13 +26,25 @@ const MOUNTS = [
   ['/', ROOT],
 ];
 
+// No COOP/COEP headers: LiteRT.js only loads its threaded WASM build when
+// `loadLiteRt` is passed `{threads: true}`, which bench.js deliberately does not
+// do. Serving cross-origin-isolated would therefore change nothing about what is
+// measured, while diverging from the production backend (plan Section 6.1 keeps
+// COOP/COEP off). Omitting them keeps the spike an honest mirror of production.
+function resolveWithin(dir, rel) {
+  const file = path.resolve(dir, rel);
+  const relative = path.relative(dir, file);
+  const escapes = relative.startsWith('..') || path.isAbsolute(relative);
+  return escapes ? null : file;
+}
+
 http
   .createServer((req, res) => {
     const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     const mount = MOUNTS.find(([prefix]) => urlPath.startsWith(prefix));
     const rel = urlPath === '/' ? 'index.html' : urlPath.slice(mount[0].length);
-    const file = path.normalize(path.join(mount[1], rel));
-    if (!file.startsWith(mount[1])) {
+    const file = resolveWithin(mount[1], rel);
+    if (!file) {
       res.writeHead(403).end('forbidden');
       return;
     }
@@ -44,13 +56,10 @@ http
       res
         .writeHead(200, {
           'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
-          // COOP/COEP enable SharedArrayBuffer so the threaded WASM backend can
-          // be measured too (plan Section 6.1 wants this data point).
-          'Cross-Origin-Opener-Policy': 'same-origin',
-          'Cross-Origin-Embedder-Policy': 'require-corp',
           'Cache-Control': 'no-store',
         })
         .end(data);
     });
   })
-  .listen(PORT, () => console.log(`face-litert-spike on http://localhost:${PORT}`));
+  // Loopback only — this serves node_modules/ and must not be reachable on the LAN.
+  .listen(PORT, '127.0.0.1', () => console.log(`face-litert-spike on http://localhost:${PORT}`));

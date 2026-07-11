@@ -145,16 +145,16 @@ Replaced the narrow 2-key cache with a full `Map`-backed cache loading all setti
 
 ---
 
-## Phase 4 — Code Quality 🔲 Pending
+## Phase 4 — Code Quality ✅ Complete
 
-**Branch:** `phase4-code-quality` (based on `main`) | **Plan:** [`docs/phase4-plan.md`](docs/phase4-plan.md)
+**Branch:** `phase4-code-quality` (based on `main`) → merged to `main` via PR #13, with follow-up fixes in `phase1-3-review-fixes` (PR #14) | **Plan:** [`docs/phase4-plan.md`](docs/phase4-plan.md)
 
-### 10. Structured logging and error handling
+### 10. Structured logging and error handling ✅
 **Files:** across the codebase (329 `console.*` calls across 19 files)
 
 Replace all `console.log/error/warn` calls with `pino` — a level-gated structured logger. `LOG_LEVEL=silent` in test env eliminates log noise; JSON output in production; `pino-pretty` for dev. Per-service child loggers carry `{ service }` context automatically. Fix the silent `catch (_) {}` in `sqlite.js:423` which swallows schema migration errors invisibly (change to `log.warn`). Add a comment to the intentional ROLLBACK swallow at `sqlite.js:459`.
 
-### 11. Unit and integration test coverage
+### 11. Unit and integration test coverage ✅
 **Directory:** `src/services/__tests__/`
 
 Only `biometricIntegration.test.js` exists with a single test. CLAUDE.md requires both unit and integration tests for all changes. Add tests using `node:test` against an in-memory SQLite DB (no mocks) for:
@@ -164,9 +164,37 @@ Only `biometricIntegration.test.js` exists with a single test. CLAUDE.md require
 
 ---
 
+## Phase 5 — Authentication ✅ Complete
+
+**Branch:** none (built directly on `main`) | **Plan:** [`declarative-knitting-globe.md`](/Users/punitgoswami/.claude/plans/declarative-knitting-globe.md)
+
+The entire API is unauthenticated. `JWT_SECRET`, `jsonwebtoken`, and `bcryptjs` are present in the codebase (`package.json`) but completely unused. The server binds to `0.0.0.0`. This was previously deferred by explicit decision — the app was assumed to run on a trusted LAN — but the desktop running the app is also internet-connected, so the "LAN-only" boundary isn't a hard guarantee (malware, a misconfigured router, or a VPN client on the host could all reach the API). Two independent layers were planned:
+
+### Part A — Staff login (web UI) ✅ Complete
+- New `staff` table (`username`, `password_hash`, `role`, `is_active`, `failed_attempts`, `locked_until`) in `src/config/sqlite.js` — separate from `members.is_admin`, which is an unrelated gym-member business flag, not a login credential.
+- `src/services/authService.js` (bcryptjs hash/verify, jsonwebtoken sign/verify, account lockout after 5 failed attempts, bootstrap admin seeding), `src/api/controllers/authController.js`, `src/api/routes/auth.js` (`POST /api/auth/login` with its own 5-attempts/15-min rate limiter, `POST /api/auth/logout`, `GET /api/auth/me`), `src/api/middleware/requireAuth.js`.
+- Token delivered via an **httpOnly cookie** (`gmgmt_token`, not `Authorization` header/localStorage) — avoids XSS token theft and pairs with the existing CSRF guard (`requireSameOrigin.js`). Server refuses to start without `JWT_SECRET` set (mirrors the existing `CORS_ORIGINS` wildcard check).
+- `requireAuth` applied globally to all `/api/*` routes except `/api/auth/*` and the ESP32 device endpoints (`esp32-webhook`, `validate`, `cache-update`, `firmware/download/:id`) that remain open pending Part B.
+- Bootstrap: seeds one admin account from `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD` env vars if the `staff` table is empty on first boot.
+- Frontend: shared `client/src/api/client.js` axios instance (`withCredentials: true`) — all 12 components that called `axios` directly now import this instead — plus `AuthContext`, `Login` page, a loading/login gate in `App.js`, and a logout icon in the `AppBar`.
+- Tests: `src/services/__tests__/auth.test.js` (hash/verify, token round-trip, login success/failure/lockout, `requireAuth` middleware) — 6 tests, all passing alongside the existing suite.
+- Verified end-to-end in a real browser: login → dashboard loads → logout → redirected back to login; confirmed protected routes 401 without a session and the ESP32 endpoints stay open.
+- Side fix: found and fixed a pre-existing bug in `biometricController.js` (`testConnection`) — a duplicated `let resolvedHost` block left over from a prior merge — that threw a `SyntaxError` and crashed the entire server on startup on Node 22. Also fixed the dev proxy (`client/package.json`) pointing at `localhost:3001`, which intermittently fails when `localhost` resolves to `::1` before `127.0.0.1`; changed to `127.0.0.1:3001` explicitly.
+
+### Part B — ESP32 device authentication ✅ Complete
+Found during Phase 5 research: `POST /api/biometric/esp32-webhook`, `/api/biometric/validate`, `/api/biometric/cache-update`, and `GET /api/firmware/download/:id` accepted requests from anyone — a device's identity is just a self-declared `device_id` string with no credential check.
+
+- Devices self-register with no pairing flow (`INSERT OR REPLACE INTO devices` on first webhook/heartbeat), so implemented **one shared secret for all devices** (`DEVICE_SHARED_SECRET` env var) rather than a per-device pairing flow.
+- `src/api/middleware/requireDeviceSecret.js` compares an `X-Device-Secret` header (or a `?device_secret=` query param, for the firmware-download case below) via `crypto.timingSafeEqual`; skipped entirely when `DEVICE_SHARED_SECRET` is unset (dev default, matches the `CORS_ORIGINS` unset-is-permissive pattern).
+- Firmware (`esp32_door_lock/esp32_door_lock.ino`): added a `device_secret` preference (loaded/saved like `device_id`), a config-portal field, and an `addDeviceSecretHeader()` helper sending `X-Device-Secret` on all 4 outbound HTTP calls (heartbeat, async webhook, `/validate`, `/cache-update`). **Not touched:** the OTA update path (`performOTAUpdate()` / `httpUpdate.update(...)`) — that library doesn't make custom headers easy to add and it's a safety-critical path that can't be compile-tested here. Instead, `src/api/routes/firmware.js`'s OTA-trigger route embeds the secret as a `?device_secret=` query param directly in the download URL it hands the device, so the device just follows the URL it's given with no firmware change needed for that endpoint.
+- Rollout: ship the firmware update via existing OTA first (secret sent but not yet enforced since `DEVICE_SHARED_SECRET` stays unset), confirm all devices report the new `firmware_version`, then set `DEVICE_SHARED_SECRET` on the backend to start enforcing — avoids bricking devices mid-rollout.
+- Tests: `src/services/__tests__/requireDeviceSecret.test.js` (5 tests — unset-secret bypass, missing/wrong/correct header, correct query param).
+- Verified against a running backend: with the secret unset, all 4 endpoints work with no header; with it set, requests with no/wrong header/query 401, correct header/query pass, and staff login/session auth continues to work unaffected alongside it.
+- **Not verified:** the `.ino` firmware changes were reviewed carefully but not compiled (no Arduino toolchain in this environment) — build and flash-test on real hardware before relying on it.
+
+---
+
 ## Tracked — Not Currently Scheduled
 
-### Authentication
-The entire API is unauthenticated. `JWT_SECRET` and `bcryptjs` are present in the codebase but unused. The server binds to `0.0.0.0`, making it reachable on all network interfaces.
-
-This was deferred by explicit decision — the app is intended for a trusted LAN environment. If the deployment moves outside a trusted network, authentication becomes the highest-priority item.
+### Magic-byte upload validation ⏸
+Deferred from Phase 1. Client-supplied `Content-Type`/file extension is spoofable; true validation requires reading the first bytes of the uploaded file and comparing against known image magic bytes, which requires buffering the stream before `multer` writes it to disk. Not scheduled.

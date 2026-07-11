@@ -8,10 +8,14 @@
 # files to versioned URLs, so a re-run always reproduces the same bytes. `fetch`
 # verifies the SHA-256 on EVERY run — even when the file already exists — so a
 # drifted, truncated, or re-serialized local copy is caught instead of silently
-# reused. A mismatch after re-download is a hard error.
+# reused. A mismatch after re-download is a hard error — these weights end up
+# gating a physical door lock, so a corrupted or substituted artifact must never
+# be silently accepted.
 set -euo pipefail
 
-cd "$(dirname "$0")/spike/models"
+MODELS_DIR="$(dirname "$0")/spike/models"
+mkdir -p "$MODELS_DIR"
+cd "$MODELS_DIR"
 
 # Immutable pin for OpenCV Zoo LFS artifacts. `main` is a moving branch: pinning
 # to it made the fetched bytes non-reproducible (the original cause of the SFace
@@ -40,7 +44,15 @@ SFACE_SHA="0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
 YUNET_URL="https://media.githubusercontent.com/media/opencv/opencv_zoo/${ZOO_REF}/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 YUNET_SHA="8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 
-sha_of() { shasum -a 256 "$1" | awk '{print $1}'; }
+# `shasum` on macOS, `sha256sum` on most Linux distros.
+if command -v sha256sum >/dev/null 2>&1; then
+  sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+elif command -v shasum >/dev/null 2>&1; then
+  sha_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
+else
+  echo "error: neither sha256sum nor shasum found" >&2
+  exit 1
+fi
 
 # fetch <url> <out> <expected-sha256>
 # Verifies on every run; (re)downloads on a missing or mismatched file; hard
