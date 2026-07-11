@@ -1,0 +1,13 @@
+{
+  "name": "face-litert-spike",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Phase 0 spike: LiteRT.js perf smoke test for browser face check-in",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@litertjs/core": "2.5.2",
+    "@litertjs/wasm-utils": "2.5.0"
+  }
+}
