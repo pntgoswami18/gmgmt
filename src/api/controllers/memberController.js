@@ -537,11 +537,7 @@ exports.setActiveStatus = async (req, res) => {
 };
 // Upload member photo
 exports.uploadMemberPhoto = [
-  (req, res, next) => {
-    req.body.prefix = `member-${req.params.id || 'unknown'}`;
-    next();
-  },
-  uploadSingle('photo'),
+  uploadSingle('photo', (req) => `member-${req.params.id || 'unknown'}`),
   async (req, res) => {
     try {
       if (!req.file) {

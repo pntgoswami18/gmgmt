@@ -16,29 +16,24 @@ function sanitizePrefix(prefix) {
   );
 }
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, './public/uploads/'),
-  filename: function (req, file, cb) {
-    const base = sanitizePrefix(req.body && req.body.prefix);
-    // crypto random suffix avoids same-millisecond collisions and makes
-    // stored filenames unguessable.
-    const unique = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${base}-${unique}${ext}`);
-  },
-});
-
-const upload = multer({
-  storage: storage,
-  limits: { fileSize: 1000000 }, // 1MB limit
-  fileFilter: function (req, file, cb) {
-    checkFileType(file, cb);
-  },
-});
-
-const uploadSingle = (field) =>
+// getPrefix, when provided, is called with req at filename-generation time
+// (after Express has populated req.params, but before/independent of
+// req.body — multer resets req.body while parsing the multipart stream, so
+// a prefix set on req.body by earlier middleware is silently discarded).
+const uploadSingle = (field, getPrefix) =>
   multer({
-    storage,
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => cb(null, './public/uploads/'),
+      filename: function (req, file, cb) {
+        const rawPrefix = typeof getPrefix === 'function' ? getPrefix(req) : undefined;
+        const base = sanitizePrefix(rawPrefix);
+        // crypto random suffix avoids same-millisecond collisions and makes
+        // stored filenames unguessable.
+        const unique = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+        const ext = path.extname(file.originalname).toLowerCase();
+        cb(null, `${base}-${unique}${ext}`);
+      },
+    }),
     limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (req, file, cb) => checkFileType(file, cb),
   }).single(field);
