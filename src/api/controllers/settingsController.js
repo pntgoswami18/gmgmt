@@ -1,6 +1,7 @@
 const { pool, runInTransaction } = require('../../config/sqlite');
 const settingsCache = require('../../services/settingsCache');
 const logger = require('../../utils/logger').child({ service: 'settingsController' });
+const { writeUploadedFile } = require('../../config/multer');
 
 // Get all settings
 exports.getAllSettings = async (req, res) => {
@@ -92,8 +93,9 @@ exports.uploadLogo = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: 'No file uploaded' });
   }
-  const logoUrl = `/uploads/${req.file.filename}`;
   try {
+    const filename = await writeUploadedFile(req.file, req.body.prefix);
+    const logoUrl = `/uploads/${filename}`;
     await pool.query('INSERT OR REPLACE INTO settings(key,value) VALUES($1,$2)', [
       'gym_logo',
       logoUrl,
@@ -101,6 +103,6 @@ exports.uploadLogo = async (req, res) => {
     await settingsCache.invalidate();
     res.json({ message: 'Logo uploaded successfully', logoUrl });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   }
 };

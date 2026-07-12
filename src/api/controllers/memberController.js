@@ -1,6 +1,6 @@
 const { pool, runInTransaction } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
-const { uploadSingle } = require('../../config/multer');
+const { uploadSingle, writeUploadedFile } = require('../../config/multer');
 const settingsCache = require('../../services/settingsCache');
 const logger = require('../../utils/logger').child({ service: 'memberController' });
 
@@ -548,13 +548,14 @@ exports.uploadMemberPhoto = [
         return res.status(400).json({ message: 'No file uploaded' });
       }
       const { id } = req.params;
-      const photoUrl = `/uploads/${req.file.filename}`;
+      const filename = await writeUploadedFile(req.file, req.body.prefix);
+      const photoUrl = `/uploads/${filename}`;
       if (id) {
         await pool.query('UPDATE members SET photo_url = $1 WHERE id = $2', [photoUrl, id]);
       }
       res.json({ message: 'Photo uploaded successfully', photo_url: photoUrl });
     } catch (err) {
-      res.status(500).json({ message: err.message });
+      res.status(err.statusCode || 500).json({ message: err.message });
     }
   },
 ];
