@@ -49,10 +49,14 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
   const db = await setup();
   try {
     // Open the morning session window around "now" so check-in/checkout pass.
+    // Clamped to [0, 1439]: sessionOf() cannot represent windows that cross
+    // midnight, so wrapped values would close the window near midnight and
+    // make this test time-of-day flaky.
     const m = new Date();
     const mins = m.getHours() * 60 + m.getMinutes();
+    const clamp = (v) => Math.min(1439, Math.max(0, v));
     const hhmm = (v) => {
-      const w = ((v % 1440) + 1440) % 1440;
+      const w = clamp(v);
       return `${String(Math.floor(w / 60)).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`;
     };
     const set = (k, v) =>
@@ -63,8 +67,9 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
         .run(k, String(v));
     set('morning_session_start', hhmm(mins - 60));
     set('morning_session_end', hhmm(mins + 60));
-    set('evening_session_start', hhmm(mins + 120));
-    set('evening_session_end', hhmm(mins + 180));
+    const [evS, evE] = mins < 720 ? [mins + 240, mins + 300] : [mins - 300, mins - 240];
+    set('evening_session_start', hhmm(evS));
+    set('evening_session_end', hhmm(evE));
     await settingsCache.refresh();
 
     const memberId = db
@@ -79,13 +84,22 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
     integration.notifyAlreadyCompleted = (mem) => calls.push(['already_completed', mem.id]);
 
     // 1st scan → check-in broadcast.
-    const first = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    const first = await integration.logMemberAttendance(member, null, {
+      userId: '9',
+      deviceId: 'd',
+    });
     assert.equal(first.reason, 'checked_in');
     // 2nd scan → checkout broadcast (no dwell requirement on fingerprint).
-    const second = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    const second = await integration.logMemberAttendance(member, null, {
+      userId: '9',
+      deviceId: 'd',
+    });
     assert.equal(second.reason, 'checked_out');
     // 3rd scan (session complete) → already_completed broadcast.
-    const third = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    const third = await integration.logMemberAttendance(member, null, {
+      userId: '9',
+      deviceId: 'd',
+    });
     assert.equal(third.reason, 'already_completed');
 
     assert.deepEqual(calls, [
