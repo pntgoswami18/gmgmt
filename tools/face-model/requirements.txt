@@ -1,0 +1,25 @@
+# Phase 1 model pipeline (conversion + evaluation). Python 3.12.
+# Install: uv venv --python 3.12 .venv && uv pip install -r requirements.txt
+#
+# Versions are PINNED to the set this pipeline was verified against, not
+# floors. onnx2tf's converter behavior and the protobuf<5 constraint are
+# load-bearing (see README) — a floor like `>=1.26` silently allowed an
+# incompatible resolve. Regenerate with `uv pip compile` after any deliberate
+# bump and re-run convert.py + evaluate.py to confirm fidelity/EER hold.
+tensorflow==2.19.1            # .tflite conversion + tflite interpreter
+onnx==1.20.1
+onnxruntime==1.26.0           # reference embeddings for the fidelity check
+onnx2tf==2.5.2                # ONNX (NCHW) -> .tflite (NHWC), emitted directly (no SavedModel)
+onnx-graphsurgeon==0.6.1      # onnx2tf dependency
+sng4onnx==2.0.1               # onnx2tf dependency
+onnxsim==0.6.5                # onnx2tf dependency
+psutil==5.9.5
+ml_dtypes==0.5.4
+protobuf==4.25.9             # <5 required by the onnx2tf / tf toolchain
+opencv-python==4.13.0.92     # YuNet detect + SFace alignCrop for the eval harness
+pandas==3.0.3                # LFW pairs parquet loader
+pyarrow==25.0.0             # pandas.read_parquet engine (not pulled in by pandas core)
+numpy==2.2.6
+tf_keras==2.19.0             # onnx2tf runtime dependency (Keras 2 shim)
+ai-edge-litert==2.1.5        # tflite interpreter (TF delegates to it)
+ai-edge-quantizer==0.7.0     # dynamic-range int8 quantization of the fp32 tflite

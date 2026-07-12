@@ -85,7 +85,9 @@ member_face_embeddings (
 )
 ```
 
-Multiple rows per member (3–5 poses). A tombstone column or `face_sync_log` for delta-sync deletion propagation. Settings defaults in `insertDefaultSettings`: `face_checkin_enabled='false'`, `face_match_threshold='0.55'`, `face_liveness_mode='challenge'`, `face_model_version=''`.
+Multiple rows per member (3–5 poses). A tombstone column or `face_sync_log` for delta-sync deletion propagation. Settings defaults in `insertDefaultSettings`: `face_checkin_enabled='false'`, `face_match_threshold` (see below), `face_liveness_mode='challenge'`, `face_model_version=''`.
+
+> **`face_match_threshold` default:** the original `0.55` placeholder predates any measurement and would reject nearly all genuine matches (Phase 1 measured an EER-region cosine of ~0.34 on fp32). Do **not** hardcode `0.34` either — that is a 1:1 verification number, not the 1:N identification accept threshold (see `tools/face-model/README.md`). Seed the default from a gallery-derived identification sweep in shadow mode (Section 8.3); until then treat the stored value as unset/provisional rather than authoritative.
 
 Extend `getMembersWithoutBiometric`/`getMembersWithBiometric` with a LEFT JOIN on `member_face_embeddings`, returning per-modality flags (`hasFingerprint`, `hasFace`) rather than forking new endpoints.
 
