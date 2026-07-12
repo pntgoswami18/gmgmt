@@ -35,3 +35,65 @@ test('startRemoteEnrollment rolls back mode when ESP32 command fails', async () 
     integration.stopEnrollmentMode('test_cleanup');
   }
 });
+
+// ---------------------------------------------------------------------------
+// logMemberAttendance notify dispatch (multi-agent review of PR #18): a typo
+// in the reason → notify switch would silently kill live check-in broadcasts —
+// nothing else asserts them.
+// ---------------------------------------------------------------------------
+
+const { setup, teardown } = require('./testDb');
+const settingsCache = require('../settingsCache');
+
+test('logMemberAttendance dispatches the right WebSocket notification per outcome', async () => {
+  const db = await setup();
+  try {
+    // Open the morning session window around "now" so check-in/checkout pass.
+    const m = new Date();
+    const mins = m.getHours() * 60 + m.getMinutes();
+    const hhmm = (v) => {
+      const w = ((v % 1440) + 1440) % 1440;
+      return `${String(Math.floor(w / 60)).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`;
+    };
+    const set = (k, v) =>
+      db
+        .prepare(
+          'INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+        )
+        .run(k, String(v));
+    set('morning_session_start', hhmm(mins - 60));
+    set('morning_session_end', hhmm(mins + 60));
+    set('evening_session_start', hhmm(mins + 120));
+    set('evening_session_end', hhmm(mins + 180));
+    await settingsCache.refresh();
+
+    const memberId = db
+      .prepare('INSERT INTO members (name, is_active) VALUES (?, 1)')
+      .run('Dispatch Subject').lastInsertRowid;
+    const member = { id: memberId, name: 'Dispatch Subject' };
+
+    const integration = new BiometricIntegration();
+    const calls = [];
+    integration.notifyCheckIn = (mem) => calls.push(['checkin', mem.id]);
+    integration.notifyCheckOut = (mem) => calls.push(['checkout', mem.id]);
+    integration.notifyAlreadyCompleted = (mem) => calls.push(['already_completed', mem.id]);
+
+    // 1st scan → check-in broadcast.
+    const first = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    assert.equal(first.reason, 'checked_in');
+    // 2nd scan → checkout broadcast (no dwell requirement on fingerprint).
+    const second = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    assert.equal(second.reason, 'checked_out');
+    // 3rd scan (session complete) → already_completed broadcast.
+    const third = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    assert.equal(third.reason, 'already_completed');
+
+    assert.deepEqual(calls, [
+      ['checkin', memberId],
+      ['checkout', memberId],
+      ['already_completed', memberId],
+    ]);
+  } finally {
+    await teardown();
+  }
+});

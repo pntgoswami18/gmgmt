@@ -114,16 +114,48 @@ const DEVICE_PATHS = new Set([
   '/api/biometric/esp32-webhook',
   '/api/biometric/validate',
   '/api/biometric/cache-update',
-  // Face check-in station routes: the kiosk browser runs unattended with no
-  // staff session, so it authenticates with the device secret instead. The
-  // sync endpoint hands out member names + embeddings — never leave it open.
-  '/api/biometric/face/sync',
-  '/api/biometric/face/check-in',
+]);
+// Face check-in station routes: the kiosk browser runs unattended with no
+// staff session, so it authenticates with the device secret instead. Unlike
+// the legacy ESP32 routes above, these do NOT inherit the unset-means-
+// permissive dev default: /face/check-in commands the door lock with a
+// client-claimed identity and /face/sync hands out member names + embeddings,
+// so both fail closed (503) until DEVICE_SHARED_SECRET is set.
+const FACE_STATION_PATHS = new Set(['/api/biometric/face/sync', '/api/biometric/face/check-in']);
+// Read-only station bootstrap (model manifest + config). The staff enrollment
+// UI needs these too, so accept EITHER the device secret (kiosk) OR a staff
+// session (admin browser) — device-secret-only would lock staff out the
+// moment the deployment is hardened.
+const FACE_BOOTSTRAP_PATHS = new Set([
   '/api/biometric/face/config',
   '/api/biometric/face/model-manifest',
 ]);
+if (!process.env.DEVICE_SHARED_SECRET) {
+  logger.warn(
+    '⚠️ DEVICE_SHARED_SECRET is not set — face check-in station endpoints ' +
+      '(/api/biometric/face/check-in, /face/sync) are DISABLED (503) until it is. ' +
+      'Legacy ESP32 endpoints remain open per the existing dev default.'
+  );
+}
 app.use('/api', (req, res, next) => {
   const requestPath = req.originalUrl.split('?')[0];
+  if (FACE_STATION_PATHS.has(requestPath)) {
+    if (!process.env.DEVICE_SHARED_SECRET) {
+      return res.status(503).json({
+        success: false,
+        message: 'Face station endpoints are disabled until DEVICE_SHARED_SECRET is configured',
+      });
+    }
+    return requireDeviceSecret(req, res, next);
+  }
+  if (FACE_BOOTSTRAP_PATHS.has(requestPath)) {
+    // Kiosk presents the device-secret header; anything else (staff browser)
+    // falls through to the normal session check.
+    if (process.env.DEVICE_SHARED_SECRET && req.headers['x-device-secret']) {
+      return requireDeviceSecret(req, res, next);
+    }
+    return requireAuth(req, res, next);
+  }
   if (DEVICE_PATHS.has(requestPath) || /^\/api\/firmware\/download\/[^/]+$/.test(requestPath)) {
     return requireDeviceSecret(req, res, next);
   }

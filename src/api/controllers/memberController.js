@@ -466,12 +466,29 @@ exports.deleteMember = async (req, res) => {
     if (!existing.rows?.length) {
       return res.status(404).json({ message: 'Member not found' });
     }
+    let hadFaceData = false;
     await runInTransaction(async () => {
       // access_logs references members without ON DELETE CASCADE — remove first or FK fails
       await pool.query('DELETE FROM access_logs WHERE member_id = $1', [id]);
       // Legacy DBs may have security_logs / biometric_events without CASCADE
       await pool.query('DELETE FROM security_logs WHERE member_id = $1', [id]);
       await pool.query('DELETE FROM biometric_events WHERE member_id = $1', [id]);
+      // Face embeddings are biometric PII and FK enforcement is off in
+      // better-sqlite3 by default (the schema's ON DELETE CASCADE is inert),
+      // so delete explicitly — and write a sync tombstone so check-in kiosks
+      // prune this member from their local gallery on next delta sync.
+      const faceDeleted = await pool.query(
+        'DELETE FROM member_face_embeddings WHERE member_id = $1',
+        [id]
+      );
+      hadFaceData = faceDeleted.rowCount > 0;
+      if (hadFaceData) {
+        await pool.query(
+          "INSERT INTO face_sync_tombstones(member_id, deleted_at) VALUES($1, datetime('now')) " +
+            'ON CONFLICT(member_id) DO UPDATE SET deleted_at = excluded.deleted_at',
+          [id]
+        );
+      }
       await pool.query('DELETE FROM members WHERE id = $1', [id]);
     });
     try {
@@ -481,6 +498,14 @@ exports.deleteMember = async (req, res) => {
       }
     } catch (cacheErr) {
       logger.error({ err: cacheErr }, 'eSP32 cache invalidation after member delete');
+    }
+    if (hadFaceData) {
+      try {
+        const { notifyFaceCacheInvalidated } = require('./faceBiometricController');
+        notifyFaceCacheInvalidated(Number(id));
+      } catch (faceErr) {
+        logger.error({ err: faceErr }, 'face cache invalidation after member delete');
+      }
     }
     res.json({ message: 'Member deleted successfully' });
   } catch (err) {

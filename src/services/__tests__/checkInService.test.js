@@ -18,9 +18,15 @@ const nowMinutes = () => {
   return d.getHours() * 60 + d.getMinutes();
 };
 
-// The service derives its "today" from the UTC date string (matching the
-// behavior extracted from logMemberAttendance).
-const todayStr = () => new Date().toISOString().split('T')[0];
+// The service derives its "today" from the LOCAL calendar date — attendance
+// days and session windows are both local concepts. (The UTC-derived date the
+// pre-refactor code used split early-morning visits across two date buckets
+// on UTC-positive timezones.)
+const dateStrOf = (d) => {
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().split('T')[0];
+};
+const todayStr = () => dateStrOf(new Date());
 
 // Local-time ISO string (no Z) — parsed as local time, like ESP32 timestamps.
 const localIso = (d) =>
@@ -53,12 +59,21 @@ function insertMember({ name = 'Test', isActive = 1, isAdmin = 0, planId = null,
   return info.lastInsertRowid;
 }
 
-function insertAttendance(memberId, checkInDate, { checkedOut = false } = {}) {
+function insertAttendance(
+  memberId,
+  checkInDate,
+  { checkedOut = false, date, rawCheckInTime } = {}
+) {
   const info = db
     .prepare(
       'INSERT INTO attendance (member_id, check_in_time, check_out_time, date) VALUES (?, ?, ?, ?)'
     )
-    .run(memberId, localIso(checkInDate), checkedOut ? localIso(new Date()) : null, todayStr());
+    .run(
+      memberId,
+      rawCheckInTime !== undefined ? rawCheckInTime : localIso(checkInDate),
+      checkedOut ? localIso(new Date()) : null,
+      date || todayStr()
+    );
   return info.lastInsertRowid;
 }
 
@@ -299,4 +314,145 @@ test('device timestamp string is stored verbatim as check_in_time', async () => 
   assert.equal(result.authorized, true);
   const row = db.prepare('SELECT check_in_time FROM attendance WHERE member_id = ?').get(memberId);
   assert.equal(row.check_in_time, stamp);
+});
+
+// ---------------------------------------------------------------------------
+// Safety-critical additions (multi-agent review of PR #18)
+// ---------------------------------------------------------------------------
+
+test('DEACTIVATED member can still check out (face) — the headline exit guarantee', async () => {
+  // "Active member gets auto-deactivated mid-workout" is a real flow
+  // (paymentDeactivationService / grace expiry). The checkout branch must
+  // ignore is_active entirely.
+  const memberId = insertMember({ name: 'DeactivatedInside' });
+  const checkIn = new Date();
+  checkIn.setMinutes(checkIn.getMinutes() - 45);
+  insertAttendance(memberId, checkIn);
+  db.prepare('UPDATE members SET is_active = 0 WHERE id = ?').run(memberId);
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    enforceAuthorization: true,
+    minCheckoutDwellMinutes: 15,
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'checkout');
+
+  const row = db.prepare('SELECT check_out_time FROM attendance WHERE member_id = ?').get(memberId);
+  assert.ok(row.check_out_time, 'deactivated member must be checked out');
+});
+
+test('open session + later-session scan => CHECKOUT (deliberate divergence from pre-refactor)', async () => {
+  // On main this yielded cross_session_violation and the member could never
+  // check out that day. Now an open row always means checkout; the
+  // cross-session gate still applies to fresh check-ins.
+  await setSetting('cross_session_checkin_restriction', 'true');
+  const m = nowMinutes();
+  // "Morning" long past, "evening" covers now.
+  await setSetting('morning_session_start', hhmm(m - 300));
+  await setSetting('morning_session_end', hhmm(m - 240));
+  await setSetting('evening_session_start', hhmm(m - 60));
+  await setSetting('evening_session_end', hhmm(m + 60));
+
+  const memberId = insertMember({ name: 'OpenMorningSession' });
+  const morningCheckIn = new Date();
+  morningCheckIn.setMinutes(morningCheckIn.getMinutes() - 270); // inside "morning"
+  insertAttendance(memberId, morningCheckIn);
+
+  const result = await checkInService.processCheckIn(memberId, { modality: 'face' });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'checkout');
+
+  await openSessionWindowNow();
+});
+
+test('dwell boundary: scan at exactly the dwell minimum is a checkout, not a duplicate', async () => {
+  const memberId = insertMember({ name: 'BoundaryDweller' });
+  const checkIn = new Date();
+  checkIn.setMinutes(checkIn.getMinutes() - 15);
+  insertAttendance(memberId, checkIn);
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    minCheckoutDwellMinutes: 15,
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'checkout');
+});
+
+test('corrupt check_in_time on the open row denies with invalid_attendance_record, not a dwell lie', async () => {
+  const memberId = insertMember({ name: 'CorruptRow' });
+  insertAttendance(memberId, new Date(), { rawCheckInTime: 'not-a-timestamp' });
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    minCheckoutDwellMinutes: 15,
+    eventContext: { biometricRef: 'face' },
+  });
+  assert.equal(result.authorized, false);
+  assert.equal(result.reason, 'invalid_attendance_record');
+  const events = eventsFor(memberId);
+  assert.equal(events.at(-1).event_type, 'invalid_attendance_record');
+});
+
+test("day rollover: face checkout closes yesterday's open row (allowCrossDateCheckout)", async () => {
+  const memberId = insertMember({ name: 'Overnighter' });
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(21, 30, 0, 0);
+  insertAttendance(memberId, yesterday, { date: dateStrOf(yesterday) });
+
+  // Without the flag (fingerprint historical behavior): no row today, so the
+  // scan lands in the check-in direction.
+  const withoutFlag = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+  });
+  assert.equal(withoutFlag.action, 'checkin', 'day-scoped behavior preserved without the flag');
+  // Remove the row that scan created so the flag case is isolated.
+  db.prepare('DELETE FROM attendance WHERE member_id = ? AND date = ?').run(memberId, todayStr());
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    minCheckoutDwellMinutes: 15,
+    allowCrossDateCheckout: true,
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'checkout');
+  const row = db
+    .prepare('SELECT check_out_time FROM attendance WHERE member_id = ? AND date = ?')
+    .get(memberId, dateStrOf(yesterday));
+  assert.ok(row.check_out_time, "yesterday's open row must be the one closed");
+});
+
+test('concurrent scans for one member serialize: exactly one row, checked out', async () => {
+  // Face (HTTP) and fingerprint (TCP) can fire near-simultaneously for the
+  // same member. Unserialized, both read "no open row" and both INSERT.
+  const memberId = insertMember({ name: 'Simultaneous' });
+  const [first, second] = await Promise.all([
+    checkInService.processCheckIn(memberId, {
+      modality: 'fingerprint',
+      enforceAuthorization: false,
+    }),
+    checkInService.processCheckIn(memberId, {
+      modality: 'fingerprint',
+      enforceAuthorization: false,
+    }),
+  ]);
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must not create duplicate attendance rows');
+  assert.deepEqual([first.action, second.action].sort(), ['checkin', 'checkout']);
+  assert.ok(rows[0].check_out_time, 'second scan became the checkout');
+});
+
+test('attendance date is bucketed by LOCAL calendar date', async () => {
+  const memberId = insertMember({ name: 'LocalDate' });
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+  });
+  assert.equal(result.authorized, true);
+  const row = db.prepare('SELECT date FROM attendance WHERE member_id = ?').get(memberId);
+  assert.equal(row.date, todayStr(), 'date column must be the local date, not the UTC one');
 });

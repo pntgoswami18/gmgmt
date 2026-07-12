@@ -74,9 +74,9 @@ class BiometricIntegration {
           // - Send welcome message to display
           // - Log entry in access log
           // - Trigger door unlock signal
-          // - Update member's last visit
 
-          await this.updateLastVisit(member);
+          // last_visit is already updated by checkInService inside
+          // logMemberAttendance above — no second write here.
           this.notifyAccessGranted(member, biometricData);
         } else {
           logger.info(`❌ Member ${member.name} has no active plan`);

@@ -8,7 +8,10 @@ const logger = require('../utils/logger').child({ service: 'checkIn' });
  * Attendance/session/plan logic previously lived in three near-duplicate
  * places: biometricIntegration.logMemberAttendance(), attendanceController's
  * performCheckIn(), and biometricController.validateBiometricId(). This module
- * is the single implementation; callers pass options that preserve their
+ * is the intended single implementation. So far only logMemberAttendance
+ * delegates here; migrating performCheckIn and validateBiometricId is a
+ * follow-up (plan Section 3.5) — until then the duplication still exists and
+ * changes must be mirrored. Callers pass options that preserve their
  * modality's historical behavior:
  *
  * - Fingerprint (biometricIntegration): enforceAuthorization=false (attendance
@@ -53,20 +56,31 @@ function sessionOf(minutesSinceMidnight, windows) {
   return null;
 }
 
+// Local calendar date (YYYY-MM-DD) of an instant. Attendance days and session
+// windows are both local concepts; deriving the date from toISOString() (UTC)
+// would bucket early-morning scans into yesterday on UTC-positive timezones
+// (e.g. 05:15 IST is 23:45Z the previous day) while the session-window check
+// uses local hours — splitting one physical visit across two date buckets.
+function toLocalDateStr(instant) {
+  const local = new Date(instant.getTime() - instant.getTimezoneOffset() * 60000);
+  return local.toISOString().split('T')[0];
+}
+
 // Mirrors logMemberAttendance's ESP32 timestamp handling: device timestamps are
 // local time and are stored verbatim to avoid timezone conversion; the derived
-// date string is taken from the same local instant.
+// date string is taken from the same local instant. The server-time fallback
+// (always taken by the face path, which sends no device timestamp) uses the
+// same local-date derivation.
 function resolveEventTime(timestamp) {
   if (timestamp) {
     const parsed = new Date(timestamp);
     if (!isNaN(parsed.getTime())) {
-      const localDate = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
-      return { now: parsed, dateStr: localDate.toISOString().split('T')[0], timeStr: timestamp };
+      return { now: parsed, dateStr: toLocalDateStr(parsed), timeStr: timestamp };
     }
     logger.warn(`⚠️ Failed to parse device timestamp "${timestamp}", using server time instead`);
   }
   const now = new Date();
-  return { now, dateStr: now.toISOString().split('T')[0], timeStr: now.toISOString() };
+  return { now, dateStr: toLocalDateStr(now), timeStr: now.toISOString() };
 }
 
 async function logEvent(eventContext, member, eventType, timeStr, success, extra = {}) {
@@ -98,6 +112,45 @@ async function getTodayAttendance(memberId, dateStr) {
     [memberId, dateStr]
   );
   return result.rows[0] || null;
+}
+
+// Most recent still-open row from the previous calendar day. Lets a member who
+// checked in before midnight check out after it — without this, the scan lands
+// in the check-in direction and can be denied by check-in gates, violating the
+// "members must always be able to leave" invariant (plan Section 3.5). Bounded
+// to yesterday so ancient rows left open by crashes aren't surprise-closed.
+async function getPreviousDayOpenAttendance(memberId, dateStr) {
+  const prev = new Date(`${dateStr}T00:00:00`);
+  prev.setDate(prev.getDate() - 1);
+  const prevDateStr = toLocalDateStr(prev);
+  const result = await pool.query(
+    `SELECT * FROM attendance
+     WHERE member_id = ? AND date = ? AND check_out_time IS NULL
+     ORDER BY check_in_time DESC LIMIT 1`,
+    [memberId, prevDateStr]
+  );
+  return result.rows[0] || null;
+}
+
+// Per-member serialization. processCheckIn's read-decide-write spans awaits
+// (pool.query wraps the synchronous driver in promises), and one member can
+// now hit two entry points at once — the face HTTP endpoint and the ESP32 TCP
+// listener. Unserialized, both read "no open row" and both INSERT, leaving a
+// duplicate open row that can never be closed. A sync transaction can't span
+// these awaits, so serialize per member in-process instead (both entry points
+// live in this one process).
+const memberLocks = new Map();
+function withMemberLock(memberId, fn) {
+  const key = String(memberId);
+  const prev = memberLocks.get(key) || Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  memberLocks.set(key, next);
+  next
+    .finally(() => {
+      if (memberLocks.get(key) === next) memberLocks.delete(key);
+    })
+    .catch(() => {});
+  return next;
 }
 
 async function updateLastVisit(memberId) {
@@ -179,6 +232,10 @@ async function checkPlanAuthorization(member) {
  * @param {number} [options.minCheckoutDwellMinutes=0]  Minimum minutes since
  *   check-in before a second scan is treated as checkout instead of a
  *   duplicate check-in attempt.
+ * @param {boolean} [options.allowCrossDateCheckout=false]  Also treat a scan as
+ *   checkout when yesterday's row is still open (overnight sessions). Face
+ *   passes true so a member who checked in before midnight can leave after it;
+ *   fingerprint keeps its historical day-scoped behavior.
  * @param {object} [options.eventContext]  When set, outcomes are logged to
  *   biometric_events: { biometricRef, deviceId, raw }.
  *
@@ -186,7 +243,11 @@ async function checkPlanAuthorization(member) {
  *   reason: string, member: object|null, attendanceId?: number, at: Date}>}
  *   Never throws for business denials; `authorized` gates any door unlock.
  */
-async function processCheckIn(memberId, options = {}) {
+function processCheckIn(memberId, options = {}) {
+  return withMemberLock(memberId, () => processCheckInLocked(memberId, options));
+}
+
+async function processCheckInLocked(memberId, options = {}) {
   const {
     modality = 'manual',
     deviceId,
@@ -195,6 +256,7 @@ async function processCheckIn(memberId, options = {}) {
     enforceAuthorization = true,
     enforceSessionWindowsOnCheckout = false,
     minCheckoutDwellMinutes = 0,
+    allowCrossDateCheckout = false,
   } = options;
   const eventContext = options.eventContext ? { deviceId, ...options.eventContext } : null;
 
@@ -233,20 +295,46 @@ async function processCheckIn(memberId, options = {}) {
   const currentSession = sessionOf(now.getHours() * 60 + now.getMinutes(), windows);
 
   const existing = await getTodayAttendance(member.id, dateStr);
+  let openRow = existing && !existing.check_out_time ? existing : null;
+  if (!openRow && !existing && allowCrossDateCheckout) {
+    openRow = await getPreviousDayOpenAttendance(member.id, dateStr);
+  }
 
   // ---- Checkout direction -------------------------------------------------
-  if (existing && !existing.check_out_time) {
+  // DELIBERATE DIVERGENCE from the pre-refactor logMemberAttendance: on main,
+  // the cross-session gate ran BEFORE the checkout decision, so a member with
+  // an open morning session scanning in the evening got cross_session_violation
+  // and could never check out that day. Here an open row always means checkout
+  // — a member with an open session must be able to close it and leave (plan
+  // Section 3.5). The cross-session gate still applies to the check-in
+  // direction below (fresh check-ins into a second session stay blocked).
+  if (openRow) {
     if (enforceSessionWindowsOnCheckout && !isAdmin && !currentSession) {
       await logEvent(eventContext, member, 'session_violation', timeStr, false, {
         error_message: 'Check-in outside session windows',
+        details: { current_time: timeStr, session_windows: windows },
       });
       return deny('outside_session_windows', member);
     }
 
     if (minCheckoutDwellMinutes > 0) {
-      const checkInTime = new Date(existing.check_in_time);
+      const checkInTime = new Date(openRow.check_in_time);
+      if (isNaN(checkInTime.getTime())) {
+        // Corrupt check_in_time: fail closed on the checkout flip (don't guess
+        // at dwell) but say what actually happened rather than blaming dwell —
+        // this row can only be fixed by staff, and a member stuck behind it
+        // needs the front desk regardless.
+        logger.warn(
+          { memberId: member.id, attendanceId: openRow.id, checkInTime: openRow.check_in_time },
+          'unparseable check_in_time on open attendance row — face checkout blocked, needs staff correction'
+        );
+        await logEvent(eventContext, member, 'invalid_attendance_record', timeStr, false, {
+          error_message: `Open attendance row ${openRow.id} has unparseable check_in_time; staff correction required`,
+        });
+        return deny('invalid_attendance_record', member);
+      }
       const dwellMinutes = (now.getTime() - checkInTime.getTime()) / 60000;
-      if (isNaN(dwellMinutes) || dwellMinutes < minCheckoutDwellMinutes) {
+      if (dwellMinutes < minCheckoutDwellMinutes) {
         await logEvent(eventContext, member, 'dwell_time_not_met', timeStr, false, {
           error_message: `Checkout requires ${minCheckoutDwellMinutes} min dwell; scan ignored as duplicate check-in`,
           details: { dwellMinutes: Math.round(dwellMinutes * 10) / 10 },
@@ -259,7 +347,7 @@ async function processCheckIn(memberId, options = {}) {
     // always be able to leave (plan Section 3.5).
     await pool.query('UPDATE attendance SET check_out_time = ? WHERE id = ?', [
       timeStr,
-      existing.id,
+      openRow.id,
     ]);
     await updateLastVisit(member.id);
     await logEvent(eventContext, member, 'checkout', timeStr, true, {
@@ -271,7 +359,7 @@ async function processCheckIn(memberId, options = {}) {
       action: 'checkout',
       reason: 'checked_out',
       member,
-      attendanceId: existing.id,
+      attendanceId: openRow.id,
       at: now,
     };
   }
@@ -292,6 +380,7 @@ async function processCheckIn(memberId, options = {}) {
     if (!currentSession) {
       await logEvent(eventContext, member, 'session_violation', timeStr, false, {
         error_message: 'Check-in outside session windows',
+        details: { current_time: timeStr, session_windows: windows },
       });
       logger.info(
         { memberId: member.id, memberName: member.name, currentTime: now.toLocaleTimeString() },
@@ -316,7 +405,12 @@ async function processCheckIn(memberId, options = {}) {
         if (existingSession && existingSession !== currentSession) {
           await logEvent(eventContext, member, 'cross_session_violation', timeStr, false, {
             error_message: `Cross-session check-in blocked: ${existingSession} → ${currentSession}`,
-            details: { existing_session: existingSession, current_session: currentSession },
+            details: {
+              existing_session: existingSession,
+              current_session: currentSession,
+              existing_time: todayCheckIns.rows[0].check_in_time,
+              current_time: timeStr,
+            },
           });
           logger.info(
             { memberId: member.id, memberName: member.name, existingSession, currentSession },
@@ -370,4 +464,4 @@ async function processCheckIn(memberId, options = {}) {
   };
 }
 
-module.exports = { processCheckIn };
+module.exports = { processCheckIn, toLocalDateStr };

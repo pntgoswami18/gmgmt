@@ -30,7 +30,9 @@ npm run esp32:test:api      # Test REST API endpoints only
 
 ### Running tests
 ```bash
-# Backend unit tests (node:test — the repo does not use jest)
+# Backend unit tests (node:test — the repo does not use jest). Requires
+# Node >= 20: on Node 18 the better-sqlite3 native module fails to load
+# (NODE_MODULE_VERSION ABI mismatch) and every DB-touching suite errors out.
 node --test 'src/services/__tests__/*.test.js'
 
 # Single test file

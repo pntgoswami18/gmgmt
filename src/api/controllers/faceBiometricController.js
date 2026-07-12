@@ -16,6 +16,25 @@ const setBiometricIntegration = (integration) => {
 const EMBEDDING_DIM = 128;
 const MAX_SAMPLES = 5;
 const POSE_LABELS = new Set(['front', 'left', 'right']);
+const MAX_DEVICE_ID_LENGTH = 128;
+const TOMBSTONE_RETENTION_DAYS = 90;
+
+// Tell connected check-in stations (browser WebSocket clients on /ws) that a
+// member's gallery entry changed so they re-sync immediately instead of
+// waiting for their periodic delta sync (plan 3.3).
+function notifyFaceCacheInvalidated(memberId) {
+  try {
+    if (biometricIntegration && typeof biometricIntegration.sendToWebSocketClients === 'function') {
+      biometricIntegration.sendToWebSocketClients({
+        type: 'face_cache_invalidated',
+        memberId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } catch (error) {
+    logger.error({ err: error }, 'error broadcasting face cache invalidation');
+  }
+}
 
 // Accepts a sample embedding as a JSON array of finite numbers and returns the
 // BLOB to store, or null if invalid. Stored as Float32Array bytes (plan 2.2).
@@ -105,27 +124,49 @@ const enrollFace = async (req, res) => {
     }
 
     const consentAt = new Date().toISOString();
-    await runInTransaction(async () => {
-      await pool.query('DELETE FROM member_face_embeddings WHERE member_id = ?', [memberId]);
-      for (const { blob, pose, quality } of blobs) {
-        await pool.query(
-          `INSERT INTO member_face_embeddings
-             (member_id, embedding, model_version, quality_score, pose_label, consent_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [memberId, blob, modelVersion, quality, pose, consentAt]
+    let pinnedNow = false;
+    try {
+      await runInTransaction(async () => {
+        // First-run convenience: pin the deployment's model version on first
+        // enrollment. Read the settings TABLE (not the cache) inside the
+        // transaction so two concurrent first enrollments with different
+        // versions can't both pin — the second sees the first's pin and, on
+        // mismatch, the whole enrollment rolls back.
+        const pinnedRow = await pool.query(
+          "SELECT value FROM settings WHERE key = 'face_model_version'"
         );
+        const pinned = pinnedRow.rows[0]?.value || '';
+        if (!pinned) {
+          await pool.query(
+            "INSERT INTO settings(key, value) VALUES('face_model_version', ?) " +
+              'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+            [modelVersion]
+          );
+          pinnedNow = true;
+        } else if (pinned !== modelVersion) {
+          const err = new Error(`modelVersion mismatch: expected ${pinned}`);
+          err.code = 'MODEL_VERSION_MISMATCH';
+          throw err;
+        }
+        await pool.query('DELETE FROM member_face_embeddings WHERE member_id = ?', [memberId]);
+        for (const { blob, pose, quality } of blobs) {
+          await pool.query(
+            `INSERT INTO member_face_embeddings
+               (member_id, embedding, model_version, quality_score, pose_label, consent_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [memberId, blob, modelVersion, quality, pose, consentAt]
+          );
+        }
+        // Re-enrollment supersedes any pending deletion tombstone.
+        await pool.query('DELETE FROM face_sync_tombstones WHERE member_id = ?', [memberId]);
+      });
+    } catch (txError) {
+      if (txError.code === 'MODEL_VERSION_MISMATCH') {
+        return res.status(409).json({ success: false, message: txError.message });
       }
-      // Re-enrollment supersedes any pending deletion tombstone.
-      await pool.query('DELETE FROM face_sync_tombstones WHERE member_id = ?', [memberId]);
-    });
-
-    // First-run convenience: pin the deployment's model version on first enrollment.
-    if (!expectedVersion) {
-      await pool.query(
-        "INSERT INTO settings(key, value) VALUES('face_model_version', ?) " +
-          'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-        [modelVersion]
-      );
+      throw txError;
+    }
+    if (pinnedNow) {
       await settingsCache.refresh();
     }
 
@@ -133,6 +174,7 @@ const enrollFace = async (req, res) => {
       samples: blobs.length,
       modelVersion,
     });
+    notifyFaceCacheInvalidated(memberId);
     logger.info(`✅ Face enrollment stored for member ${memberId} (${blobs.length} samples)`);
     res.json({
       success: true,
@@ -172,6 +214,7 @@ const removeFaceData = async (req, res) => {
         .json({ success: false, message: 'No face enrollment found for this member' });
     }
     await logFaceEvent(memberId, 'face_removal', null, true, { removedSamples: result });
+    notifyFaceCacheInvalidated(memberId);
     res.json({ success: true, message: 'Face data removed', data: { memberId } });
   } catch (error) {
     logger.error({ err: error }, 'error removing face data');
@@ -183,6 +226,9 @@ const removeFaceData = async (req, res) => {
 const getFaceStatus = async (req, res) => {
   try {
     const memberId = parseInt(req.params.memberId, 10);
+    if (!Number.isInteger(memberId) || memberId <= 0) {
+      return res.status(400).json({ success: false, message: 'Valid memberId is required' });
+    }
     const rows = await pool.query(
       `SELECT model_version, pose_label, quality_score, consent_at, created_at
        FROM member_face_embeddings WHERE member_id = ? ORDER BY id`,
@@ -207,24 +253,49 @@ const getFaceStatus = async (req, res) => {
 };
 
 // POST /api/biometric/face/sync — gallery sync for the check-in station
-// (plan 3.3). Body: { since } (ISO timestamp, optional). Returns active members'
-// embeddings plus deletedMemberIds so the client can prune its IndexedDB cache.
+// (plan 3.3). Body: { since } (ISO timestamp, optional). Returns ALL enrolled
+// members' embeddings (including deactivated ones, with isActive flagged so
+// the client can grey them out — the server-side check-in re-validates
+// is_active regardless) plus deletedMemberIds so the client can prune its
+// IndexedDB cache. Embeddings are filtered to the deployment's pinned
+// face_model_version: cross-version cosine comparisons are meaningless, so a
+// kiosk must never receive vectors from a superseded model (plan 2.2).
 const syncFaceCache = async (req, res) => {
   try {
     const { since } = req.body || {};
+    if (since && (typeof since !== 'string' || isNaN(Date.parse(since)))) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'since must be an ISO-8601 timestamp' });
+    }
     const params = [];
     let whereDelta = '';
     if (since) {
-      whereDelta = 'AND f.updated_at > ?';
+      // datetime(?) normalizes the client's ISO-8601 value ("…T12:00:00Z") to
+      // SQLite's storage format ("… 12:00:00") before comparing. Raw string
+      // comparison silently fails for same-day values because ' ' < 'T'.
+      whereDelta = 'AND f.updated_at > datetime(?)';
       params.push(since);
     }
+    let whereVersion = '';
+    const pinnedVersion = settingsCache.get('face_model_version', '');
+    if (pinnedVersion) {
+      whereVersion = 'AND f.model_version = ?';
+      params.push(pinnedVersion);
+    }
+
+    // Housekeeping: tombstones only need to outlive the longest plausible gap
+    // between kiosk syncs; prune the ancient ones so the table stays bounded.
+    await pool.query(
+      `DELETE FROM face_sync_tombstones WHERE deleted_at < datetime('now', '-${TOMBSTONE_RETENTION_DAYS} days')`
+    );
 
     const rows = await pool.query(
       `SELECT f.member_id, f.embedding, f.model_version, f.pose_label, f.quality_score,
               f.updated_at, m.name, m.photo_url, m.is_active
        FROM member_face_embeddings f
        JOIN members m ON m.id = f.member_id
-       WHERE 1=1 ${whereDelta}
+       WHERE 1=1 ${whereDelta} ${whereVersion}
        ORDER BY f.member_id, f.id`,
       params
     );
@@ -249,7 +320,7 @@ const syncFaceCache = async (req, res) => {
 
     const tombstones = await pool.query(
       since
-        ? 'SELECT member_id FROM face_sync_tombstones WHERE deleted_at > ?'
+        ? 'SELECT member_id FROM face_sync_tombstones WHERE deleted_at > datetime(?)'
         : 'SELECT member_id FROM face_sync_tombstones',
       since ? [since] : []
     );
@@ -278,15 +349,41 @@ const faceCheckIn = async (req, res) => {
       return res.status(403).json({ authorized: false, reason: 'face_checkin_disabled' });
     }
 
-    const { memberId, matchScore, deviceId, livenessPassed } = req.body || {};
+    const { memberId, matchScore, livenessPassed } = req.body || {};
+    // Free-form client string persisted into biometric_events — bound it.
+    const deviceId =
+      typeof req.body?.deviceId === 'string'
+        ? req.body.deviceId.slice(0, MAX_DEVICE_ID_LENGTH)
+        : undefined;
     const numericId = parseInt(memberId, 10);
     if (!Number.isInteger(numericId) || numericId <= 0) {
       return res.status(400).json({ authorized: false, reason: 'invalid_member_id' });
     }
 
+    // Liveness is a v1 gate on the unlock (plan 3.4): unless the deployment
+    // explicitly disables it, a claim that skipped or failed the challenge
+    // never reaches the authorization step — a buggy kiosk build must not be
+    // able to open the door with a photo.
+    const livenessMode = settingsCache.get('face_liveness_mode', 'challenge');
+    if (livenessMode !== 'none' && livenessPassed !== true) {
+      await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
+        reason: 'liveness_not_passed',
+        livenessMode,
+      });
+      return res.json({ authorized: false, reason: 'liveness_not_passed' });
+    }
+
     // Server-side floor on the claimed match score — a compromised client can
     // lie, but an honest one is stopped from submitting sub-threshold claims.
-    const threshold = parseFloat(settingsCache.get('face_match_threshold', '0.55'));
+    // A blanked/garbage setting must fail toward the conservative default, not
+    // silently disable the floor (NaN comparisons are always false).
+    let threshold = parseFloat(settingsCache.get('face_match_threshold', '0.55'));
+    if (!Number.isFinite(threshold)) {
+      logger.error(
+        `face_match_threshold setting is not a number ("${settingsCache.get('face_match_threshold', '')}") — falling back to 0.55`
+      );
+      threshold = 0.55;
+    }
     if (typeof matchScore !== 'number' || matchScore < threshold) {
       await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
         matchScore,
@@ -297,15 +394,31 @@ const faceCheckIn = async (req, res) => {
 
     // Members can only face-check-in if they are actually enrolled — rejects
     // fabricated memberIds from a client that has no gallery entry for them.
+    // Enrollment must be under the CURRENT pinned model version: after a model
+    // upgrade, old-version embeddings can't have produced this match honestly
+    // (cross-version cosine scores are meaningless — plan 2.2), so stale
+    // enrollments deny until the member re-enrolls.
+    const pinnedVersion = settingsCache.get('face_model_version', '');
     const enrolled = await pool.query(
-      'SELECT COUNT(*) as n FROM member_face_embeddings WHERE member_id = ?',
-      [numericId]
+      `SELECT COUNT(*) as n,
+              SUM(CASE WHEN model_version = ? THEN 1 ELSE 0 END) as current_n
+       FROM member_face_embeddings WHERE member_id = ?`,
+      [pinnedVersion, numericId]
     );
-    if (!enrolled.rows[0] || enrolled.rows[0].n === 0) {
+    const totalEnrolled = enrolled.rows[0]?.n || 0;
+    const currentEnrolled = enrolled.rows[0]?.current_n || 0;
+    if (totalEnrolled === 0) {
       await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
         reason: 'not_enrolled',
       });
       return res.json({ authorized: false, reason: 'not_enrolled' });
+    }
+    if (pinnedVersion && currentEnrolled === 0) {
+      await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
+        reason: 'model_version_mismatch',
+        pinnedVersion,
+      });
+      return res.json({ authorized: false, reason: 'model_version_mismatch' });
     }
 
     const result = await checkInService.processCheckIn(numericId, {
@@ -315,6 +428,8 @@ const faceCheckIn = async (req, res) => {
       enforceAuthorization: true,
       enforceSessionWindowsOnCheckout: false,
       minCheckoutDwellMinutes: settingsCache.getInt('face_checkout_min_dwell_minutes', 15),
+      // A member who checked in before midnight must be able to leave after it.
+      allowCrossDateCheckout: true,
       eventContext: {
         biometricRef: 'face',
         raw: { modality: 'face', matchScore, livenessPassed: livenessPassed === true },
@@ -348,7 +463,9 @@ const faceCheckIn = async (req, res) => {
       action: result.action,
       reason: result.reason,
       memberId: result.member?.id ?? numericId,
-      memberName: result.member?.name || null,
+      // Name only on success: denial responses must not confirm identities to
+      // a device-secret holder probing arbitrary memberIds.
+      memberName: result.authorized ? result.member?.name || null : null,
       doorCommandSent,
     });
   } catch (error) {
@@ -399,6 +516,7 @@ const getFaceConfig = async (req, res) => {
 
 module.exports = {
   setBiometricIntegration,
+  notifyFaceCacheInvalidated,
   enrollFace,
   removeFaceData,
   getFaceStatus,
