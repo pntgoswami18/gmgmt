@@ -5,12 +5,13 @@ description: Run the full test suite (backend unit tests + ESP32 integration tes
 
 Run the following commands in order and report results. Stop and surface failures immediately — do not continue past a failing step.
 
-1. **Backend unit tests:**
+1. **Backend unit tests** (the suite uses node:test, not jest):
    ```bash
-   npx jest src/services/__tests__/
+   node --test 'src/services/__tests__/*.test.js'
    ```
 
-2. **ESP32 integration tests:**
+2. **ESP32 integration tests** (needs the server up — start it first if it isn't:
+   `JWT_SECRET=<any> ENABLE_BIOMETRIC=true BIOMETRIC_PORT=5005 node src/app.js`):
    ```bash
    npm run esp32:test
    ```

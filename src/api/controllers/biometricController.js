@@ -556,12 +556,14 @@ const getMembersWithoutBiometric = async (req, res) => {
     const countResult = await pool.query(countQuery, searchParams);
     const total = parseInt(countResult.rows[0].total, 10);
 
-    // Get paginated results
+    // Get paginated results (hasFace flag lets the enrollment UI show
+    // per-modality status without a second endpoint — plan Section 2.2)
     const query = `
-      SELECT id, name, email, phone, join_date, is_admin 
-      FROM members 
+      SELECT id, name, email, phone, join_date, is_admin,
+        EXISTS(SELECT 1 FROM member_face_embeddings f WHERE f.member_id = members.id) AS hasFace
+      FROM members
       WHERE (biometric_id IS NULL OR biometric_id = '') AND is_active = 1 ${searchCondition}
-      ORDER BY name ASC 
+      ORDER BY name ASC
       LIMIT $${searchParams.length + 1} OFFSET $${searchParams.length + 2}
     `;
     const result = await pool.query(query, [...searchParams, limitNum, offset]);
@@ -615,12 +617,13 @@ const getMembersWithBiometric = async (req, res) => {
     const countResult = await pool.query(countQuery, searchParams);
     const total = parseInt(countResult.rows[0].total, 10);
 
-    // Get paginated results
+    // Get paginated results (hasFace mirrors getMembersWithoutBiometric)
     const query = `
-      SELECT id, name, email, phone, join_date, biometric_id, is_admin
-      FROM members 
+      SELECT id, name, email, phone, join_date, biometric_id, is_admin,
+        EXISTS(SELECT 1 FROM member_face_embeddings f WHERE f.member_id = members.id) AS hasFace
+      FROM members
       WHERE biometric_id IS NOT NULL AND biometric_id != '' AND is_active = 1 ${searchCondition}
-      ORDER BY name ASC 
+      ORDER BY name ASC
       LIMIT $${searchParams.length + 1} OFFSET $${searchParams.length + 2}
     `;
     const result = await pool.query(query, [...searchParams, limitNum, offset]);

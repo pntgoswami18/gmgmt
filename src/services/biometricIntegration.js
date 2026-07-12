@@ -1,4 +1,5 @@
 const BiometricListener = require('./biometricListener');
+const checkInService = require('./checkInService');
 const { pool } = require('../config/sqlite');
 const whatsappService = require('./whatsappService');
 const settingsCache = require('./settingsCache');
@@ -73,9 +74,9 @@ class BiometricIntegration {
           // - Send welcome message to display
           // - Log entry in access log
           // - Trigger door unlock signal
-          // - Update member's last visit
 
-          await this.updateLastVisit(member);
+          // last_visit is already updated by checkInService inside
+          // logMemberAttendance above — no second write here.
           this.notifyAccessGranted(member, biometricData);
         } else {
           logger.info(`❌ Member ${member.name} has no active plan`);
@@ -115,315 +116,42 @@ class BiometricIntegration {
     }
   }
 
+  // Delegates to the shared checkInService (face check-in plan Section 3.5).
+  // Options preserve the fingerprint path's historical behavior: attendance is
+  // recorded regardless of plan validity (the plan check in handleAccessGranted
+  // only gates the access-granted notification), session windows apply to both
+  // directions, and there is no checkout dwell requirement.
   async logMemberAttendance(member, timestamp, biometricData = null) {
     try {
-      // Use the ESP32 timestamp if provided, otherwise use current server time
-      let now, dateStr, timeStr;
+      const result = await checkInService.processCheckIn(member.id, {
+        modality: 'fingerprint',
+        deviceId: biometricData?.deviceId,
+        timestamp,
+        enforceAuthorization: false,
+        enforceSessionWindowsOnCheckout: true,
+        eventContext: biometricData
+          ? { biometricRef: biometricData.userId, raw: biometricData }
+          : null,
+      });
 
-      if (timestamp) {
-        // Parse the ESP32 timestamp (which is in local time format like "2025-08-26T22:52:23")
-        // ESP32 sends local time, so we need to interpret it as local time
-        now = new Date(timestamp);
-
-        // If the timestamp is valid, use it directly
-        if (!isNaN(now.getTime())) {
-          // The timestamp is already in local time from ESP32, so we can use it directly
-          // Extract date and time components without timezone conversion
-          const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-          dateStr = localDate.toISOString().split('T')[0];
-          timeStr = timestamp; // Use the original ESP32 timestamp to avoid timezone conversion
-        } else {
-          // Fallback to current server time if parsing fails
-          now = new Date();
-          dateStr = now.toISOString().split('T')[0];
-          timeStr = now.toISOString();
-          logger.warn(
-            `⚠️ Failed to parse ESP32 timestamp "${timestamp}", using server time instead`
-          );
-        }
-      } else {
-        now = new Date();
-        dateStr = now.toISOString().split('T')[0];
-        timeStr = now.toISOString();
+      switch (result.reason) {
+        case 'checked_in':
+          this.notifyCheckIn(member, result.at);
+          break;
+        case 'checked_out':
+          this.notifyCheckOut(member, result.at);
+          break;
+        case 'already_completed':
+          this.notifyAlreadyCompleted(member);
+          break;
+        default:
+          // Denials (session/cross-session violations) are logged to
+          // biometric_events by the service; no broadcast, same as before.
+          break;
       }
-
-      // Enhanced logging
-      const deviceUserId = biometricData?.userId || 'N/A';
-
-      // Check if member is admin (admins can check in multiple times across sessions)
-      const memberCheck = await pool.query('SELECT is_admin FROM members WHERE id = ?', [
-        member.id,
-      ]);
-      const isAdmin = memberCheck.rows[0]?.is_admin === 1;
-
-      // Enforce session windows and cross-session restrictions (unless admin)
-      if (!isAdmin) {
-        // Get session settings from cache
-        const settingsMap = {
-          morning_session_start: settingsCache.get('morning_session_start', '05:00'),
-          morning_session_end: settingsCache.get('morning_session_end', '11:00'),
-          evening_session_start: settingsCache.get('evening_session_start', '16:00'),
-          evening_session_end: settingsCache.get('evening_session_end', '22:00'),
-          cross_session_checkin_restriction: settingsCache.get(
-            'cross_session_checkin_restriction',
-            'true'
-          ),
-        };
-
-        // Check if cross-session restriction is enabled
-        const crossSessionRestrictionEnabled =
-          settingsMap.cross_session_checkin_restriction === 'true' ||
-          settingsMap.cross_session_checkin_restriction === true;
-
-        const parseTimeToMinutes = (hhmm) => {
-          const [h, m] = String(hhmm || '00:00')
-            .split(':')
-            .map(Number);
-          return h * 60 + (m || 0);
-        };
-
-        const MORNING_START_MINUTES = parseTimeToMinutes(
-          settingsMap.morning_session_start || '05:00'
-        );
-        const MORNING_END_MINUTES = parseTimeToMinutes(settingsMap.morning_session_end || '11:00');
-        const EVENING_START_MINUTES = parseTimeToMinutes(
-          settingsMap.evening_session_start || '16:00'
-        );
-        const EVENING_END_MINUTES = parseTimeToMinutes(settingsMap.evening_session_end || '22:00');
-
-        const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
-        const isInMorningSession =
-          minutesSinceMidnight >= MORNING_START_MINUTES &&
-          minutesSinceMidnight <= MORNING_END_MINUTES;
-        const isInEveningSession =
-          minutesSinceMidnight >= EVENING_START_MINUTES &&
-          minutesSinceMidnight <= EVENING_END_MINUTES;
-
-        // Check if current time is within allowed session windows
-        if (!isInMorningSession && !isInEveningSession) {
-          logger.info(
-            { memberId: member.id, memberName: member.name, currentTime: now.toLocaleTimeString() },
-            'check-in outside session windows'
-          );
-
-          // Log biometric event for session violation
-          if (biometricData) {
-            await this.logBiometricEvent({
-              member_id: member.id,
-              biometric_id: biometricData.userId,
-              event_type: 'session_violation',
-              device_id: biometricData.deviceId || 'unknown',
-              timestamp: timeStr,
-              success: false,
-              error_message: 'Check-in outside session windows',
-              raw_data: JSON.stringify({
-                ...biometricData,
-                action: 'session_violation',
-                current_time: now.toLocaleTimeString(),
-                session_windows: settingsMap,
-              }),
-            });
-          }
-          return; // Exit without processing check-in
-        }
-
-        // Check for cross-session violations (only if restriction is enabled)
-        if (crossSessionRestrictionEnabled) {
-          const todayCheckIns = await pool.query(
-            `SELECT check_in_time FROM attendance 
-             WHERE member_id = ? AND DATE(check_in_time) = DATE(?) 
-             ORDER BY check_in_time DESC`,
-            [member.id, dateStr]
-          );
-
-          if (todayCheckIns.rows.length > 0) {
-            // Check which session the existing check-in was in
-            const existingCheckInTime = new Date(todayCheckIns.rows[0].check_in_time);
-            const existingMinutesSinceMidnight =
-              existingCheckInTime.getHours() * 60 + existingCheckInTime.getMinutes();
-
-            const existingWasMorning =
-              existingMinutesSinceMidnight >= MORNING_START_MINUTES &&
-              existingMinutesSinceMidnight <= MORNING_END_MINUTES;
-            const existingWasEvening =
-              existingMinutesSinceMidnight >= EVENING_START_MINUTES &&
-              existingMinutesSinceMidnight <= EVENING_END_MINUTES;
-
-            // Determine current session
-            const currentIsMorning = isInMorningSession;
-            const currentIsEvening = isInEveningSession;
-
-            // Prevent cross-session check-ins
-            if (
-              (existingWasMorning && currentIsEvening) ||
-              (existingWasEvening && currentIsMorning)
-            ) {
-              const existingSession = existingWasMorning ? 'morning' : 'evening';
-              const currentSession = currentIsMorning ? 'morning' : 'evening';
-
-              logger.info(
-                {
-                  memberId: member.id,
-                  memberName: member.name,
-                  existingSession,
-                  currentSession,
-                  existingTime: existingCheckInTime.toLocaleTimeString(),
-                  currentTime: now.toLocaleTimeString(),
-                },
-                'cross-session check-in blocked'
-              );
-
-              // Log biometric event for cross-session violation
-              if (biometricData) {
-                await this.logBiometricEvent({
-                  member_id: member.id,
-                  biometric_id: biometricData.userId,
-                  event_type: 'cross_session_violation',
-                  device_id: biometricData.deviceId || 'unknown',
-                  timestamp: timeStr,
-                  success: false,
-                  error_message: `Cross-session check-in blocked: ${existingSession} → ${currentSession}`,
-                  raw_data: JSON.stringify({
-                    ...biometricData,
-                    action: 'cross_session_violation',
-                    existing_session: existingSession,
-                    current_session: currentSession,
-                    existing_time: existingCheckInTime.toLocaleTimeString(),
-                    current_time: now.toLocaleTimeString(),
-                  }),
-                });
-              }
-              return; // Exit without processing check-in
-            }
-          }
-        }
-      }
-
-      // Check if member already checked in today (for checkout logic)
-      const existingCheckIn = await this.getTodayCheckIn(member.id, dateStr);
-
-      if (existingCheckIn && !existingCheckIn.check_out_time) {
-        // Member is checking out
-        await this.checkOutMember(existingCheckIn.id, timeStr);
-        logger.info(
-          { memberId: member.id, memberName: member.name, deviceUserId },
-          'member checked out'
-        );
-        this.notifyCheckOut(member, now);
-
-        // Log biometric event for checkout
-        if (biometricData) {
-          await this.logBiometricEvent({
-            member_id: member.id,
-            biometric_id: biometricData.userId,
-            event_type: 'checkout',
-            device_id: biometricData.deviceId || 'unknown',
-            timestamp: timeStr,
-            success: true,
-            raw_data: JSON.stringify({
-              ...biometricData,
-              action: 'checkout',
-            }),
-          });
-        }
-      } else if (!existingCheckIn) {
-        // Member is checking in for the first time today
-        const attendanceData = {
-          member_id: member.id,
-          check_in_time: timeStr,
-          date: dateStr,
-        };
-
-        await this.createAttendanceRecord(attendanceData);
-        logger.info(
-          { memberId: member.id, memberName: member.name, deviceUserId },
-          'member checked in'
-        );
-        this.notifyCheckIn(member, now);
-
-        // Log biometric event for checkin
-        if (biometricData) {
-          await this.logBiometricEvent({
-            member_id: member.id,
-            biometric_id: biometricData.userId,
-            event_type: 'checkin',
-            device_id: biometricData.deviceId || 'unknown',
-            timestamp: timeStr,
-            success: true,
-            raw_data: JSON.stringify({
-              ...biometricData,
-              action: 'checkin',
-            }),
-          });
-        }
-      } else {
-        // Member already completed their session today
-        logger.info(
-          { memberId: member.id, memberName: member.name, deviceUserId },
-          'member already completed session today'
-        );
-        this.notifyAlreadyCompleted(member);
-
-        // Log biometric event for already completed
-        if (biometricData) {
-          await this.logBiometricEvent({
-            member_id: member.id,
-            biometric_id: biometricData.userId,
-            event_type: 'already_completed',
-            device_id: biometricData.deviceId || 'unknown',
-            timestamp: timeStr,
-            success: true,
-            raw_data: JSON.stringify({
-              ...biometricData,
-              action: 'already_completed',
-            }),
-          });
-        }
-      }
+      return result;
     } catch (error) {
       logger.error({ err: error }, 'error logging attendance');
-    }
-  }
-
-  async getTodayCheckIn(memberId, date) {
-    try {
-      const query =
-        'SELECT * FROM attendance WHERE member_id = ? AND date = ? ORDER BY check_in_time DESC LIMIT 1';
-      const result = await pool.query(query, [memberId, date]);
-      return result.rows[0] || null;
-    } catch (error) {
-      logger.error({ err: error }, 'error getting today check-in');
-      return null;
-    }
-  }
-
-  async createAttendanceRecord(attendanceData) {
-    try {
-      const query = `
-        INSERT INTO attendance (member_id, check_in_time, date)
-        VALUES (?, ?, ?)
-      `;
-
-      const result = await pool.query(query, [
-        attendanceData.member_id,
-        attendanceData.check_in_time,
-        attendanceData.date,
-      ]);
-      return result.lastInsertId;
-    } catch (error) {
-      logger.error({ err: error }, 'error creating attendance record');
-      throw error;
-    }
-  }
-
-  async checkOutMember(attendanceId, checkOutTime) {
-    try {
-      const query = 'UPDATE attendance SET check_out_time = ? WHERE id = ?';
-      await pool.query(query, [checkOutTime, attendanceId]);
-      return;
-    } catch (error) {
-      logger.error({ err: error }, 'error checking out member');
-      throw error;
     }
   }
 
