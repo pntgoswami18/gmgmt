@@ -26,3 +26,7 @@ esp32_door_lock/build/**
 # Face model deployment artifacts (P1 outputs, ~40MB of binaries + deployment-
 # specific manifest) — deployed into public/models/, never committed.
 public/models/
+
+# Local dev-server launch config — holds machine-specific runtimeExecutable
+# paths (e.g. an absolute nvm node binary), so it must not be committed.
+.claude/launch.json
