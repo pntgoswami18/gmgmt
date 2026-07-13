@@ -87,6 +87,7 @@ Net effect: **the actual security boundary remains the device secret itself** (u
 Caveats that remain and still belong in the rollout doc (§3.8):
 - **A device-secret leak (or kiosk compromise) still allows full impersonation** via `/face/sync` + replay, as above — this is the primary caveat, not a footnote.
 - **Liveness is still a client-asserted boolean.** `livenessPassed` cannot be recomputed server-side without the raw frames, so the anti-spoof guarantee still lives in the kiosk's challenge loop, gated server-side only by `face_liveness_mode`. A trusted-kiosk assumption still underpins liveness even though it no longer underpins the honest-kiosk identity-scoring path.
+- **The re-scored probe is not temporally bound to the liveness-proven frame.** In `useFaceCheckin.js`, the probe embedding is captured when the K-consecutive-frame `MatchAccumulator` first accepts an identity (in `tick()`, during the `idle` phase) and stashed in `pendingRef`. The liveness challenge (blink/head-turn) then runs against *subsequent* frames, and on success `verify(pendingRef.current, true)` submits that original, pre-challenge probe — not a frame captured during or after the liveness proof. So the embedding the server re-scores and the frames that proved liveness come from two disjoint moments with nothing binding them together; an honest kiosk's liveness proof doesn't guarantee it's the same live subject the embedding was drawn from.
 - **Tailgating** (a second person entering behind an authorized scan) is unaddressed — see the §3.8 note above.
 
 ---
