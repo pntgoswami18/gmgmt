@@ -107,6 +107,26 @@ test('uploadMemberPhoto handler — 400s with a clear message when the uploaded 
   assert.match(res._body.message, /does not match/i);
 });
 
+test('uploadMemberPhoto handler — derives the filename prefix from the route param, ignoring any client-supplied req.body.prefix', async () => {
+  // Regression test: the prefix must come from req.params.id, never from
+  // req.body — multer resets req.body while parsing the multipart stream,
+  // so a client-supplied value there is unreliable and must not be trusted
+  // for naming (or as an injection vector).
+  const handler = memberController.uploadMemberPhoto[memberController.uploadMemberPhoto.length - 1];
+  const req = {
+    params: { id: '999999999' }, // nonexistent id -> UPDATE affects 0 rows, no throw
+    body: { prefix: 'evil-injected-name' },
+    file: { originalname: 'photo.png', buffer: PNG_BYTES },
+  };
+  const res = mockRes();
+
+  await handler(req, res);
+
+  assert.equal(res._status, 200);
+  assert.match(res._body.photo_url, /^\/uploads\/member-999999999-/);
+  assert.doesNotMatch(res._body.photo_url, /evil-injected-name/);
+});
+
 test('settingsController.uploadLogo — 400s when the uploaded content is spoofed', async () => {
   const req = {
     body: { prefix: 'logo' },

@@ -37,7 +37,7 @@ const uploadSingle = (field) =>
     fileFilter: (req, file, cb) => checkFileType(file, cb),
   }).single(field);
 
-module.exports = { uploadSingle, writeUploadedFile };
+module.exports = { uploadSingle, sanitizePrefix, writeUploadedFile };
 
 function checkFileType(file, cb) {
   const ext = path.extname(file.originalname).toLowerCase();

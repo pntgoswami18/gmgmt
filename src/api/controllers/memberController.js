@@ -562,10 +562,6 @@ exports.setActiveStatus = async (req, res) => {
 };
 // Upload member photo
 exports.uploadMemberPhoto = [
-  (req, res, next) => {
-    req.body.prefix = `member-${req.params.id || 'unknown'}`;
-    next();
-  },
   uploadSingle('photo'),
   async (req, res) => {
     try {
@@ -573,7 +569,11 @@ exports.uploadMemberPhoto = [
         return res.status(400).json({ message: 'No file uploaded' });
       }
       const { id } = req.params;
-      const filename = await writeUploadedFile(req.file, req.body.prefix);
+      // Derive the filename prefix from the route param, never from
+      // req.body — multer resets req.body while parsing the multipart
+      // stream, so a value set there by earlier middleware (or a client)
+      // is unreliable and shouldn't be trusted for naming.
+      const filename = await writeUploadedFile(req.file, `member-${id || 'unknown'}`);
       const photoUrl = `/uploads/${filename}`;
       if (id) {
         await pool.query('UPDATE members SET photo_url = $1 WHERE id = $2', [photoUrl, id]);
