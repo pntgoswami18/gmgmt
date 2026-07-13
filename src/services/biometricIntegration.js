@@ -119,8 +119,13 @@ class BiometricIntegration {
   // Delegates to the shared checkInService (face check-in plan Section 3.5).
   // Options preserve the fingerprint path's historical behavior: attendance is
   // recorded regardless of plan validity (the plan check in handleAccessGranted
-  // only gates the access-granted notification), session windows apply to both
-  // directions, and there is no checkout dwell requirement.
+  // only gates the access-granted notification) and session windows apply to
+  // both directions. Parity with the face path (added later): a re-scan within
+  // the checkout dwell window is treated as a RE-ENTRY (the member stepped out
+  // and came back), not a checkout — so it doesn't flip the open row to
+  // checked-out or create a duplicate. The dwell is configurable via
+  // `fingerprint_checkout_min_dwell_minutes`; setting it to 0 restores the old
+  // "any second scan is an immediate checkout" behavior.
   async logMemberAttendance(member, timestamp, biometricData = null) {
     try {
       const result = await checkInService.processCheckIn(member.id, {
@@ -129,6 +134,7 @@ class BiometricIntegration {
         timestamp,
         enforceAuthorization: false,
         enforceSessionWindowsOnCheckout: true,
+        minCheckoutDwellMinutes: settingsCache.getInt('fingerprint_checkout_min_dwell_minutes', 15),
         eventContext: biometricData
           ? { biometricRef: biometricData.userId, raw: biometricData }
           : null,
@@ -140,6 +146,11 @@ class BiometricIntegration {
           break;
         case 'checked_out':
           this.notifyCheckOut(member, result.at);
+          break;
+        case 'already_checked_in':
+          // Re-entry within the dwell window: already checked in, walked back
+          // in. Attendance is unchanged (no duplicate row, no checkout).
+          this.notifyReentry(member, result.at);
           break;
         case 'already_completed':
           this.notifyAlreadyCompleted(member);
@@ -251,6 +262,13 @@ class BiometricIntegration {
     const message = `GOODBYE:${member.name}:OUT:${timeStr}`;
     this.listener.broadcast(message);
     logger.info(`🔒 ${member.name} checked OUT at ${timeStr}`);
+  }
+
+  notifyReentry(member, timestamp) {
+    const timeStr = timestamp.toLocaleTimeString();
+    const message = `WELCOME_BACK:${member.name}:IN:${timeStr}`;
+    this.listener.broadcast(message);
+    logger.info(`🔓 ${member.name} re-entered at ${timeStr} (already checked in)`);
   }
 
   notifyAlreadyCompleted(member) {

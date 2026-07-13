@@ -314,16 +314,54 @@ test('re-entry within dwell: deactivated member is refused re-admission (not aut
   assert.equal(events.at(-1).success, 0);
 });
 
+test('re-entry within dwell: fingerprint (enforceAuthorization=false) admits a deactivated member, unlike face', async () => {
+  const memberId = insertMember({ name: 'LapsedFingerprint', isActive: 0 });
+  const checkIn = new Date();
+  checkIn.setMinutes(checkIn.getMinutes() - 2);
+  insertAttendance(memberId, checkIn);
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    minCheckoutDwellMinutes: 15,
+    eventContext: { biometricRef: 'fingerprint' },
+  });
+  // Fingerprint's is_active gate on re-entry is intentionally skipped
+  // (enforceAuthorization: false, matching its historical "always logs
+  // attendance" behavior) — unlike face, which denies this same scenario
+  // with member_inactive (see the preceding test).
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'reentry');
+  assert.equal(result.reason, 'already_checked_in');
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must NOT create a duplicate attendance row');
+  assert.equal(rows[0].check_out_time, null, 'must NOT be flipped to checked out');
+});
+
 test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.max floor)', async () => {
   const memberId = insertMember({ name: 'AlmostOut' });
   // 14.5 min into a 15-min dwell → raw ceil(0.5) = 1; the sub-minute remainder
   // must surface as "1 minute until checkout", not "0".
-  const checkIn = new Date(Date.now() - 14.5 * 60000);
-  insertAttendance(memberId, checkIn);
+  //
+  // Both the check-in row and the scan are pinned to the SAME fixed reference
+  // instant, 14.5 minutes apart, via explicit full-precision timestamps
+  // (rawCheckInTime / timestamp) — NOT via localIso(), which hardcodes ":00"
+  // seconds and so truncates to whole minutes. Truncating both sides down to
+  // their respective minute starts turns the intended 14.5-minute gap into
+  // anywhere from ~14 to ~15+ minutes depending on the seconds-value of `now`
+  // when the test happens to run, occasionally tipping dwellMinutes to >= 15
+  // and flipping this to a checkout (observed as a flake correlated with wall
+  // time, not DB load). Full-precision timestamps make the gap exactly 14.5
+  // minutes regardless of when the test runs.
+  const now = new Date();
+  const checkIn = new Date(now.getTime() - 14.5 * 60000);
+  insertAttendance(memberId, checkIn, { rawCheckInTime: checkIn.toISOString() });
 
   const result = await checkInService.processCheckIn(memberId, {
     modality: 'face',
     minCheckoutDwellMinutes: 15,
+    timestamp: now.toISOString(),
     eventContext: { biometricRef: 'face' },
   });
   assert.equal(result.authorized, true, JSON.stringify(result));
@@ -436,6 +474,40 @@ test('dwell boundary: scan at exactly the dwell minimum is a checkout, not a dup
   });
   assert.equal(result.authorized, true, JSON.stringify(result));
   assert.equal(result.action, 'checkout');
+});
+
+test('dwell decision ignores a skewed device clock: a fingerprint unit reporting a timestamp far ahead of real time must not force an immediate checkout', async () => {
+  const memberId = insertMember({ name: 'SkewedDevice' });
+  // Real check-in 2 minutes ago (server-observed time), well within a 15-min dwell.
+  const checkIn = new Date(Date.now() - 2 * 60000);
+  insertAttendance(memberId, checkIn, { rawCheckInTime: checkIn.toISOString() });
+
+  // Simulates a second ESP32 unit whose onboard clock is 30 minutes ahead of
+  // real time. Pre-fix, dwell math used this device-reported value directly,
+  // so (skewed "now" - real checkInTime) would read as ~32 minutes elapsed —
+  // past the 15-min dwell — and wrongly flip this to a checkout.
+  const skewedDeviceTimestamp = new Date(Date.now() + 30 * 60000).toISOString();
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    minCheckoutDwellMinutes: 15,
+    timestamp: skewedDeviceTimestamp,
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(
+    result.action,
+    'reentry',
+    'must be a re-entry — the real elapsed time is ~2 minutes, not ~32'
+  );
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must NOT create a duplicate attendance row');
+  assert.equal(
+    rows[0].check_out_time,
+    null,
+    'must NOT be flipped to checked out by a skewed device clock'
+  );
 });
 
 test('corrupt check_in_time on the open row denies with invalid_attendance_record, not a dwell lie', async () => {

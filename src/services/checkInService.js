@@ -333,7 +333,15 @@ async function processCheckInLocked(memberId, options = {}) {
         });
         return deny('invalid_attendance_record', member);
       }
-      const dwellMinutes = (now.getTime() - checkInTime.getTime()) / 60000;
+      // Dwell math must not trust a client-reported clock: `now` above may
+      // come straight from a device's own `timestamp` field (e.g. an ESP32
+      // fingerprint unit's onboard clock), and with multiple physical door
+      // units their clocks can drift independently or be wrong outright.
+      // Before dwell-aware fingerprint checkout existed, that only skewed a
+      // cosmetic log time; now it directly decides checkout vs. re-entry, so
+      // the elapsed-time side of that decision is always measured against
+      // the server's own wall clock instead.
+      const dwellMinutes = (Date.now() - checkInTime.getTime()) / 60000;
       if (dwellMinutes < minCheckoutDwellMinutes) {
         // Re-entry, not checkout: the member is already checked in and has
         // scanned again too soon to be leaving (e.g. stepped out for a call and
