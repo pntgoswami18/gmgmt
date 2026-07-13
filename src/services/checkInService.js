@@ -335,11 +335,58 @@ async function processCheckInLocked(memberId, options = {}) {
       }
       const dwellMinutes = (now.getTime() - checkInTime.getTime()) / 60000;
       if (dwellMinutes < minCheckoutDwellMinutes) {
-        await logEvent(eventContext, member, 'dwell_time_not_met', timeStr, false, {
-          error_message: `Checkout requires ${minCheckoutDwellMinutes} min dwell; scan ignored as duplicate check-in`,
-          details: { dwellMinutes: Math.round(dwellMinutes * 10) / 10 },
+        // Re-entry, not checkout: the member is already checked in and has
+        // scanned again too soon to be leaving (e.g. stepped out for a call and
+        // walked back in). Let them through — the door unlocks because this is
+        // authorized — without logging a checkout or a duplicate check-in row.
+        // Only after the dwell elapses does a re-scan flip to checkout (below).
+        //
+        // Authorization freshness: re-entry is re-admission INTO the building,
+        // so — unlike checkout (which must never be blocked, plan Section 3.5) —
+        // it respects deactivation: a member deactivated after checking in
+        // (e.g. by paymentDeactivationService) does not get re-admitted on the
+        // strength of a stale open row. They can still CHECK OUT once the dwell
+        // elapses (that path is intentionally ungated) — we only refuse to
+        // unlock the door to let them back IN.
+        //
+        // This is NOT full fresh-check-in parity, and deliberately so: re-entry
+        // applies ONLY the is_active gate below. It does not re-run the
+        // session-window or plan/grace-validity gates a fresh check-in enforces
+        // (further down), because the member is already inside an active visit —
+        // re-scoping them out of it near a session boundary, or on a day-
+        // granular grace flip minutes after they were admitted, would strand a
+        // legitimately-present member at the door. is_active is the one gate
+        // that reflects an intentional mid-visit revocation, so it's the one we
+        // honor here.
+        if (enforceAuthorization && member.is_active !== 1) {
+          await logEvent(eventContext, member, 'member_inactive', timeStr, false, {
+            error_message: 'Member is deactivated; re-entry within dwell window refused',
+            details: { dwellMinutes: Math.round(dwellMinutes * 10) / 10 },
+          });
+          return deny('member_inactive', member);
+        }
+        const minutesUntilCheckout = Math.max(1, Math.ceil(minCheckoutDwellMinutes - dwellMinutes));
+        await updateLastVisit(member.id);
+        await logEvent(eventContext, member, 'reentry', timeStr, true, {
+          details: {
+            dwellMinutes: Math.round(dwellMinutes * 10) / 10,
+            minutesUntilCheckout,
+            ...(matchScore != null ? { matchScore } : {}),
+          },
         });
-        return deny('dwell_time_not_met', member);
+        logger.info(
+          { memberId: member.id, memberName: member.name, modality, minutesUntilCheckout },
+          'member re-entered within dwell window (no new attendance)'
+        );
+        return {
+          authorized: true,
+          action: 'reentry',
+          reason: 'already_checked_in',
+          member,
+          attendanceId: openRow.id,
+          minutesUntilCheckout,
+          at: now,
+        };
       }
     }
 

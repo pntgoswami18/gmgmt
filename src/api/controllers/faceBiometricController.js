@@ -492,6 +492,9 @@ const faceCheckIn = async (req, res) => {
       // Name only on success: denial responses must not confirm identities to
       // a device-secret holder probing arbitrary memberIds.
       memberName: result.authorized ? result.member?.name || null : null,
+      // Present on a re-entry (already checked in, scanned again before the
+      // checkout dwell) so the kiosk can tell the member when checkout unlocks.
+      minutesUntilCheckout: result.minutesUntilCheckout,
       doorCommandSent,
     });
   } catch (error) {

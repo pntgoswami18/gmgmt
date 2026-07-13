@@ -255,10 +255,70 @@ test('checkout: authorized even with expired plan, and not gated by session wind
   await openSessionWindowNow();
 });
 
-test('checkout dwell guard: scan shortly after check-in is ignored as duplicate', async () => {
+test('re-entry within dwell: scan shortly after check-in is authorized (door unlocks) with no checkout and no new row', async () => {
   const memberId = insertMember({ name: 'Lingerer' });
   const checkIn = new Date();
   checkIn.setMinutes(checkIn.getMinutes() - 2);
+  const attendanceId = insertAttendance(memberId, checkIn);
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    minCheckoutDwellMinutes: 15,
+    eventContext: { biometricRef: 'face' },
+  });
+  // Member stepped out and walked back in — let them through (authorized so the
+  // door unlocks) but don't check them out or double-log attendance.
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'reentry');
+  assert.equal(result.reason, 'already_checked_in');
+  assert.equal(result.attendanceId, attendanceId, 'stays on the same open row');
+  assert.ok(
+    result.minutesUntilCheckout >= 12 && result.minutesUntilCheckout <= 15,
+    `expected ~13 min until checkout, got ${result.minutesUntilCheckout}`
+  );
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must NOT create a duplicate attendance row');
+  assert.equal(rows[0].check_out_time, null, 'must NOT be flipped to checked out');
+
+  const events = eventsFor(memberId);
+  assert.equal(events.at(-1).event_type, 'reentry');
+  assert.equal(events.at(-1).success, 1);
+});
+
+test('re-entry within dwell: deactivated member is refused re-admission (not authorized), but the open row is untouched', async () => {
+  const memberId = insertMember({ name: 'Lapsed', isActive: 0 });
+  const checkIn = new Date();
+  checkIn.setMinutes(checkIn.getMinutes() - 2);
+  const attendanceId = insertAttendance(memberId, checkIn);
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    minCheckoutDwellMinutes: 15,
+    eventContext: { biometricRef: 'face' },
+  });
+  // Re-entry is re-admission INTO the building, so a member deactivated after
+  // check-in must not be let back in on the strength of the stale open row.
+  assert.equal(result.authorized, false, JSON.stringify(result));
+  assert.equal(result.reason, 'member_inactive');
+  assert.equal(result.action, null);
+
+  // The open row is neither closed nor duplicated — they can still check OUT
+  // once the dwell elapses (that path is intentionally ungated).
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must NOT create a duplicate attendance row');
+  assert.equal(rows[0].check_out_time, null, 'open row must be left intact for a later checkout');
+
+  const events = eventsFor(memberId);
+  assert.equal(events.at(-1).event_type, 'member_inactive');
+  assert.equal(events.at(-1).success, 0);
+});
+
+test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.max floor)', async () => {
+  const memberId = insertMember({ name: 'AlmostOut' });
+  // 14.5 min into a 15-min dwell → raw ceil(0.5) = 1; the sub-minute remainder
+  // must surface as "1 minute until checkout", not "0".
+  const checkIn = new Date(Date.now() - 14.5 * 60000);
   insertAttendance(memberId, checkIn);
 
   const result = await checkInService.processCheckIn(memberId, {
@@ -266,11 +326,9 @@ test('checkout dwell guard: scan shortly after check-in is ignored as duplicate'
     minCheckoutDwellMinutes: 15,
     eventContext: { biometricRef: 'face' },
   });
-  assert.equal(result.authorized, false);
-  assert.equal(result.reason, 'dwell_time_not_met');
-
-  const row = db.prepare('SELECT check_out_time FROM attendance WHERE member_id = ?').get(memberId);
-  assert.equal(row.check_out_time, null, 'must NOT be flipped to checked out');
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'reentry');
+  assert.equal(result.minutesUntilCheckout, 1, 'sub-minute remainder must clamp to 1, not 0');
 });
 
 test('fingerprint checkout is blocked outside session windows (historical behavior preserved)', async () => {

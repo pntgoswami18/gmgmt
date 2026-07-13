@@ -155,6 +155,50 @@ For face check-in specifically, `faceBiometricController.faceCheckIn` calls `pro
 
 This also settles part of open question #7 (checkout via face) beyond the yes/no: yes, and specifically with asymmetric authorization for the two directions.
 
+### 3.6 Admin-UI entry point: navigating to & activating the kiosk
+
+Everything above describes the kiosk once it's running. This section closes the last gap: **today there is no path from the admin UI to the kiosk at all.** A staff user can't discover, launch, or provision the check-in station without hand-editing the URL bar. `client/src/App.js` (~line 175) special-cases `location.pathname === '/checkin'` to render `<CheckIn/>` fullscreen, *outside* the admin chrome and the staff-login gate; the navigation drawer in the same file (Dashboard → Members → Classes → Attendance → Biometric → Financials → Settings) has no `/checkin` entry, and the Settings "Face Check-In" section (`client/src/components/Settings.js`, ~line 915) only mentions the URL in caption text. This subsection specifies how staff get there.
+
+**"Activate" is three different actions — separate them explicitly.** Conflating them is the main source of confusion here:
+
+- **(a) Enable the feature flag** — flip `face_checkin_enabled` on. Already fully built: the toggle in the Settings Face Check-In section, persisted via `PUT /api/settings`. No new work; the entry point below just needs to *link to* it and reflect its state.
+- **(b) Launch/enter kiosk mode** — open the chrome-less `/checkin` view. This is the missing navigation affordance.
+- **(c) Provision the station** — supply the device secret (must equal the backend `DEVICE_SHARED_SECRET`) + optional station label that `StationSetup` in `CheckIn.js` requires on first run, stored per-browser in `localStorage` (`gmgmt_face_station`) via `client/src/utils/faceStation.js`. This is the security-sensitive one; design effort concentrates on (b) and (c).
+
+#### 3.6.1 Navigation — how staff reach `/checkin` (decided: launch button, new tab; not a drawer `Link`)
+
+The kiosk deliberately renders *without* the drawer/AppBar (App.js special-case). That makes an in-tab drawer `<Link to="/checkin">` the wrong mechanism: it would unmount the admin chrome in the staff member's working tab and strand them fullscreen with no visible way back (no AppBar, no drawer, no logout) — a dead-end that reads as a crash. Options considered:
+
+1. **Drawer `<Link to="/checkin">`** — matches the other nav items visually, but navigates in-tab into a chrome-less dead-end (above). Rejected as the primary mechanism.
+2. **A "Launch check-in kiosk" button that opens `/checkin` in a new tab** (`window.open('/checkin', '_blank')`, or an `<a href="/checkin" target="_blank" rel="noopener">`). The admin session stays intact in the original tab; the kiosk gets its own tab that can be dragged to the entrance display and, optionally, put fullscreen (F11 / `requestFullscreen()` on a user gesture). **Recommended.**
+3. **Both** — the button, plus a low-emphasis drawer entry that *also* opens a new tab rather than navigating in-tab. Reasonable, but a drawer item that behaves differently from every other drawer item (new tab, not in-tab route) is a papercut; keep the drawer consistent and put the affordance where the context is.
+
+**Recommendation: the primary entry point is a "Launch check-in kiosk" button inside the Settings → Face Check-In section** (`Settings.js`, next to the enable toggle and Door Device ID, right where the existing caption already names `/checkin`). It sits with the feature flag (a) and the door config it depends on, so the three activation steps are co-located. Secondary: a matching button on the **Biometric** tab (`BiometricEnrollment.js`), since that's where staff already manage enrollment and would expect a "start the kiosk" action. **Do not add a plain drawer `Link`** — if a drawer entry is wanted later, it must open a new tab, not route in-tab, to avoid the chrome-less dead-end. This keeps the App.js special-casing an intentional, documented behavior rather than a trap.
+
+#### 3.6.2 Station provisioning from admin (decided: keep the hand-typed secret; do **not** pipe `DEVICE_SHARED_SECRET` through the admin session)
+
+The tempting "smooth" move is to have the admin UI pre-fill the device secret so the operator doesn't type it. **Reject this.** The whole point of `DEVICE_SHARED_SECRET` is that it's a server-side env var that the fail-closed gates in `src/app.js` (503 on `/face/sync` + `/face/check-in` until it's set; `x-device-secret` required thereafter) check against — it is deliberately *not* readable by any staff-session endpoint. Options weighed:
+
+1. **Status quo — operator hand-types the secret into `StationSetup`.** The secret lives only in the station browser's `localStorage`, never in the admin session, never in a server response, never in an access log. Most secure; one-time-per-install friction. **Recommended baseline.**
+2. **Admin endpoint that returns the secret to pre-fill `StationSetup`.** Would put `DEVICE_SHARED_SECRET` into a staff-session HTTP response (and therefore into browser history, devtools, and any request logging). Directly **weakens the fail-closed posture** the task forbids touching. **Rejected.**
+3. **A new short-lived provisioning-token endpoint** (admin mints a one-time token; kiosk exchanges it for the device secret over a separate call). Keeps the raw secret out of the admin tab and out of logs if done carefully, but it is **new backend surface** (a token table/TTL, a mint endpoint, an exchange endpoint, and their own auth) for an action that happens *once per install* on a *one-machine-per-install* deployment. Over-engineered for v1. **Flagged as new surface; deferred, not built** — worth revisiting only if multi-station provisioning ever becomes real.
+
+**What to actually improve (no secret exposure, minimal surface):** give staff a clear pre-flight *before* they launch, so a mis-provisioned server is diagnosable from the admin UI instead of surfacing as a mysterious 503 at the kiosk:
+
+- Surface a **boolean** `deviceSecretConfigured` (true/false — **never the value**) on the existing `GET /api/biometric/face/config` bootstrap response. This is a one-field addition to an endpoint the admin session can already call (it's in `FACE_BOOTSTRAP_PATHS`, so a staff session is accepted); it is **not** a new endpoint and it exposes no secret material. The server computes it as `!!process.env.DEVICE_SHARED_SECRET`.
+- The Settings Face Check-In section reads that boolean and, when it's false, shows "Server device secret not set — the kiosk can't accept scans until `DEVICE_SHARED_SECRET` is configured on the server" and disables/warns on the Launch button. This mirrors the existing caption's spirit (already distinguishing "enabled" from "needs `ENABLE_BIOMETRIC` + a Door Device ID").
+
+So: **no new endpoint required** — one boolean field on `/face/config`. Provisioning itself stays exactly as `StationSetup` does it today.
+
+#### 3.6.3 UX & edge cases
+
+The kiosk already models most fail-closed states via `deriveStationStatus` in `faceStation.js` (`setup` / `error` / `disabled` / `no_door` / `ready`); the admin entry point mostly needs to route staff into them cleanly and not create new ambiguity.
+
+- **Launched from an admin-authenticated browser.** The new `/checkin` tab shares the staff session cookie, so the bootstrap `GET /face/config` succeeds via the staff session even *before* a device secret is entered — the kiosk can correctly render `disabled` / `no_door`. But `/face/sync` and `/face/check-in` accept **only** the device secret (staff session is *not* accepted for those), so actual scanning still requires the operator to complete `StationSetup`. This is the intended boundary, not a bug: launching from admin gets you to the kiosk and shows its status; it does not silently authorize scanning on the strength of the staff login.
+- **Leaving / exiting kiosk mode.** Because `/checkin` is chrome-less by design (unattended operation), don't bolt an always-visible "exit to admin" button onto it — that would invite a walk-up member to escape into the admin app. Exit is "close the tab" (the admin tab the staff launched from is still open behind it). The existing `error` screen's "Change device secret" button (which calls `resetStation`) is the only station-management affordance the kiosk needs. If an explicit exit is ever wanted, gate it behind a non-obvious gesture (long-press / secret key combo), never a visible button.
+- **Feature disabled when launched.** `face_checkin_enabled=false` → `deriveStationStatus` returns `disabled` → the kiosk shows "Face check-in is disabled" and `faceCheckIn` would 403 anyway. The Launch button should still work (so staff can preview the disabled state), but the Settings section should make it obvious the toggle is off.
+- **`DEVICE_SHARED_SECRET` unset when staff launches.** Bootstrap `/face/config` still resolves via the staff session, so the kiosk won't hard-error on load — but `/face/sync` and `/face/check-in` return 503 the moment scanning is attempted. Without the 3.6.2 pre-flight this is a confusing dead-end; **with** the `deviceSecretConfigured` boolean, Settings warns before launch and the failure is diagnosable. (If desired, `deriveStationStatus` could also learn to distinguish a 503-secret-unset config fetch, but the admin-side pre-flight is the higher-leverage fix.)
+
 ---
 
 ## 4. New/Changed Backend Surface
@@ -222,6 +266,7 @@ Every failure mode below resolves to **the door stays locked and the member is d
 
 - Backend: `checkInService.test.js`, `faceBiometricController.test.js` (enroll validation, replace-on-re-enroll, delete tombstones, sync, check-in denial reasons, device token).
 - Client: `faceMatching.test.js` (pure math, fixture embeddings, threshold/margin truth tables), `faceCacheDb` tests, check-in-flow component tests with mocked `faceEngine`.
+- Admin entry point (Section 3.6): unit-test that the Settings "Launch check-in kiosk" button targets `/checkin` in a new tab (not an in-tab route) and that it disables/warns when the new `deviceSecretConfigured` boolean from `/face/config` is false; assert the boolean is a pure `!!process.env.DEVICE_SHARED_SECRET` and **never** echoes the secret value (add to `faceBiometricController.test.js`'s `getFaceConfig` coverage).
 - Model quality harness (offline, `tools/face-model/evaluate.py`): ROC/FAR-FRR, conversion-fidelity check, outputs recommended threshold.
 - E2E without hardware: Chrome's `--use-fake-device-for-media-stream --use-file-for-fake-video-capture=clip.mjpeg` lets Playwright drive the real pipeline with recorded video, including spoof clips.
 
@@ -229,6 +274,7 @@ Every failure mode below resolves to **the door stays locked and the member is d
 
 - `SimulateFaceCheckInModal.js` (cloned from `SimulateCheckInModal.js`) — exercises the server pipeline with zero camera.
 - Debug overlay (backend name, ms/frame, top-3 candidates, liveness state) for threshold tuning.
+- Manual smoke for the admin entry point: from a logged-in admin browser, Launch opens `/checkin` in a new tab that renders the correct `deriveStationStatus` state (`setup` when unprovisioned, `disabled`/`no_door` per settings) while the original admin tab stays authenticated; closing the kiosk tab returns cleanly to admin.
 
 ### 8.3 Staged rollout
 
@@ -252,6 +298,7 @@ Because the end state is a fully automated door unlock, the staged rollout is th
 | P3 — Enrollment UI | `faceEngine.js` (shared) + `FaceEnrollment.js` tab | M | P1, P2 |
 | P4 — Check-in client + liveness | Automated check-in route/component, matching loop, liveness challenge (no longer a separate later phase — ships together since v1 requires it), door-unlock call wired to authorized outcome only, sync, manual fallback, debug overlay | L | P2, P3 |
 | P5 — Door-lock integration & fail-closed hardening | Wire `unlockDoorRemotely` call, `door_device_id` config/setup UI, verify every failure path in 6.2 actually fails closed (dedicated test pass), spoof-clip e2e tests | M | P4 |
+| P5a — Admin-UI kiosk entry point | "Launch check-in kiosk" button in Settings Face Check-In section + Biometric tab (opens `/checkin` in a new tab, no drawer `Link`); add `deviceSecretConfigured` boolean to `/face/config` and pre-flight warning in Settings (Section 3.6). No new endpoint, no app-secret exposure | S | P4 |
 | P6 — Test & shadow rollout | Playwright fake-camera suite, `SimulateFaceCheckInModal`, shadow mode (Section 8.3 stage 2 — no unlock calls), threshold tuning | M | P4, P5 |
 | P7 — Pilot → GA hardening | Assisted→autonomous pilot, passive liveness v2, embedding encryption, docs | M | P6 |
 
@@ -305,3 +352,10 @@ Original draft assumed a mounted tablet kiosk. Changes made after learning the a
 - **Accuracy target**: balanced FAR ~0.1% / FRR ~2–3%, now stated explicitly in Section 1.2 as the harness's tuning target.
 - **Device auth, liveness posture, multi-location, photo bootstrap, hardware prerequisite, tailgating**: all confirmed as previously recommended — no design changes, just resolved status.
 - **Checkout via face — the one real design addition**: user chose to support it (diverging from the plan's original check-in-only recommendation), which required new work, not just a flag flip: (a) a dwell-time guard in Section 3.2 so a lingering face after check-in doesn't accidentally trigger a checkout, and (b) asymmetric authorization in Section 3.5 — checkout must never be blocked by an expired plan, since that would risk physically locking a member inside the building over a billing issue. This is now a hard requirement in `checkInService`'s design, not an edge case to catch in testing. Milestone P2 updated to reflect the added scope.
+
+**Fourth revision — admin-UI entry point for the kiosk (this update).** Added Section 3.6 to close the last gap surfaced in testing: there was no path from the admin UI to the kiosk at all — staff had to hand-type `/checkin`. Changes made:
+- New Section 3.6 specifies navigation and activation, separating the three conflated meanings of "activate" (enable the feature flag / launch kiosk mode / provision the station secret).
+- **Navigation decision (3.6.1)**: a "Launch check-in kiosk" button that opens `/checkin` in a *new tab*, placed in the Settings Face Check-In section (primary) and the Biometric tab (secondary). Explicitly **not** a drawer `Link` — the kiosk is chrome-less by design (App.js special-case), so an in-tab route would strand staff in a dead-end.
+- **Provisioning decision (3.6.2)**: keep the operator hand-typing the device secret into `StationSetup`; do **not** pipe `DEVICE_SHARED_SECRET` through any staff-session response (that would weaken the fail-closed 503/`x-device-secret` gates in `app.js`). The only backend change is a single boolean `deviceSecretConfigured` field on the existing `/face/config` bootstrap response, powering a pre-flight warning in Settings — **no new endpoint, no secret exposure.** A one-time provisioning-token endpoint was considered and deferred as over-engineered for a one-machine-per-install deployment.
+- Milestones: added **P5a** (admin-UI kiosk entry point, size S, depends on P4). Section 8.2 gained a manual-smoke aid for the launch-in-new-tab flow.
+- Scope guard: this revision is a planning-doc change only — no application code was modified.
