@@ -16,17 +16,30 @@ function sanitizePrefix(prefix) {
   );
 }
 
-// getPrefix, when provided, is called with req at filename-generation time
-// (after Express has populated req.params, but before/independent of
-// req.body — multer resets req.body while parsing the multipart stream, so
-// a prefix set on req.body by earlier middleware is silently discarded).
+// Resolve the sanitized filename prefix for a request. getPrefix, when
+// provided, is called with req at filename-generation time (after Express
+// has populated req.params, but before/independent of req.body — multer
+// resets req.body while parsing the multipart stream, so a prefix set on
+// req.body by earlier middleware is silently discarded). Left as a plain
+// (throwing) function — callers invoking it inside multer's filename
+// callback are responsible for catching and routing errors through cb(err)
+// per multer's error-handling convention.
+function resolvePrefix(req, getPrefix) {
+  const rawPrefix = typeof getPrefix === 'function' ? getPrefix(req) : undefined;
+  return sanitizePrefix(rawPrefix);
+}
+
 const uploadSingle = (field, getPrefix) =>
   multer({
     storage: multer.diskStorage({
       destination: (req, file, cb) => cb(null, './public/uploads/'),
       filename: function (req, file, cb) {
-        const rawPrefix = typeof getPrefix === 'function' ? getPrefix(req) : undefined;
-        const base = sanitizePrefix(rawPrefix);
+        let base;
+        try {
+          base = resolvePrefix(req, getPrefix);
+        } catch (e) {
+          return cb(e);
+        }
         // crypto random suffix avoids same-millisecond collisions and makes
         // stored filenames unguessable.
         const unique = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
@@ -38,7 +51,7 @@ const uploadSingle = (field, getPrefix) =>
     fileFilter: (req, file, cb) => checkFileType(file, cb),
   }).single(field);
 
-module.exports = { uploadSingle };
+module.exports = { uploadSingle, sanitizePrefix, resolvePrefix };
 
 function checkFileType(file, cb) {
   const ext = path.extname(file.originalname).toLowerCase();
