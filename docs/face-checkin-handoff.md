@@ -4,7 +4,7 @@
 
 **Note on naming:** `phase2-plan.md` / `phase3-plan.md` / `phase4-plan.md` in this same `docs/` directory are an **unrelated** initiative (code-quality/logging/test-coverage remediation). This feature's phases (P0–P5) are sections *inside* `face-checkin-plan.md`, not separate files. Don't confuse the two "Phase 4"s.
 
-Last updated: 2026-07-13 (full audit pass: gmgmt#26/#27, client#12/#13 confirmed merged; two new PRs open — gmgmt#28 + client#14, a re-entry-within-dwell-window fix; a new planned-but-unbuilt gap identified, §3.11 admin-UI entry point; all test suites re-run clean).
+Last updated: 2026-07-13 (full audit pass: gmgmt#26/#27/#28 and client#12/#13/#14 all confirmed merged — the re-entry-within-dwell-window fix landed; a submodule-pointer bump to pick up client#14 is open as gmgmt#32; a new planned-but-unbuilt gap identified, §3.11 admin-UI entry point; all test suites re-run clean).
 
 ---
 
@@ -25,8 +25,9 @@ Last updated: 2026-07-13 (full audit pass: gmgmt#26/#27, client#12/#13 confirmed
 | — | gmgmt | Dev fix: stop tracking `.claude/launch.json` (machine-specific paths) | ✅ Merged ([gmgmt#26](https://github.com/pntgoswami18/gmgmt/pull/26), commit `795b37e`) — shipped differently than first drafted, see §5 |
 | — | gmgmt | **Security: recompute face match server-side** (closes part of §3.9's trust gap) | ✅ Merged ([gmgmt#27](https://github.com/pntgoswami18/gmgmt/pull/27), commit `445098d`) |
 | — | client | Companion: kiosk sends probe embedding for server re-scoring | ✅ Merged ([client#13](https://github.com/pntgoswami18/client/pull/13), commit `0f088e4`) |
-| — | gmgmt | Fix: re-entry within checkout dwell window unlocks door, doesn't double-log | 🟡 PR open — [gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28) |
-| — | client | Fix: inverted liveness turn direction, generic denial messages, re-entry UI, face-tracking overlay | 🟡 PR open — [client#14](https://github.com/pntgoswami18/client/pull/14) |
+| — | gmgmt | Fix: re-entry within checkout dwell window unlocks door, doesn't double-log | ✅ Merged ([gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28), commit `b4c24ce`) |
+| — | client | Fix: inverted liveness turn direction, generic denial messages, re-entry UI, face-tracking overlay | ✅ Merged ([client#14](https://github.com/pntgoswami18/client/pull/14), commit `64be0a6`) |
+| — | gmgmt | Bump `client` submodule pointer to pick up client#14 (`64be0a6`) | 🟡 PR open — [gmgmt#32](https://github.com/pntgoswami18/gmgmt/pull/32) |
 | — | client+gmgmt | **New gap found: admin-UI entry point to the kiosk** (plan §3.6, see §3.11) | ⬜ **Planned only — zero code.** No "Launch kiosk" button, no `deviceSecretConfigured` field |
 | — | ops | Run `deploy-models.sh` on the actual deployment target | ⬜ Not started |
 | — | ops | Set `DEVICE_SHARED_SECRET` env var + provision kiosk browser | ⬜ Not started |
@@ -34,22 +35,22 @@ Last updated: 2026-07-13 (full audit pass: gmgmt#26/#27, client#12/#13 confirmed
 | — | human | Real-camera walk-up test (enroll → kiosk scan → unlock) | ⬜ Not started |
 | — | docs | Rollout doc: name the tailgating + device-secret-replay + liveness-temporal-binding limitations explicitly | ⬜ Not started |
 
-**Bottom line:** the backend, pure-logic, kiosk-UI, Settings-UI, server-side match recompute, and re-entry-fix code are all written and unit-tested; everything above except the admin-UI entry point (§3.11) is merged or in open PRs awaiting a review click, not awaiting more code. §3.11 is the one place where more frontend+backend work is still genuinely unwritten. Everything else remaining is deployment/config/ops work: run the model deploy script, set the device secret, register hardware, and do a real walk-up test.
+**Bottom line:** the backend, pure-logic, kiosk-UI, Settings-UI, server-side match recompute, and re-entry-fix code are all written, unit-tested, and now **merged** (the only code-carrying PR still open is the submodule-pointer bump, gmgmt#32). The admin-UI entry point (§3.11) is the one place where more frontend+backend work is still genuinely unwritten. Everything else remaining is deployment/config/ops work: run the model deploy script, set the device secret, register hardware, and do a real walk-up test.
 
 ---
 
 ## 2. Repo/branch/PR map
 
-**gmgmt** (backend + docs), `main` tip: `445098d`
-- `f80bd90` P1 (#17) → `3340ad3` P2 (#18) → `21e1639` P3 model-deploy (#21) → `fcd6b36` P3 verify (#22) → `af6283d` submodule bump (#23) → `3803945` `.gitmodules` + trust-model doc (#24) → `a698156` handoff doc update (#25) → `795b37e` untrack `.claude/launch.json` (#26) → `445098d` server-side match recompute (#27)
-- **Open:** [gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28) `face-checkin-kiosk-fixes` → `main` — re-entry-within-dwell-window fix (79/79 backend tests as of the PR; a concurrent session was still adding clarifying comments + tests to this same branch as of this audit, uncommitted, not yet pushed — don't assume the PR diff is final).
+**gmgmt** (backend + docs), `main` tip: `b4c24ce`
+- `f80bd90` P1 (#17) → `3340ad3` P2 (#18) → `21e1639` P3 model-deploy (#21) → `fcd6b36` P3 verify (#22) → `af6283d` submodule bump (#23) → `3803945` `.gitmodules` + trust-model doc (#24) → `a698156` handoff doc update (#25) → `795b37e` untrack `.claude/launch.json` (#26) → `445098d` server-side match recompute (#27) → `b4c24ce` re-entry-within-dwell-window fix (#28)
+- **Open:** [gmgmt#32](https://github.com/pntgoswami18/gmgmt/pull/32) `bump-client-pointer` → `main` — bumps the `client` submodule pointer to `64be0a6` (client#14). Docs/pointer only, no backend code.
 
-**client** (frontend, git submodule `github.com/pntgoswami18/client.git`), `main` tip: `0f088e4`
+**client** (frontend, git submodule `github.com/pntgoswami18/client.git`), `main` tip: `64be0a6`
 - `5a421f1` P3 enrollment (#10, **squash-merged** — old commit SHAs `19b653b`/`b794545` are *not* ancestors of `main`, see §5 gotcha)
-- `b83312f` P4 kiosk (#11, squash-merged) → `69c35b2` Settings UI (#12) → `0f088e4` probe-embedding companion to gmgmt#27 (#13)
-- **Open:** [client#14](https://github.com/pntgoswami18/client/pull/14) `face-checkin-kiosk-fixes` → `main` — inverted liveness turn-direction fix, denial-message re-keying, re-entry UI, plus a new face-tracking overlay (`faceOverlayGeometry.js` pure math + `faceOverlayDraw.js` canvas rendering, wired into `useFaceCheckin`'s existing rAF loop).
+- `b83312f` P4 kiosk (#11, squash-merged) → `69c35b2` Settings UI (#12) → `0f088e4` probe-embedding companion to gmgmt#27 (#13) → `64be0a6` kiosk fixes: liveness turn direction, denial messages, re-entry UI, face-tracking overlay (#14, squash-merged)
+- No open client PRs.
 
-**gmgmt's submodule pointer** for `client` is `b83312f` (P3+P4 only — predates client#12/#13). Needs bumping once gmgmt#28/client#14 merge, to pick up everything through client#13 at minimum. `.gitmodules` (previously missing — a fresh clone couldn't resolve the submodule URL) is committed via #24.
+**gmgmt's submodule pointer** for `client` is still `b83312f` on `main` (P3+P4 only — predates client#12/#13/#14). The bump to `64be0a6` (picking up everything through client#14) is open as **gmgmt#32** and needs merging for a fresh clone to resolve the current kiosk code. `.gitmodules` (previously missing — a fresh clone couldn't resolve the submodule URL) is committed via #24.
 
 ---
 
@@ -97,11 +98,11 @@ Caveats that remain and still belong in the rollout doc (§3.8):
 - **The re-scored probe is not temporally bound to the liveness-proven frame.** In `useFaceCheckin.js`, the probe embedding is captured when the K-consecutive-frame `MatchAccumulator` first accepts an identity (in `tick()`, during the `idle` phase) and stashed in `pendingRef`. The liveness challenge (blink/head-turn) then runs against *subsequent* frames, and on success `verify(pendingRef.current, true)` submits that original, pre-challenge probe — not a frame captured during or after the liveness proof. So the embedding the server re-scores and the frames that proved liveness come from two disjoint moments with nothing binding them together; an honest kiosk's liveness proof doesn't guarantee it's the same live subject the embedding was drawn from.
 - **Tailgating** (a second person entering behind an authorized scan) is unaddressed — see the §3.8 note above.
 
-### 3.10 Re-entry within checkout dwell window — PRs open, not yet merged
+### 3.10 Re-entry within checkout dwell window — merged (gmgmt#28 + client#14)
 Found during manual testing: a member who checked in, stepped back out briefly (e.g. a phone call at the entrance), and re-scanned **before** `face_checkout_min_dwell_minutes` elapsed was denied (`dwell_time_not_met`) and the door stayed locked — a real usability bug, not just an edge case.
 
-- **[gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28)**: an early re-scan on an already-open attendance row is now treated as a **re-entry** — `checkInService.processCheckIn` returns `authorized: true, action: 'reentry'` (door unlocks via the normal authorized→unlock path) without checking the member out or inserting a duplicate attendance row, and returns `minutesUntilCheckout` so the kiosk can tell the member when checkout actually unlocks. Re-entry deliberately applies **only** the `member.is_active` gate — not the full session-window/plan-validity gates a fresh check-in enforces — because the member is already inside an active visit; re-validating them out of it near a session boundary would strand someone legitimately present. 79/79 backend tests as of the PR description; **a concurrent session was still adding clarifying comments to this exact rationale plus more tests on the same branch, uncommitted, as of this audit** — check `git log` on `face-checkin-kiosk-fixes` for the latest before assuming the PR is final.
-- **[client#14](https://github.com/pntgoswami18/client/pull/14)**: the matching frontend half, plus two independent bug fixes found in the same testing pass:
+- **[gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28)** (merged as `b4c24ce`): an early re-scan on an already-open attendance row is now treated as a **re-entry** — `checkInService.processCheckIn` returns `authorized: true, action: 'reentry'` (door unlocks via the normal authorized→unlock path) without checking the member out or inserting a duplicate attendance row, and returns `minutesUntilCheckout` so the kiosk can tell the member when checkout actually unlocks. Re-entry deliberately applies **only** the `member.is_active` gate — not the full session-window/plan-validity gates a fresh check-in enforces — because the member is already inside an active visit; re-validating them out of it near a session boundary would strand someone legitimately present.
+- **[client#14](https://github.com/pntgoswami18/client/pull/14)** (merged as `64be0a6`): the matching frontend half, plus two independent bug fixes found in the same testing pass:
   1. **Liveness turn direction was inverted.** The kiosk shows a mirrored selfie view, but `faceAlign`'s yaw ratio is image-space (`ratio > 0` = nose toward image-right, which happens when the subject turns their own **left**). The `turn_left`/`turn_right` challenge checks had the comparison backwards, so a "turn left" prompt was only satisfied by physically turning right. This is a real bug worth flagging distinctly from the dwell-window fix — it would have made the liveness challenge confusing-to-unusable for every real user, not an edge case.
   2. **Denial messages were mostly generic.** `DENY_MESSAGES` was keyed on strings the backend never actually returns (`session_window`, `inactive_plan`); re-keyed to the real reason strings (`outside_session_windows`, `member_inactive`, `cross_session_violation`, …) so denials are now specific and actionable instead of a generic "Something went wrong" for almost everything.
   3. **New face-tracking overlay** — a reticle + directional arrows drawn on a canvas over the video feed (`faceOverlayGeometry.js` for pure cover-mapping/anchoring math, tested; `faceOverlayDraw.js` for the actual canvas strokes, validated live per its own header comment since drawing code isn't meaningfully unit-testable). Wired into `useFaceCheckin`'s existing per-frame loop — no second rAF loop.
@@ -121,7 +122,7 @@ This is genuinely unbuilt — worth prioritizing before rollout, since without i
 ## 4. Key files (orientation for a fresh session)
 
 **Backend (gmgmt):**
-- `src/services/checkInService.js` — `processCheckIn()`, the shared authorization core (asymmetric check-in/checkout rules). As of gmgmt#28 (open), also owns the re-entry-within-dwell-window branch (`action: 'reentry'`), gated only by `member.is_active` — see §3.10 for why it's narrower than a fresh check-in's gates.
+- `src/services/checkInService.js` — `processCheckIn()`, the shared authorization core (asymmetric check-in/checkout rules). As of gmgmt#28 (merged), also owns the re-entry-within-dwell-window branch (`action: 'reentry'`), gated only by `member.is_active` — see §3.10 for why it's narrower than a fresh check-in's gates.
 - `src/api/controllers/faceBiometricController.js` — all `/face/*` and face-enroll endpoints. `faceCheckIn` recomputes the cosine match server-side from the client's probe `embedding` (via `src/utils/faceMatch.js`); the client `matchScore` is advisory and `livenessPassed` is still a client-asserted gate (see §3.9)
 - `src/utils/faceMatch.js` — pure server-side cosine match / probe validation, the authoritative re-scoring the door unlock hangs on (mirror of the kiosk's `faceMatching.js`)
 - `src/config/sqlite.js:287-292` — face settings defaults
@@ -137,7 +138,7 @@ This is genuinely unbuilt — worth prioritizing before rollout, since without i
 - `src/utils/faceLiveness.js` — `LivenessChallenge` (blink/head-turn state machine)
 - `src/utils/faceCacheDb.js` — IndexedDB gallery cache, delta-merge core
 - `src/utils/faceStation.js` — device-secret station config, fail-closed status derivation, and `submitCheckIn` (now sends the probe `embedding` — client#13)
-- `src/utils/faceOverlayGeometry.js` / `faceOverlayDraw.js` — pure cover-mapping/anchoring math (tested) + canvas rendering (live-validated only) for the kiosk's face-tracking reticle/arrow overlay (client#14, open)
+- `src/utils/faceOverlayGeometry.js` / `faceOverlayDraw.js` — pure cover-mapping/anchoring math (tested) + canvas rendering (live-validated only) for the kiosk's face-tracking reticle/arrow overlay (client#14, merged)
 - `src/hooks/useFaceCheckin.js` — orchestrates the above into the walk-up loop; also where the probe-vs-liveness temporal-binding gap (§3.9) lives
 - `src/components/CheckIn.js` — fullscreen `/checkin` UI (all phase screens)
 - `src/components/Settings.js` — Face Check-In settings section (client#12); no launch-kiosk affordance yet (§3.11)
