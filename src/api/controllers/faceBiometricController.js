@@ -14,7 +14,7 @@ const setBiometricIntegration = (integration) => {
   biometricIntegration = integration;
 };
 
-const EMBEDDING_DIM = 128;
+const { EMBEDDING_DIM } = faceMatch;
 const MAX_SAMPLES = 5;
 const POSE_LABELS = new Set(['front', 'left', 'right']);
 const MAX_DEVICE_ID_LENGTH = 128;

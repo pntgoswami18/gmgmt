@@ -422,6 +422,79 @@ test('faceCheckIn: embeddings from a superseded model version deny with model_ve
   assert.equal(res._body.reason, 'model_version_mismatch');
 });
 
+test('faceCheckIn: a stale-model-version sample is excluded from scoring even when a current sample also exists', async () => {
+  await setSetting('face_checkin_enabled', 'true');
+  const memberId = insertMember('MixedVersions');
+  // Current-version enrollment that does NOT match the probe.
+  await faceController.enrollFace(
+    {
+      params: { memberId: String(memberId) },
+      body: { modelVersion: 'sface_v1_fp32', consent: true, samples: [{ embedding: ORTHOGONAL }] },
+    },
+    mockRes()
+  );
+  // Inject a second row, tagged with a superseded model version, that WOULD
+  // score a perfect match if it leaked into the gallery used for scoring.
+  // If per-row version filtering ever regressed (e.g. to a some()/every()
+  // check instead of filtering rows individually), this row would wrongly
+  // authorize the check-in.
+  const staleBlob = Buffer.from(new Float32Array(ONES).buffer);
+  db.prepare(
+    'INSERT INTO member_face_embeddings (member_id, embedding, model_version) VALUES (?, ?, ?)'
+  ).run(memberId, staleBlob, 'sface_v0_old');
+
+  const res = mockRes();
+  await faceController.faceCheckIn(
+    { body: { memberId, livenessPassed: true, embedding: ONES } },
+    res
+  );
+  assert.equal(res._body.authorized, false, JSON.stringify(res._body));
+  assert.equal(
+    res._body.reason,
+    'below_match_threshold',
+    'must score only the current-version row, not the stale one it happens to match'
+  );
+});
+
+test('faceCheckIn: best-of-multiple-samples scoring — a probe matching only the 2nd enrolled sample still authorizes', async () => {
+  await setSetting('face_checkin_enabled', 'true');
+  const memberId = insertMember('MultiPose');
+  await faceController.enrollFace(
+    {
+      params: { memberId: String(memberId) },
+      body: {
+        modelVersion: 'sface_v1_fp32',
+        consent: true,
+        samples: [{ embedding: ORTHOGONAL }, { embedding: ONES }],
+      },
+    },
+    mockRes()
+  );
+
+  // Probe matches only the 2nd sample (ONES); the 1st (ORTHOGONAL) alone
+  // would deny. bestMatchScore must take the max over all enrolled samples.
+  const res = mockRes();
+  await faceController.faceCheckIn(
+    { body: { memberId, livenessPassed: true, embedding: ONES } },
+    res
+  );
+  assert.equal(res._body.authorized, true, JSON.stringify(res._body));
+});
+
+test('faceCheckIn: rejects a non-integer/zero/negative memberId as invalid_member_id', async () => {
+  await setSetting('face_checkin_enabled', 'true');
+  for (const memberId of ['not-a-number', 0, -1, undefined]) {
+    const res = mockRes();
+    await faceController.faceCheckIn(
+      { body: { memberId, livenessPassed: true, embedding: ONES } },
+      res
+    );
+    assert.equal(res._status, 400, JSON.stringify(res._body));
+    assert.equal(res._body.authorized, false);
+    assert.equal(res._body.reason, 'invalid_member_id');
+  }
+});
+
 test('faceCheckIn: garbage face_match_threshold falls back to 0.55, not to no floor', async () => {
   await setSetting('face_checkin_enabled', 'true');
   const memberId = insertMember('ThresholdSubject');
