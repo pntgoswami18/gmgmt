@@ -255,22 +255,35 @@ test('checkout: authorized even with expired plan, and not gated by session wind
   await openSessionWindowNow();
 });
 
-test('checkout dwell guard: scan shortly after check-in is ignored as duplicate', async () => {
+test('re-entry within dwell: scan shortly after check-in is authorized (door unlocks) with no checkout and no new row', async () => {
   const memberId = insertMember({ name: 'Lingerer' });
   const checkIn = new Date();
   checkIn.setMinutes(checkIn.getMinutes() - 2);
-  insertAttendance(memberId, checkIn);
+  const attendanceId = insertAttendance(memberId, checkIn);
 
   const result = await checkInService.processCheckIn(memberId, {
     modality: 'face',
     minCheckoutDwellMinutes: 15,
     eventContext: { biometricRef: 'face' },
   });
-  assert.equal(result.authorized, false);
-  assert.equal(result.reason, 'dwell_time_not_met');
+  // Member stepped out and walked back in — let them through (authorized so the
+  // door unlocks) but don't check them out or double-log attendance.
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'reentry');
+  assert.equal(result.reason, 'already_checked_in');
+  assert.equal(result.attendanceId, attendanceId, 'stays on the same open row');
+  assert.ok(
+    result.minutesUntilCheckout >= 12 && result.minutesUntilCheckout <= 15,
+    `expected ~13 min until checkout, got ${result.minutesUntilCheckout}`
+  );
 
-  const row = db.prepare('SELECT check_out_time FROM attendance WHERE member_id = ?').get(memberId);
-  assert.equal(row.check_out_time, null, 'must NOT be flipped to checked out');
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must NOT create a duplicate attendance row');
+  assert.equal(rows[0].check_out_time, null, 'must NOT be flipped to checked out');
+
+  const events = eventsFor(memberId);
+  assert.equal(events.at(-1).event_type, 'reentry');
+  assert.equal(events.at(-1).success, 1);
 });
 
 test('fingerprint checkout is blocked outside session windows (historical behavior preserved)', async () => {

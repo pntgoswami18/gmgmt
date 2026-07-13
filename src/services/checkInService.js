@@ -335,11 +335,33 @@ async function processCheckInLocked(memberId, options = {}) {
       }
       const dwellMinutes = (now.getTime() - checkInTime.getTime()) / 60000;
       if (dwellMinutes < minCheckoutDwellMinutes) {
-        await logEvent(eventContext, member, 'dwell_time_not_met', timeStr, false, {
-          error_message: `Checkout requires ${minCheckoutDwellMinutes} min dwell; scan ignored as duplicate check-in`,
-          details: { dwellMinutes: Math.round(dwellMinutes * 10) / 10 },
+        // Re-entry, not checkout: the member is already checked in and has
+        // scanned again too soon to be leaving (e.g. stepped out for a call and
+        // walked back in). Let them through — the door unlocks because this is
+        // authorized — without logging a checkout or a duplicate check-in row.
+        // Only after the dwell elapses does a re-scan flip to checkout (below).
+        const minutesUntilCheckout = Math.max(1, Math.ceil(minCheckoutDwellMinutes - dwellMinutes));
+        await updateLastVisit(member.id);
+        await logEvent(eventContext, member, 'reentry', timeStr, true, {
+          details: {
+            dwellMinutes: Math.round(dwellMinutes * 10) / 10,
+            minutesUntilCheckout,
+            ...(matchScore != null ? { matchScore } : {}),
+          },
         });
-        return deny('dwell_time_not_met', member);
+        logger.info(
+          { memberId: member.id, memberName: member.name, modality, minutesUntilCheckout },
+          'member re-entered within dwell window (no new attendance)'
+        );
+        return {
+          authorized: true,
+          action: 'reentry',
+          reason: 'already_checked_in',
+          member,
+          attendanceId: openRow.id,
+          minutesUntilCheckout,
+          at: now,
+        };
       }
     }
 

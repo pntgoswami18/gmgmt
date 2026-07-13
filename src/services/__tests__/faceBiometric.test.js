@@ -273,6 +273,45 @@ test('faceCheckIn: 403 when feature disabled; denial vocabulary when enabled', a
   assert.equal(res._body.memberName, 'Walker');
 });
 
+test('faceCheckIn: re-scan within the dwell window is a re-entry (authorized, no new row, minutesUntilCheckout)', async () => {
+  await setSetting('face_checkin_enabled', 'true');
+  await setSetting('face_liveness_mode', 'none'); // focus on the attendance branch
+  await setSetting('face_checkout_min_dwell_minutes', '15');
+  const memberId = insertMember('Returner');
+  await faceController.enrollFace(
+    {
+      params: { memberId: String(memberId) },
+      body: { modelVersion: 'sface_v1_fp32', consent: true, samples: [{ embedding: embedding() }] },
+    },
+    mockRes()
+  );
+
+  // First scan → check-in (opens the attendance row).
+  let res = mockRes();
+  await faceController.faceCheckIn({ body: { memberId, matchScore: 0.9 } }, res);
+  assert.equal(res._body.action, 'checkin', JSON.stringify(res._body));
+
+  // Immediate second scan → within dwell → re-entry: authorized (so the door
+  // unlocks — same authorized→unlock path as check-in), but no checkout and no
+  // duplicate row, and the response carries the minutes until checkout unlocks.
+  res = mockRes();
+  await faceController.faceCheckIn({ body: { memberId, matchScore: 0.9 } }, res);
+  assert.equal(res._body.authorized, true, JSON.stringify(res._body));
+  assert.equal(res._body.action, 'reentry');
+  assert.equal(res._body.reason, 'already_checked_in');
+  assert.equal(res._body.memberName, 'Returner', 'name is shown on an authorized re-entry');
+  assert.ok(
+    res._body.minutesUntilCheckout >= 1 && res._body.minutesUntilCheckout <= 15,
+    `expected a sane minutesUntilCheckout, got ${res._body.minutesUntilCheckout}`
+  );
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'no duplicate attendance row on re-entry');
+  assert.equal(rows[0].check_out_time, null, 'not checked out');
+
+  await setSetting('face_liveness_mode', 'challenge');
+});
+
 // ---------------------------------------------------------------------------
 // Safety-critical additions (multi-agent review of PR #18)
 // ---------------------------------------------------------------------------
