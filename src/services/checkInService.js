@@ -343,11 +343,21 @@ async function processCheckInLocked(memberId, options = {}) {
         //
         // Authorization freshness: re-entry is re-admission INTO the building,
         // so — unlike checkout (which must never be blocked, plan Section 3.5) —
-        // it must respect deactivation just like a fresh check-in. A member
-        // deactivated after checking in (e.g. by paymentDeactivationService)
-        // does not get re-admitted on the strength of a stale open row. They
-        // can still CHECK OUT once the dwell elapses (that path is intentionally
-        // ungated) — we only refuse to unlock the door to let them back IN.
+        // it respects deactivation: a member deactivated after checking in
+        // (e.g. by paymentDeactivationService) does not get re-admitted on the
+        // strength of a stale open row. They can still CHECK OUT once the dwell
+        // elapses (that path is intentionally ungated) — we only refuse to
+        // unlock the door to let them back IN.
+        //
+        // This is NOT full fresh-check-in parity, and deliberately so: re-entry
+        // applies ONLY the is_active gate below. It does not re-run the
+        // session-window or plan/grace-validity gates a fresh check-in enforces
+        // (further down), because the member is already inside an active visit —
+        // re-scoping them out of it near a session boundary, or on a day-
+        // granular grace flip minutes after they were admitted, would strand a
+        // legitimately-present member at the door. is_active is the one gate
+        // that reflects an intentional mid-visit revocation, so it's the one we
+        // honor here.
         if (enforceAuthorization && member.is_active !== 1) {
           await logEvent(eventContext, member, 'member_inactive', timeStr, false, {
             error_message: 'Member is deactivated; re-entry within dwell window refused',

@@ -280,6 +280,10 @@ test('faceCheckIn: 403 when feature disabled; denial vocabulary when enabled', a
   assert.equal(res._body.action, 'checkin');
   assert.equal(res._body.doorCommandSent, false);
   assert.equal(res._body.memberName, 'Walker');
+  // minutesUntilCheckout is a re-entry-only field; a plain check-in must not
+  // carry a (stale) value — the controller spreads it unconditionally, so this
+  // guards against a regression that leaks it on non-reentry outcomes.
+  assert.equal(res._body.minutesUntilCheckout, undefined);
 });
 
 test('faceCheckIn: re-scan within the dwell window is a re-entry (authorized, no new row, minutesUntilCheckout)', async () => {

@@ -314,6 +314,23 @@ test('re-entry within dwell: deactivated member is refused re-admission (not aut
   assert.equal(events.at(-1).success, 0);
 });
 
+test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.max floor)', async () => {
+  const memberId = insertMember({ name: 'AlmostOut' });
+  // 14.5 min into a 15-min dwell → raw ceil(0.5) = 1; the sub-minute remainder
+  // must surface as "1 minute until checkout", not "0".
+  const checkIn = new Date(Date.now() - 14.5 * 60000);
+  insertAttendance(memberId, checkIn);
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    minCheckoutDwellMinutes: 15,
+    eventContext: { biometricRef: 'face' },
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'reentry');
+  assert.equal(result.minutesUntilCheckout, 1, 'sub-minute remainder must clamp to 1, not 0');
+});
+
 test('fingerprint checkout is blocked outside session windows (historical behavior preserved)', async () => {
   const memberId = insertMember({ name: 'FpCheckout' });
   const checkIn = new Date();
