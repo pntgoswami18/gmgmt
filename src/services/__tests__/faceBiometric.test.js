@@ -21,6 +21,15 @@ function mockRes() {
 
 const embedding = (seed = 0) => Array.from({ length: 128 }, (_, i) => Math.sin(i + seed));
 
+// Deterministic probes for the server-side re-scoring path. cosineSimilarity
+// normalizes defensively, so only direction matters, not magnitude.
+const ONES = Array.from({ length: 128 }, () => 1);
+// 64×(+1), 64×(−1): dot with ONES is 0 → cosine 0 (a confident non-match).
+const ORTHOGONAL = Array.from({ length: 128 }, (_, i) => (i % 2 === 0 ? 1 : -1));
+// Probe whose cosine similarity to ONES is exactly (128 − 2·flips)/128 — lets a
+// test straddle the threshold precisely (flips=28 → 0.5625, flips=29 → 0.547).
+const probeToOnes = (flips) => Array.from({ length: 128 }, (_, i) => (i < flips ? -1 : 1));
+
 async function setSetting(key, value) {
   db.prepare(
     'INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
@@ -223,7 +232,7 @@ test('faceCheckIn: 403 when feature disabled; denial vocabulary when enabled', a
       body: {
         modelVersion: 'sface_v1_fp32',
         consent: true,
-        samples: [{ embedding: embedding() }],
+        samples: [{ embedding: ONES }],
       },
     },
     mockRes()
@@ -233,7 +242,7 @@ test('faceCheckIn: 403 when feature disabled; denial vocabulary when enabled', a
   await setSetting('face_checkin_enabled', 'false');
   let res = mockRes();
   await faceController.faceCheckIn(
-    { body: { memberId, matchScore: 0.9, livenessPassed: true } },
+    { body: { memberId, embedding: ONES, livenessPassed: true } },
     res
   );
   assert.equal(res._status, 403);
@@ -241,36 +250,103 @@ test('faceCheckIn: 403 when feature disabled; denial vocabulary when enabled', a
 
   await setSetting('face_checkin_enabled', 'true');
 
-  // Below server-side threshold → rejected regardless of client claim.
+  // Probe that scores below the server threshold → rejected.
   res = mockRes();
   await faceController.faceCheckIn(
-    { body: { memberId, matchScore: 0.3, livenessPassed: true } },
+    { body: { memberId, embedding: ORTHOGONAL, livenessPassed: true } },
     res
   );
   assert.equal(res._body.authorized, false);
   assert.equal(res._body.reason, 'below_match_threshold');
   assert.equal(res._body.memberName ?? null, null, 'denials must not confirm identities');
 
-  // Not enrolled → rejected even with a high claimed score.
+  // Not enrolled → rejected even with a matching-looking probe.
   const stranger = insertMember('Stranger');
   res = mockRes();
   await faceController.faceCheckIn(
-    { body: { memberId: stranger, matchScore: 0.9, livenessPassed: true } },
+    { body: { memberId: stranger, embedding: ONES, livenessPassed: true } },
     res
   );
   assert.equal(res._body.authorized, false);
   assert.equal(res._body.reason, 'not_enrolled');
 
-  // Valid claim → authorized check-in; no door configured → command not sent.
+  // Probe matching the enrolled sample → authorized; no door configured → command not sent.
   res = mockRes();
   await faceController.faceCheckIn(
-    { body: { memberId, matchScore: 0.9, livenessPassed: true } },
+    { body: { memberId, embedding: ONES, livenessPassed: true } },
     res
   );
   assert.equal(res._body.authorized, true, JSON.stringify(res._body));
   assert.equal(res._body.action, 'checkin');
   assert.equal(res._body.doorCommandSent, false);
   assert.equal(res._body.memberName, 'Walker');
+});
+
+test('faceCheckIn: match is recomputed server-side — a lying client cannot authorize', async () => {
+  await setSetting('face_checkin_enabled', 'true');
+  const memberId = insertMember('Impostor');
+  await faceController.enrollFace(
+    {
+      params: { memberId: String(memberId) },
+      body: { modelVersion: 'sface_v1_fp32', consent: true, samples: [{ embedding: ONES }] },
+    },
+    mockRes()
+  );
+
+  // Client claims a perfect score but submits a probe that does NOT match the
+  // enrolled sample. The server ignores the claim and re-scores → denied.
+  let res = mockRes();
+  await faceController.faceCheckIn(
+    { body: { memberId, matchScore: 0.99, livenessPassed: true, embedding: ORTHOGONAL } },
+    res
+  );
+  assert.equal(res._body.authorized, false, JSON.stringify(res._body));
+  assert.equal(res._body.reason, 'below_match_threshold');
+  assert.equal(
+    db.prepare('SELECT COUNT(*) n FROM attendance WHERE member_id = ?').get(memberId).n,
+    0,
+    'no attendance recorded when the real probe fails to match'
+  );
+
+  // Same member, a probe that genuinely matches → the server authorizes and
+  // records ITS recomputed score (1.0), not the client-claimed 0.4.
+  res = mockRes();
+  await faceController.faceCheckIn(
+    { body: { memberId, matchScore: 0.4, livenessPassed: true, embedding: ONES } },
+    res
+  );
+  assert.equal(res._body.authorized, true, JSON.stringify(res._body));
+  const ev = db
+    .prepare(
+      "SELECT raw_data FROM biometric_events WHERE member_id = ? AND event_type = 'checkin' ORDER BY id DESC LIMIT 1"
+    )
+    .get(memberId);
+  const raw = JSON.parse(ev.raw_data);
+  assert.ok(Math.abs(raw.matchScore - 1) < 1e-9, `logged server score, got ${raw.matchScore}`);
+  assert.equal(raw.claimedScore, 0.4, 'client-claimed score retained for audit');
+});
+
+test('faceCheckIn: missing or malformed probe embedding fails closed', async () => {
+  await setSetting('face_checkin_enabled', 'true');
+  const memberId = insertMember('NoProbe');
+  await faceController.enrollFace(
+    {
+      params: { memberId: String(memberId) },
+      body: { modelVersion: 'sface_v1_fp32', consent: true, samples: [{ embedding: ONES }] },
+    },
+    mockRes()
+  );
+
+  for (const probe of [undefined, [1, 2, 3], ONES.map(() => NaN)]) {
+    const res = mockRes();
+    await faceController.faceCheckIn(
+      { body: { memberId, matchScore: 0.99, livenessPassed: true, embedding: probe } },
+      res
+    );
+    assert.equal(res._status, 400, JSON.stringify(res._body));
+    assert.equal(res._body.authorized, false);
+    assert.equal(res._body.reason, 'invalid_probe_embedding');
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -284,15 +360,16 @@ test('faceCheckIn: liveness enforced server-side unless mode is none', async () 
   await faceController.enrollFace(
     {
       params: { memberId: String(memberId) },
-      body: { modelVersion: 'sface_v1_fp32', consent: true, samples: [{ embedding: embedding() }] },
+      body: { modelVersion: 'sface_v1_fp32', consent: true, samples: [{ embedding: ONES }] },
     },
     mockRes()
   );
 
-  // Missing / false livenessPassed → denied before authorization runs.
+  // Missing / false livenessPassed → denied before authorization runs, even
+  // with a genuinely matching probe.
   for (const livenessPassed of [undefined, false]) {
     const res = mockRes();
-    await faceController.faceCheckIn({ body: { memberId, matchScore: 0.9, livenessPassed } }, res);
+    await faceController.faceCheckIn({ body: { memberId, livenessPassed, embedding: ONES } }, res);
     assert.equal(res._body.authorized, false);
     assert.equal(res._body.reason, 'liveness_not_passed');
   }
@@ -305,7 +382,7 @@ test('faceCheckIn: liveness enforced server-side unless mode is none', async () 
   // mode none → liveness not required.
   await setSetting('face_liveness_mode', 'none');
   const res = mockRes();
-  await faceController.faceCheckIn({ body: { memberId, matchScore: 0.9 } }, res);
+  await faceController.faceCheckIn({ body: { memberId, embedding: ONES } }, res);
   assert.equal(res._body.authorized, true, JSON.stringify(res._body));
   await setSetting('face_liveness_mode', 'challenge');
 });
@@ -328,7 +405,7 @@ test('faceCheckIn: embeddings from a superseded model version deny with model_ve
 
   const res = mockRes();
   await faceController.faceCheckIn(
-    { body: { memberId, matchScore: 0.9, livenessPassed: true } },
+    { body: { memberId, livenessPassed: true, embedding: ONES } },
     res
   );
   assert.equal(res._body.authorized, false);
@@ -341,25 +418,26 @@ test('faceCheckIn: garbage face_match_threshold falls back to 0.55, not to no fl
   await faceController.enrollFace(
     {
       params: { memberId: String(memberId) },
-      body: { modelVersion: 'sface_v1_fp32', consent: true, samples: [{ embedding: embedding() }] },
+      body: { modelVersion: 'sface_v1_fp32', consent: true, samples: [{ embedding: ONES }] },
     },
     mockRes()
   );
   await setSetting('face_match_threshold', 'banana');
 
-  // NaN threshold must not disable the floor: sub-default score stays denied.
+  // NaN threshold must not disable the floor: a probe scoring 0.547 (just under
+  // the 0.55 fallback) stays denied.
   let res = mockRes();
   await faceController.faceCheckIn(
-    { body: { memberId, matchScore: 0.5, livenessPassed: true } },
+    { body: { memberId, livenessPassed: true, embedding: probeToOnes(29) } },
     res
   );
   assert.equal(res._body.authorized, false);
   assert.equal(res._body.reason, 'below_match_threshold');
 
-  // Above the fallback default → passes the floor.
+  // A probe scoring 0.5625 (just over the fallback default) passes the floor.
   res = mockRes();
   await faceController.faceCheckIn(
-    { body: { memberId, matchScore: 0.6, livenessPassed: true } },
+    { body: { memberId, livenessPassed: true, embedding: probeToOnes(28) } },
     res
   );
   assert.equal(res._body.authorized, true, JSON.stringify(res._body));
