@@ -283,6 +283,10 @@ function initializeDatabase() {
     ['local_listen_port', '5005'],
     ['membership_types', '["standard","premium","vip"]'],
     ['cross_session_checkin_restriction', 'true'],
+    // Minutes after a fingerprint check-in before a re-scan counts as checkout
+    // rather than a re-entry (member stepped out and came back). Mirrors
+    // face_checkout_min_dwell_minutes; 0 = any second scan checks out immediately.
+    ['fingerprint_checkout_min_dwell_minutes', '15'],
     ['whatsapp_welcome_enabled', 'false'],
     ['face_checkin_enabled', 'false'],
     ['face_match_threshold', '0.55'],
