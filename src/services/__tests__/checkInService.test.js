@@ -18,9 +18,11 @@ const dateStrOf = (d) => {
 const todayStr = () => dateStrOf(new Date());
 
 // Local-time ISO string (no Z) — parsed as local time, like ESP32 timestamps.
+// Seconds are preserved (not zeroed) so sub-minute dwell math in the service
+// isn't skewed by up to a minute depending on when the test happens to run.
 const localIso = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` +
-  `T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:00`;
+  `T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 
 async function setSetting(key, value) {
   db.prepare(
