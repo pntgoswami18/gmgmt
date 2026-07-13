@@ -4,7 +4,7 @@
 
 **Note on naming:** `phase2-plan.md` / `phase3-plan.md` / `phase4-plan.md` in this same `docs/` directory are an **unrelated** initiative (code-quality/logging/test-coverage remediation). This feature's phases (P0–P5) are sections *inside* `face-checkin-plan.md`, not separate files. Don't confuse the two "Phase 4"s.
 
-Last updated: 2026-07-13 (§3.9 revised — gmgmt#27 + kiosk client#13 recompute the match server-side, but multi-agent review found this only defends against a buggy honest kiosk, not a malicious device-secret holder, who can still impersonate via `/face/sync` + embedding replay).
+Last updated: 2026-07-13 (full audit pass: gmgmt#26/#27, client#12/#13 confirmed merged; two new PRs open — gmgmt#28 + client#14, a re-entry-within-dwell-window fix; a new planned-but-unbuilt gap identified, §3.11 admin-UI entry point; all test suites re-run clean).
 
 ---
 
@@ -21,30 +21,35 @@ Last updated: 2026-07-13 (§3.9 revised — gmgmt#27 + kiosk client#13 recompute
 | P4 | client | Kiosk UI — `/checkin` route, matching/liveness/cache modules, `useFaceCheckin` hook | ✅ Merged ([client#11](https://github.com/pntgoswami18/client/pull/11), commit `b83312f`) |
 | — | gmgmt | Bump `client` submodule pointer to new client `main` | ✅ Merged ([gmgmt#23](https://github.com/pntgoswami18/gmgmt/pull/23), commit `af6283d`) |
 | — | gmgmt | Add missing `.gitmodules` + check-in trust-model doc note | ✅ Merged ([gmgmt#24](https://github.com/pntgoswami18/gmgmt/pull/24), commit `3803945`) |
-| — | client | Staff-facing Settings UI for face config | 🟡 PR open — [client#12](https://github.com/pntgoswami18/client/pull/12) |
-| — | gmgmt | Dev fix: `.claude/launch.json` backend Node version | 🟡 PR open — [gmgmt#26](https://github.com/pntgoswami18/gmgmt/pull/26) |
+| — | client | Staff-facing Settings UI for face config | ✅ Merged ([client#12](https://github.com/pntgoswami18/client/pull/12), commit `69c35b2`) |
+| — | gmgmt | Dev fix: stop tracking `.claude/launch.json` (machine-specific paths) | ✅ Merged ([gmgmt#26](https://github.com/pntgoswami18/gmgmt/pull/26), commit `795b37e`) — shipped differently than first drafted, see §5 |
+| — | gmgmt | **Security: recompute face match server-side** (closes part of §3.9's trust gap) | ✅ Merged ([gmgmt#27](https://github.com/pntgoswami18/gmgmt/pull/27), commit `445098d`) |
+| — | client | Companion: kiosk sends probe embedding for server re-scoring | ✅ Merged ([client#13](https://github.com/pntgoswami18/client/pull/13), commit `0f088e4`) |
+| — | gmgmt | Fix: re-entry within checkout dwell window unlocks door, doesn't double-log | 🟡 PR open — [gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28) |
+| — | client | Fix: inverted liveness turn direction, generic denial messages, re-entry UI, face-tracking overlay | 🟡 PR open — [client#14](https://github.com/pntgoswami18/client/pull/14) |
+| — | client+gmgmt | **New gap found: admin-UI entry point to the kiosk** (plan §3.6, see §3.11) | ⬜ **Planned only — zero code.** No "Launch kiosk" button, no `deviceSecretConfigured` field |
 | — | ops | Run `deploy-models.sh` on the actual deployment target | ⬜ Not started |
 | — | ops | Set `DEVICE_SHARED_SECRET` env var + provision kiosk browser | ⬜ Not started |
 | — | ops | Register/pair the ESP32 door device, set `face_door_device_id` | ⬜ Not started (hardware-dependent) |
 | — | human | Real-camera walk-up test (enroll → kiosk scan → unlock) | ⬜ Not started |
-| — | docs | Rollout doc: name the tailgating limitation explicitly | ⬜ Not started |
+| — | docs | Rollout doc: name the tailgating + device-secret-replay + liveness-temporal-binding limitations explicitly | ⬜ Not started |
 
-**Bottom line:** all backend, pure-logic, kiosk-UI, and Settings-UI code for face check-in is written, unit-tested, and either merged or in open PRs pending review. **No feature code is left to write.** Everything remaining is deployment/config/ops work: run the model deploy script, set the device secret, register hardware, and do a real walk-up test.
+**Bottom line:** the backend, pure-logic, kiosk-UI, Settings-UI, server-side match recompute, and re-entry-fix code are all written and unit-tested; everything above except the admin-UI entry point (§3.11) is merged or in open PRs awaiting a review click, not awaiting more code. §3.11 is the one place where more frontend+backend work is still genuinely unwritten. Everything else remaining is deployment/config/ops work: run the model deploy script, set the device secret, register hardware, and do a real walk-up test.
 
 ---
 
 ## 2. Repo/branch/PR map
 
-**gmgmt** (backend + docs), `main` tip: `3803945`
-- `f80bd90` P1 (#17) → `3340ad3` P2 (#18) → `21e1639` P3 model-deploy (#21) → `fcd6b36` P3 verify (#22) → `af6283d` submodule bump (#23) → `3803945` `.gitmodules` + trust-model doc (#24)
-- **Open:** [gmgmt#26](https://github.com/pntgoswami18/gmgmt/pull/26) `fix-backend-launch-node-version` → `main` — dev-only fix, `.claude/launch.json`'s backend config now points at the Node 22 binary instead of plain `node` (which resolves to Node 18 in this environment and fails `better-sqlite3`'s native binding).
+**gmgmt** (backend + docs), `main` tip: `445098d`
+- `f80bd90` P1 (#17) → `3340ad3` P2 (#18) → `21e1639` P3 model-deploy (#21) → `fcd6b36` P3 verify (#22) → `af6283d` submodule bump (#23) → `3803945` `.gitmodules` + trust-model doc (#24) → `a698156` handoff doc update (#25) → `795b37e` untrack `.claude/launch.json` (#26) → `445098d` server-side match recompute (#27)
+- **Open:** [gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28) `face-checkin-kiosk-fixes` → `main` — re-entry-within-dwell-window fix (79/79 backend tests as of the PR; a concurrent session was still adding clarifying comments + tests to this same branch as of this audit, uncommitted, not yet pushed — don't assume the PR diff is final).
 
-**client** (frontend, git submodule `github.com/pntgoswami18/client.git`), `main` tip: `b83312f`
+**client** (frontend, git submodule `github.com/pntgoswami18/client.git`), `main` tip: `0f088e4`
 - `5a421f1` P3 enrollment (#10, **squash-merged** — old commit SHAs `19b653b`/`b794545` are *not* ancestors of `main`, see §5 gotcha)
-- `b83312f` P4 kiosk (#11, squash-merged) — CheckIn.js, useFaceCheckin.js, faceStation.js, faceMatching.js, faceLiveness.js, faceCacheDb.js + tests
-- **Open:** [client#12](https://github.com/pntgoswami18/client/pull/12) `face-checkin-settings-ui` → `main` — the §3.3 Settings UI panel, live-verified against a running backend.
+- `b83312f` P4 kiosk (#11, squash-merged) → `69c35b2` Settings UI (#12) → `0f088e4` probe-embedding companion to gmgmt#27 (#13)
+- **Open:** [client#14](https://github.com/pntgoswami18/client/pull/14) `face-checkin-kiosk-fixes` → `main` — inverted liveness turn-direction fix, denial-message re-keying, re-entry UI, plus a new face-tracking overlay (`faceOverlayGeometry.js` pure math + `faceOverlayDraw.js` canvas rendering, wired into `useFaceCheckin`'s existing rAF loop).
 
-**gmgmt's submodule pointer** for `client` is `b83312f` — up to date through P4. Will need bumping again once client#12 merges. `.gitmodules` (previously missing — a fresh clone couldn't resolve the submodule URL) is now committed via #24.
+**gmgmt's submodule pointer** for `client` is `b83312f` (P3+P4 only — predates client#12/#13). Needs bumping once gmgmt#28/client#14 merge, to pick up everything through client#13 at minimum. `.gitmodules` (previously missing — a fresh clone couldn't resolve the submodule URL) is committed via #24.
 
 ---
 
@@ -56,10 +61,12 @@ Merged 2026-07-13 as `b83312f`.
 ### 3.2 ~~Merge gmgmt#23 (submodule bump)~~ — done
 Merged 2026-07-13 as `af6283d`. `.gitmodules` fix + trust-model doc note also merged separately as gmgmt#24 (`3803945`) — see §3.9.
 
-### 3.3 ~~Staff-facing Settings UI~~ — built, PR open
-[client#12](https://github.com/pntgoswami18/client/pull/12) adds a "Face Check-In" section to `Settings.js`'s General tab: enable toggle, match threshold (number input, not a slider — kept consistent with the rest of the file's existing input patterns), liveness mode select (native `<select>` via the same `TextField select SelectProps={{native:true}}` pattern already used for currency/color-mode, not MUI `Select` — avoids a new import), door device ID (plain text field — `GET /api/biometric/devices` turned out to be unreliable for a dropdown: it 503s when `ENABLE_BIOMETRIC=false` and only lists devices seen in the last 24h, so free text with a helper note was more robust), checkout dwell minutes, and a read-only pinned-model-version display. `PUT /api/settings` needed no changes — it already accepts arbitrary keys via `INSERT OR REPLACE`, no allowlist.
+### 3.3 ~~Staff-facing Settings UI~~ — done
+[client#12](https://github.com/pntgoswami18/client/pull/12), merged as `69c35b2`. Adds a "Face Check-In" section to `Settings.js`'s General tab: enable toggle, match threshold (number input, not a slider — kept consistent with the rest of the file's existing input patterns), liveness mode select (native `<select>` via the same `TextField select SelectProps={{native:true}}` pattern already used for currency/color-mode, not MUI `Select` — avoids a new import), door device ID (plain text field — `GET /api/biometric/devices` turned out to be unreliable for a dropdown: it 503s when `ENABLE_BIOMETRIC=false` and only lists devices seen in the last 24h, so free text with a helper note was more robust), checkout dwell minutes, and a read-only pinned-model-version display. `PUT /api/settings` needed no changes — it already accepts arbitrary keys via `INSERT OR REPLACE`, no allowlist.
 
 Live-verified end to end against a running local backend: panel loads correct defaults from `GET /api/settings`, editing fields fires the existing "unsaved changes" dirty-tracking, Save round-trips through `PUT /api/settings`, and a fresh reload confirms persistence. See §5 for two automation gotchas hit during that verification (MUI Checkbox event handling, and a screenshot/CSS-pixel coordinate mismatch) — not relevant to the shipped code, just to future browser-automation debugging.
+
+**Known limitation carried into §3.11:** this panel only mentions `/checkin` in caption text — there's no button that takes staff there. See §3.11.
 
 ### 3.4 Deploy models to the target environment
 `tools/face-model/deploy-models.sh` (merged in #21) copies the fp32 embedder + pinned `face_landmarker.task` + WASM runtimes into `public/models/` and writes `manifest.json`. **`public/models/` is gitignored** — this must be *run*, not just merged, on every environment that needs to serve the kiosk (dev, staging, prod). Confirm it's been run wherever `/checkin` will actually be tested/used; `GET /api/biometric/face/model-manifest` 404s otherwise (see `getModelManifest` in `faceBiometricController.js`).
@@ -90,17 +97,37 @@ Caveats that remain and still belong in the rollout doc (§3.8):
 - **The re-scored probe is not temporally bound to the liveness-proven frame.** In `useFaceCheckin.js`, the probe embedding is captured when the K-consecutive-frame `MatchAccumulator` first accepts an identity (in `tick()`, during the `idle` phase) and stashed in `pendingRef`. The liveness challenge (blink/head-turn) then runs against *subsequent* frames, and on success `verify(pendingRef.current, true)` submits that original, pre-challenge probe — not a frame captured during or after the liveness proof. So the embedding the server re-scores and the frames that proved liveness come from two disjoint moments with nothing binding them together; an honest kiosk's liveness proof doesn't guarantee it's the same live subject the embedding was drawn from.
 - **Tailgating** (a second person entering behind an authorized scan) is unaddressed — see the §3.8 note above.
 
+### 3.10 Re-entry within checkout dwell window — PRs open, not yet merged
+Found during manual testing: a member who checked in, stepped back out briefly (e.g. a phone call at the entrance), and re-scanned **before** `face_checkout_min_dwell_minutes` elapsed was denied (`dwell_time_not_met`) and the door stayed locked — a real usability bug, not just an edge case.
+
+- **[gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28)**: an early re-scan on an already-open attendance row is now treated as a **re-entry** — `checkInService.processCheckIn` returns `authorized: true, action: 'reentry'` (door unlocks via the normal authorized→unlock path) without checking the member out or inserting a duplicate attendance row, and returns `minutesUntilCheckout` so the kiosk can tell the member when checkout actually unlocks. Re-entry deliberately applies **only** the `member.is_active` gate — not the full session-window/plan-validity gates a fresh check-in enforces — because the member is already inside an active visit; re-validating them out of it near a session boundary would strand someone legitimately present. 79/79 backend tests as of the PR description; **a concurrent session was still adding clarifying comments to this exact rationale plus more tests on the same branch, uncommitted, as of this audit** — check `git log` on `face-checkin-kiosk-fixes` for the latest before assuming the PR is final.
+- **[client#14](https://github.com/pntgoswami18/client/pull/14)**: the matching frontend half, plus two independent bug fixes found in the same testing pass:
+  1. **Liveness turn direction was inverted.** The kiosk shows a mirrored selfie view, but `faceAlign`'s yaw ratio is image-space (`ratio > 0` = nose toward image-right, which happens when the subject turns their own **left**). The `turn_left`/`turn_right` challenge checks had the comparison backwards, so a "turn left" prompt was only satisfied by physically turning right. This is a real bug worth flagging distinctly from the dwell-window fix — it would have made the liveness challenge confusing-to-unusable for every real user, not an edge case.
+  2. **Denial messages were mostly generic.** `DENY_MESSAGES` was keyed on strings the backend never actually returns (`session_window`, `inactive_plan`); re-keyed to the real reason strings (`outside_session_windows`, `member_inactive`, `cross_session_violation`, …) so denials are now specific and actionable instead of a generic "Something went wrong" for almost everything.
+  3. **New face-tracking overlay** — a reticle + directional arrows drawn on a canvas over the video feed (`faceOverlayGeometry.js` for pure cover-mapping/anchoring math, tested; `faceOverlayDraw.js` for the actual canvas strokes, validated live per its own header comment since drawing code isn't meaningfully unit-testable). Wired into `useFaceCheckin`'s existing per-frame loop — no second rAF loop.
+
+### 3.11 Admin-UI entry point to the kiosk — planned (plan doc §3.6), zero code written
+A plan-only commit (`docs/face-checkin-plan.md` §3.6, no code) identifies a real gap: **there is currently no path from the admin UI to `/checkin` at all.** Staff have to know and hand-type the URL. Confirmed via grep against the current tree — neither piece below exists in code yet:
+
+- **A "Launch check-in kiosk" button**, decided location: inside the Settings → Face Check-In section (`Settings.js`, next to the enable toggle and Door Device ID — colocated with the feature flag and the config it depends on). Must open `/checkin` in a **new tab** (`window.open` or `<a target="_blank">`), never an in-tab drawer `Link` — the kiosk is deliberately chrome-less (no AppBar/drawer/logout) so an in-tab navigation would strand the staff member fullscreen with no visible way back. Secondary button recommended on the Biometric tab too.
+- **A `deviceSecretConfigured` boolean** added to the existing `GET /api/biometric/face/config` response (`!!process.env.DEVICE_SHARED_SECRET` — never the value itself; no new endpoint needed, since staff sessions already reach this endpoint via `FACE_BOOTSTRAP_PATHS`). Lets the Settings panel pre-flight-warn *before* launch ("server device secret not set") instead of the operator discovering a 503 only after walking to the kiosk.
+- Explicitly **rejected**: piping `DEVICE_SHARED_SECRET` itself through the admin session to pre-fill `StationSetup` — would put the secret into a staff-session HTTP response, browser history, and devtools, directly weakening the fail-closed posture the rest of this feature protects. The hand-typed-secret-into-`StationSetup` flow stays as-is; only a non-secret readiness signal is added.
+- Also specified: `/checkin` opened from an authenticated admin tab shares the staff session cookie, so the bootstrap `/face/config` call succeeds via that session even before a device secret is entered (correctly renders `disabled`/`no_door`) — but `/face/sync` and `/face/check-in` still accept **only** the device secret, so actual scanning still requires completing `StationSetup`. This is intentional, not a bug to fix.
+
+This is genuinely unbuilt — worth prioritizing before rollout, since without it the kiosk is only reachable by staff who already know to type `/checkin` manually.
+
 ---
 
 ## 4. Key files (orientation for a fresh session)
 
-**Backend (gmgmt, all merged):**
-- `src/services/checkInService.js` — `processCheckIn()`, the shared authorization core (asymmetric check-in/checkout rules)
+**Backend (gmgmt):**
+- `src/services/checkInService.js` — `processCheckIn()`, the shared authorization core (asymmetric check-in/checkout rules). As of gmgmt#28 (open), also owns the re-entry-within-dwell-window branch (`action: 'reentry'`), gated only by `member.is_active` — see §3.10 for why it's narrower than a fresh check-in's gates.
 - `src/api/controllers/faceBiometricController.js` — all `/face/*` and face-enroll endpoints. `faceCheckIn` recomputes the cosine match server-side from the client's probe `embedding` (via `src/utils/faceMatch.js`); the client `matchScore` is advisory and `livenessPassed` is still a client-asserted gate (see §3.9)
 - `src/utils/faceMatch.js` — pure server-side cosine match / probe validation, the authoritative re-scoring the door unlock hangs on (mirror of the kiosk's `faceMatching.js`)
 - `src/config/sqlite.js:287-292` — face settings defaults
 - `src/app.js:110-163` — auth routing: `FACE_STATION_PATHS` (device-secret-only, fail-closed), `FACE_BOOTSTRAP_PATHS` (device-secret OR staff session)
 - `tools/face-model/` — P1 conversion/eval scripts + `deploy-models.sh`
+- `tools/simulate-esp32-door.js` — local dev-only ESP32 door simulator (heartbeat self-registration + serves the unlock-command HTTP endpoint on port 80, needs `sudo`), used to manually verify gmgmt#28's re-entry unlock live. Untracked as of this audit; being added to the repo separately.
 
 **Frontend (client):**
 - `src/utils/faceEngine.js` — LiteRT.js + MediaPipe wrapper, shared by enrollment and kiosk
@@ -109,12 +136,14 @@ Caveats that remain and still belong in the rollout doc (§3.8):
 - `src/utils/faceMatching.js` — cosine similarity, `MatchAccumulator` (K-consecutive-frame gate)
 - `src/utils/faceLiveness.js` — `LivenessChallenge` (blink/head-turn state machine)
 - `src/utils/faceCacheDb.js` — IndexedDB gallery cache, delta-merge core
-- `src/utils/faceStation.js` — device-secret station config + fail-closed status derivation
-- `src/hooks/useFaceCheckin.js` — orchestrates the above into the walk-up loop
+- `src/utils/faceStation.js` — device-secret station config, fail-closed status derivation, and `submitCheckIn` (now sends the probe `embedding` — client#13)
+- `src/utils/faceOverlayGeometry.js` / `faceOverlayDraw.js` — pure cover-mapping/anchoring math (tested) + canvas rendering (live-validated only) for the kiosk's face-tracking reticle/arrow overlay (client#14, open)
+- `src/hooks/useFaceCheckin.js` — orchestrates the above into the walk-up loop; also where the probe-vs-liveness temporal-binding gap (§3.9) lives
 - `src/components/CheckIn.js` — fullscreen `/checkin` UI (all phase screens)
+- `src/components/Settings.js` — Face Check-In settings section (client#12); no launch-kiosk affordance yet (§3.11)
 - `src/App.js` — `/checkin` route branch, before the auth/drawer layout
 
-**Test files:** every `.js` in the list above except `CheckIn.js`/`useFaceCheckin.js`/`FaceEnrollment.js` has a co-located `.test.js`. 63 util tests pass as of #11.
+**Test files:** every pure-logic `.js` in the list above has a co-located `.test.js` (component/hook files — `CheckIn.js`, `useFaceCheckin.js`, `FaceEnrollment.js`, `Settings.js`, `faceOverlayDraw.js` — do not, by design or because they're view-only). See §6 for current pass counts.
 
 ---
 
@@ -126,12 +155,24 @@ Caveats that remain and still belong in the rollout doc (§3.8):
 - **`FACE_STATION_PATHS` (`/face/sync`, `/face/check-in`) fail closed with 503 if `DEVICE_SHARED_SECRET` is unset** — this is intentional (see `app.js` comment), not a deployment bug. `FACE_BOOTSTRAP_PATHS` (`/face/config`, `/face/model-manifest`) is more permissive by design — it accepts either the device secret or a staff session, so the admin enrollment UI and the kiosk can both call it.
 - **`data/data/gmgmt.sqlite` shows as locally modified** in the gmgmt working tree on most branches — pre-existing local runtime state (DB file grew from local testing) unrelated to the face-checkin work; don't commit it accidentally with a broad `git add -A`.
 - **This repo's working directory can be shared by more than one concurrent session.** During this work, a parallel session committed unrelated `.gitmodules`/trust-model-doc work (gmgmt#24) on a new branch and, via a broad `git add`, incidentally scooped up this handoff file mid-edit — it landed in that PR as a stale snapshot, requiring a manual reconcile (`git pull` after backing up the local copy, then re-applying edits to the now-tracked file) to avoid losing either version. Run `git status` before any branch switch, and don't assume you're the only writer in this directory.
-- **`better-sqlite3`'s native binding is Node-version-specific.** The plain `node` in `.claude/launch.json`'s backend config resolves to whatever the shell's default is (Node 18 in this environment), which throws a `NODE_MODULE_VERSION` ABI mismatch on startup. Fixed in gmgmt#26 by pinning to the Node 22 binary directly; if the binary was previously built against a different Node version, `npm rebuild better-sqlite3` under the target Node first.
+- **`better-sqlite3`'s native binding is Node-version-specific.** The plain `node` in `.claude/launch.json`'s backend config resolves to whatever the shell's default is (Node 18 in this environment), which throws a `NODE_MODULE_VERSION` ABI mismatch on startup. See the gmgmt#26 entry below for the actual fix (local-only, not committed) and why an earlier committed-path attempt was rejected; if the binary was previously built against a different Node version, `npm rebuild better-sqlite3` under the target Node first.
 - **Browser-automation gotchas hit while verifying the Settings panel (client#12), for future live-verification sessions:** (1) MUI `Checkbox` sometimes needs a real coordinate-based click rather than the `form_input` tool's boolean-value path to reliably fire React's `onChange` — verify state changes via a direct DOM/JS check (`input.checked`) rather than trusting a screenshot. (2) On this environment the Browser pane's screenshot pixel coordinates and `getBoundingClientRect()`'s CSS-pixel coordinates did **not** match 1:1 (a `devicePixelRatio: 2` page) — a raw `computer` click at screenshot-derived coordinates missed its target by roughly 2x. Prefer `ref`-based clicks (resolved internally by the tool) or coordinates read from `getBoundingClientRect()` over eyeballing a screenshot.
+- **This project runs many concurrent sessions in parallel git worktrees as a matter of course** (`git worktree list` typically shows half a dozen at once under `.claude/worktrees/`), not just as an occasional collision. Treat any shared working directory (i.e., not your own worktree) as actively co-owned: `git status`/`git diff` before touching tracked files that aren't yours, and if you find unstaged modifications you didn't make, leave them alone and do your own work in a fresh worktree off `origin/main` rather than branching from a dirty HEAD. This audit found exactly that: uncommitted edits to `checkInService.js` and two test files, mid-flight from another session, sitting on the same branch (`face-checkin-kiosk-fixes`) this session was also using.
+- **gmgmt#26 shipped differently than first drafted.** An earlier attempt fixed the Node-18-vs-`better-sqlite3` launch failure by committing an absolute path to a specific machine's Node 22 binary in `.claude/launch.json`. That was correctly rejected in favor of **gitignoring the file entirely** — a machine-specific `runtimeExecutable` path doesn't belong in version control regardless of which machine wrote it. If `preview_start` fails on `better-sqlite3`'s `NODE_MODULE_VERSION`, the fix is local: point your own `.claude/launch.json` at your own Node ≥ 20 binary (or `npm rebuild better-sqlite3` under it), not a commit.
+- **gmgmt#27's PR description overstated what the server-side match recompute actually defends against** — multi-agent review caught that `/face/sync` hands out raw embeddings to anyone holding the device secret, so the "recompute" adds no friction against a malicious secret-holder, only against an honest-but-buggy kiosk. See §3.9's full writeup. Worth remembering when reading *any* PR description in this feature area: verify security claims against the actual auth boundary (here, `X-Device-Secret`), not just against what a diff appears to fix.
 
 ---
 
 ## 6. Test commands (copy-paste for a fresh session)
+
+Last run during this audit (2026-07-13, Node 22):
+
+| Suite | Command | Result |
+|---|---|---|
+| gmgmt backend unit tests | `node --test 'src/services/__tests__/*.test.js'` | **89/89 pass** |
+| gmgmt ESP32 integration tests | `JWT_SECRET=x ENABLE_BIOMETRIC=true BIOMETRIC_PORT=5005 PORT=3001 node src/app.js &` then `npm run esp32:test` | **5/5 pass** |
+| client face-checkin utils | see command below | **83/83 pass** |
+| client full suite | `CI=true npx react-scripts test --watchAll=false` | 88/93 pass — 2 failing suites (`App.test.js`, `SearchableMemberDropdown.test.js`) are **pre-existing and unrelated to face check-in**; confirmed via `git log` showing neither file touched since the original CRA scaffold / PR #2 |
 
 ```bash
 # gmgmt backend (from repo root; needs Node >= 20)
@@ -139,6 +180,6 @@ node --test 'src/services/__tests__/*.test.js'
 npm run esp32:test   # needs server running with ENABLE_BIOMETRIC=true
 
 # client frontend (from client/)
-CI=true npx react-scripts test --testPathPattern="utils/(faceStation|faceMatching|faceLiveness|faceCacheDb|faceAlign)" --watchAll=false
+CI=true npx react-scripts test --testPathPattern="utils/(faceStation|faceMatching|faceLiveness|faceCacheDb|faceAlign|faceOverlay)" --watchAll=false
 npx react-scripts build   # full compile/lint check
 ```
