@@ -1,4 +1,5 @@
 const test = require('node:test');
+const { mock } = require('node:test');
 const assert = require('node:assert/strict');
 const { setup, teardown } = require('./testDb');
 const settingsCache = require('../settingsCache');
@@ -188,21 +189,64 @@ test('cross-session check-in blocked when restriction enabled', async () => {
   await setSetting('cross_session_checkin_restriction', 'true');
 
   const memberId = insertMember({ name: 'CrossSession' });
+  const today = todayStr();
   // Completed morning session (checked out) inside the morning window.
   insertAttendance(memberId, null, {
     checkedOut: true,
-    rawCheckInTime: `${todayStr()}T09:00:00`,
+    rawCheckInTime: `${today}T09:00:00`,
   });
 
-  const result = await checkInService.processCheckIn(memberId, {
-    modality: 'face',
-    timestamp: `${todayStr()}T18:00:00`, // evening scan
-    eventContext: { biometricRef: 'face' },
-  });
-  assert.equal(result.authorized, false);
-  assert.equal(result.reason, 'cross_session_violation');
+  // currentSession is derived from the server's wall clock, not the
+  // device-reported timestamp (clock-trust fix in checkInService.js), so the
+  // server clock — not just the `timestamp` option below — must be placed in
+  // the evening window for this scan to land there.
+  mock.timers.enable({ apis: ['Date'], now: new Date(`${today}T18:00:00`) });
+  try {
+    const result = await checkInService.processCheckIn(memberId, {
+      modality: 'face',
+      timestamp: `${today}T18:00:00`, // evening scan (device-reported time, stored verbatim)
+      eventContext: { biometricRef: 'face' },
+    });
+    assert.equal(result.authorized, false);
+    assert.equal(result.reason, 'cross_session_violation');
+  } finally {
+    mock.timers.reset();
+  }
 
   await openSessionWindowNow();
+});
+
+test('session-window decision ignores a skewed device clock: a fingerprint unit reporting a timestamp outside the real session window must not force an incorrect denial', async () => {
+  // Real server clock is inside the (real-time-relative) session window...
+  await openSessionWindowNow();
+
+  // ...but this simulates a device whose onboard clock is wrong and reports
+  // a timestamp far outside any configured session window. Pre-fix,
+  // currentSession was computed from this device-reported `now`, so a wrong
+  // device clock could wrongly deny a check-in that is happening right now,
+  // during an open session window, on the server's own clock.
+  // awayWindow keeps this offset (3-4 hours from real "now") on whichever
+  // side of midnight fits in-day, same MIDNIGHT SAFETY concern as the window
+  // helpers above.
+  const [skewedMinute] = awayWindow(nowMinutes(), 180, 240);
+  const skewedDeviceTimestamp = `${todayStr()}T${hhmm(skewedMinute)}:00`;
+
+  const memberId = insertMember({ name: 'SkewedSessionDevice' });
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    timestamp: skewedDeviceTimestamp,
+    eventContext: { biometricRef: 'fingerprint' },
+  });
+
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'checkin');
+  assert.equal(result.reason, 'checked_in');
+
+  // The device-reported time is still stored verbatim for the attendance
+  // record itself — only the session-window *decision* uses the server clock.
+  const row = db.prepare('SELECT check_in_time FROM attendance WHERE member_id = ?').get(memberId);
+  assert.equal(row.check_in_time, skewedDeviceTimestamp);
 });
 
 test('plan grace expiry denies face check-in and auto-deactivates member', async () => {
