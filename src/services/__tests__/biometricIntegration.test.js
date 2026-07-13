@@ -44,17 +44,16 @@ test('startRemoteEnrollment rolls back mode when ESP32 command fails', async () 
 
 const { setup, teardown } = require('./testDb');
 const settingsCache = require('../settingsCache');
+const { hhmm, nowMinutes, awayWindow } = require('./sessionWindowTestUtils');
 
 test('logMemberAttendance dispatches the right WebSocket notification per outcome', async () => {
   const db = await setup();
   try {
     // Open the morning session window around "now" so check-in/checkout pass.
-    const m = new Date();
-    const mins = m.getHours() * 60 + m.getMinutes();
-    const hhmm = (v) => {
-      const w = ((v % 1440) + 1440) % 1440;
-      return `${String(Math.floor(w / 60)).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`;
-    };
+    // sessionOf() cannot represent windows that cross midnight, so
+    // hhmm/awayWindow (see sessionWindowTestUtils) keep the window in-day —
+    // otherwise this test would be flaky right around midnight.
+    const mins = nowMinutes();
     const set = (k, v) =>
       db
         .prepare(
@@ -63,8 +62,9 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
         .run(k, String(v));
     set('morning_session_start', hhmm(mins - 60));
     set('morning_session_end', hhmm(mins + 60));
-    set('evening_session_start', hhmm(mins + 120));
-    set('evening_session_end', hhmm(mins + 180));
+    const [evS, evE] = awayWindow(mins, 240, 300);
+    set('evening_session_start', hhmm(evS));
+    set('evening_session_end', hhmm(evE));
     await settingsCache.refresh();
 
     const memberId = db
@@ -79,13 +79,22 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
     integration.notifyAlreadyCompleted = (mem) => calls.push(['already_completed', mem.id]);
 
     // 1st scan → check-in broadcast.
-    const first = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    const first = await integration.logMemberAttendance(member, null, {
+      userId: '9',
+      deviceId: 'd',
+    });
     assert.equal(first.reason, 'checked_in');
     // 2nd scan → checkout broadcast (no dwell requirement on fingerprint).
-    const second = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    const second = await integration.logMemberAttendance(member, null, {
+      userId: '9',
+      deviceId: 'd',
+    });
     assert.equal(second.reason, 'checked_out');
     // 3rd scan (session complete) → already_completed broadcast.
-    const third = await integration.logMemberAttendance(member, null, { userId: '9', deviceId: 'd' });
+    const third = await integration.logMemberAttendance(member, null, {
+      userId: '9',
+      deviceId: 'd',
+    });
     assert.equal(third.reason, 'already_completed');
 
     assert.deepEqual(calls, [

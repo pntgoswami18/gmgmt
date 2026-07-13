@@ -2,21 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { setup, teardown } = require('./testDb');
 const settingsCache = require('../settingsCache');
+const { hhmm, nowMinutes, awayWindow } = require('./sessionWindowTestUtils');
 
 let db;
 let checkInService;
-
-// Session windows are wall-clock based; tests pin them relative to "now" so
-// they are deterministic at any time of day.
-const wrap = (mins) => ((mins % 1440) + 1440) % 1440;
-const hhmm = (mins) => {
-  const m = wrap(mins);
-  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-};
-const nowMinutes = () => {
-  const d = new Date();
-  return d.getHours() * 60 + d.getMinutes();
-};
 
 // The service derives its "today" from the LOCAL calendar date — attendance
 // days and session windows are both local concepts. (The UTC-derived date the
@@ -41,12 +30,31 @@ async function setSetting(key, value) {
 }
 
 // Puts "now" inside the morning window and keeps the evening window far away.
+//
+// MIDNIGHT SAFETY: sessionOf() uses non-wrapping start<=t<=end comparisons, so
+// helper windows must never cross midnight — naive `hhmm(m - 60)` at 00:20
+// produces a 23:20–01:20 "window" that matches nothing and every session-gated
+// test fails between roughly 21:00 and 03:00 wall-clock. clamp/awayWindow (see
+// sessionWindowTestUtils) keep every derived minute inside a single day.
 async function openSessionWindowNow() {
   const m = nowMinutes();
   await setSetting('morning_session_start', hhmm(m - 60));
   await setSetting('morning_session_end', hhmm(m + 60));
-  await setSetting('evening_session_start', hhmm(m + 120));
-  await setSetting('evening_session_end', hhmm(m + 180));
+  // "Evening" only needs to exist somewhere that does NOT contain now.
+  const [evStart, evEnd] = awayWindow(m, 240, 300);
+  await setSetting('evening_session_start', hhmm(evStart));
+  await setSetting('evening_session_end', hhmm(evEnd));
+}
+
+// Closes both windows: places them on whichever side of "now" fits in-day.
+async function closeAllSessionWindowsNow() {
+  const m = nowMinutes();
+  const [aStart, aEnd] = awayWindow(m, 120, 180);
+  const [bStart, bEnd] = awayWindow(m, 240, 300);
+  await setSetting('morning_session_start', hhmm(aStart));
+  await setSetting('morning_session_end', hhmm(aEnd));
+  await setSetting('evening_session_start', hhmm(bStart));
+  await setSetting('evening_session_end', hhmm(bEnd));
 }
 
 function insertMember({ name = 'Test', isActive = 1, isAdmin = 0, planId = null, joinDate }) {
@@ -151,12 +159,7 @@ test('face check-in: inactive member denied; fingerprint mode still records (his
 });
 
 test('check-in outside session windows denied for non-admin, allowed for admin', async () => {
-  const m = nowMinutes();
-  // Close both windows (place them away from now)
-  await setSetting('morning_session_start', hhmm(m + 120));
-  await setSetting('morning_session_end', hhmm(m + 180));
-  await setSetting('evening_session_start', hhmm(m + 240));
-  await setSetting('evening_session_end', hhmm(m + 300));
+  await closeAllSessionWindowsNow();
 
   const memberId = insertMember({ name: 'OutsideWindow' });
   const denied = await checkInService.processCheckIn(memberId, {
@@ -175,22 +178,25 @@ test('check-in outside session windows denied for non-admin, allowed for admin',
 });
 
 test('cross-session check-in blocked when restriction enabled', async () => {
-  const m = nowMinutes();
-  // Now sits in the EVENING window; morning window is earlier today.
-  await setSetting('morning_session_start', hhmm(m - 300));
-  await setSetting('morning_session_end', hhmm(m - 240));
-  await setSetting('evening_session_start', hhmm(m - 30));
-  await setSetting('evening_session_end', hhmm(m + 60));
+  // Fully synthetic clock: fixed windows + explicit device timestamps, so the
+  // "checked in earlier today" scenario exists at any wall-clock time (it
+  // physically can't right after midnight).
+  await setSetting('morning_session_start', '08:00');
+  await setSetting('morning_session_end', '11:00');
+  await setSetting('evening_session_start', '17:00');
+  await setSetting('evening_session_end', '19:00');
   await setSetting('cross_session_checkin_restriction', 'true');
 
   const memberId = insertMember({ name: 'CrossSession' });
-  // Completed morning session (checked out) at a time inside the morning window.
-  const morning = new Date();
-  morning.setMinutes(morning.getMinutes() - 270);
-  insertAttendance(memberId, morning, { checkedOut: true });
+  // Completed morning session (checked out) inside the morning window.
+  insertAttendance(memberId, null, {
+    checkedOut: true,
+    rawCheckInTime: `${todayStr()}T09:00:00`,
+  });
 
   const result = await checkInService.processCheckIn(memberId, {
     modality: 'face',
+    timestamp: `${todayStr()}T18:00:00`, // evening scan
     eventContext: { biometricRef: 'face' },
   });
   assert.equal(result.authorized, false);
@@ -231,11 +237,7 @@ test('checkout: authorized even with expired plan, and not gated by session wind
   insertAttendance(memberId, checkIn);
 
   // Close all session windows — checkout must still work for face.
-  const m = nowMinutes();
-  await setSetting('morning_session_start', hhmm(m + 120));
-  await setSetting('morning_session_end', hhmm(m + 180));
-  await setSetting('evening_session_start', hhmm(m + 240));
-  await setSetting('evening_session_end', hhmm(m + 300));
+  await closeAllSessionWindowsNow();
 
   const result = await checkInService.processCheckIn(memberId, {
     modality: 'face',
@@ -277,11 +279,7 @@ test('fingerprint checkout is blocked outside session windows (historical behavi
   checkIn.setMinutes(checkIn.getMinutes() - 60);
   insertAttendance(memberId, checkIn);
 
-  const m = nowMinutes();
-  await setSetting('morning_session_start', hhmm(m + 120));
-  await setSetting('morning_session_end', hhmm(m + 180));
-  await setSetting('evening_session_start', hhmm(m + 240));
-  await setSetting('evening_session_end', hhmm(m + 300));
+  await closeAllSessionWindowsNow();
 
   const result = await checkInService.processCheckIn(memberId, {
     modality: 'fingerprint',
@@ -347,19 +345,21 @@ test('open session + later-session scan => CHECKOUT (deliberate divergence from 
   // check out that day. Now an open row always means checkout; the
   // cross-session gate still applies to fresh check-ins.
   await setSetting('cross_session_checkin_restriction', 'true');
-  const m = nowMinutes();
-  // "Morning" long past, "evening" covers now.
-  await setSetting('morning_session_start', hhmm(m - 300));
-  await setSetting('morning_session_end', hhmm(m - 240));
-  await setSetting('evening_session_start', hhmm(m - 60));
-  await setSetting('evening_session_end', hhmm(m + 60));
+  // Synthetic clock (see cross-session test above): fixed windows + explicit
+  // timestamps, deterministic at any wall-clock time.
+  await setSetting('morning_session_start', '08:00');
+  await setSetting('morning_session_end', '11:00');
+  await setSetting('evening_session_start', '17:00');
+  await setSetting('evening_session_end', '19:00');
 
   const memberId = insertMember({ name: 'OpenMorningSession' });
-  const morningCheckIn = new Date();
-  morningCheckIn.setMinutes(morningCheckIn.getMinutes() - 270); // inside "morning"
-  insertAttendance(memberId, morningCheckIn);
+  // Open (never checked out) morning-session row.
+  insertAttendance(memberId, null, { rawCheckInTime: `${todayStr()}T09:00:00` });
 
-  const result = await checkInService.processCheckIn(memberId, { modality: 'face' });
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    timestamp: `${todayStr()}T18:00:00`, // evening scan
+  });
   assert.equal(result.authorized, true, JSON.stringify(result));
   assert.equal(result.action, 'checkout');
 
