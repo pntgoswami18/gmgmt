@@ -31,9 +31,19 @@ MEDIAPIPE_WASM_SRC="$REPO_ROOT/client/node_modules/@mediapipe/tasks-vision/wasm"
 
 log() { echo "[deploy-models] $*"; }
 
+# `shasum` on macOS, `sha256sum` on most Linux distros.
+if command -v sha256sum >/dev/null 2>&1; then
+  sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+elif command -v shasum >/dev/null 2>&1; then
+  sha_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
+else
+  echo "[deploy-models] error: neither sha256sum nor shasum found" >&2
+  exit 1
+fi
+
 verify_sha() { # file expected_sha
   local actual
-  actual="$(shasum -a 256 "$1" | awk '{print $1}')"
+  actual="$(sha_of "$1")"
   if [[ "$actual" != "$2" ]]; then
     echo "[deploy-models] CHECKSUM MISMATCH for $1" >&2
     echo "  expected: $2" >&2
@@ -78,7 +88,7 @@ cp -R "$LITERT_WASM_SRC" "$OUT/litert-wasm"
 cp -R "$MEDIAPIPE_WASM_SRC" "$OUT/mediapipe-wasm"
 log "wasm runtimes -> $OUT/{litert-wasm,mediapipe-wasm}"
 
-EMBEDDER_SHA="$(shasum -a 256 "$OUT/face_embedder_v1_fp32.tflite" | awk '{print $1}')"
+EMBEDDER_SHA="$(sha_of "$OUT/face_embedder_v1_fp32.tflite")"
 
 cat > "$OUT/manifest.json" <<EOF
 {
