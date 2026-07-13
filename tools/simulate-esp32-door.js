@@ -66,6 +66,7 @@ function sendHeartbeat() {
         'X-Device-Secret': SECRET,
         'User-Agent': 'SimulatedESP32DoorLock/1.0',
       },
+      timeout: 10000, // mirror the backend's sendHTTPCommandToDevice timeout
     },
     (res) => {
       let data = '';
@@ -86,6 +87,10 @@ function sendHeartbeat() {
   req.on('error', (e) =>
     log(`⚠️  heartbeat failed: ${e.message} (is the backend up at ${BACKEND}?)`)
   );
+  req.on('timeout', () => {
+    log(`⚠️  heartbeat timed out after 10s (backend accepted the connection but never replied)`);
+    req.destroy();
+  });
   req.write(body);
   req.end();
 }
@@ -98,7 +103,11 @@ function handleCommand(payload, res) {
 
   if (command === 'unlock_door' || command === 'access_granted') {
     relayLocked = false;
-    const durationMs = (payload.data && payload.data.duration) || 5000;
+    // Match the firmware's hold times when the backend doesn't specify one:
+    // access_granted holds for DOOR_UNLOCK_TIME (3s), unlock_door for
+    // EMERGENCY_UNLOCK_TIME (5s). See esp32_door_lock.ino.
+    const defaultMs = command === 'access_granted' ? 3000 : 5000;
+    const durationMs = (payload.data && payload.data.duration) || defaultMs;
     console.log('');
     log('🔓🔓🔓  DOOR UNLOCKED  🔓🔓🔓  (relay -> LOW)');
     console.log('');
@@ -125,6 +134,9 @@ function handleCommand(payload, res) {
 const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/command') {
     let raw = '';
+    // Without this, a client that resets mid-request emits 'error' on the
+    // request stream with no listener, which crashes the process.
+    req.on('error', (e) => log(`⚠️  command request stream error: ${e.message}`));
     req.on('data', (c) => (raw += c));
     req.on('end', () => {
       let payload = {};
@@ -152,11 +164,12 @@ server.on('error', (e) => {
   if (e.code === 'EACCES') {
     console.error(`\n❌ Cannot bind port ${LISTEN_PORT} — needs elevated privileges.`);
     console.error(
-      '   The backend hard-codes port 80 for the door command channel, so run with sudo:'
+      '   The backend hard-codes port 80 for the door command channel, so run with sudo.'
     );
-    console.error(
-      '     sudo DEVICE_SHARED_SECRET=' + SECRET + ' node tools/simulate-esp32-door.js\n'
-    );
+    console.error('   Export the device secret first so it survives sudo (and stays out of');
+    console.error('   your shell history / the process list), then use sudo -E:');
+    console.error('     export DEVICE_SHARED_SECRET=<your-secret>');
+    console.error('     sudo -E node tools/simulate-esp32-door.js\n');
   } else if (e.code === 'EADDRINUSE') {
     console.error(`\n❌ Port ${LISTEN_PORT} is already in use (another process is bound to it).\n`);
   } else {
