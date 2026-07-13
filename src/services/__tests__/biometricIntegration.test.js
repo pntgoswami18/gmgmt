@@ -44,21 +44,16 @@ test('startRemoteEnrollment rolls back mode when ESP32 command fails', async () 
 
 const { setup, teardown } = require('./testDb');
 const settingsCache = require('../settingsCache');
+const { hhmm, nowMinutes, awayWindow } = require('./sessionWindowTestUtils');
 
 test('logMemberAttendance dispatches the right WebSocket notification per outcome', async () => {
   const db = await setup();
   try {
     // Open the morning session window around "now" so check-in/checkout pass.
-    // Clamped to [0, 1439]: sessionOf() cannot represent windows that cross
-    // midnight, so wrapped values would close the window near midnight and
-    // make this test time-of-day flaky.
-    const m = new Date();
-    const mins = m.getHours() * 60 + m.getMinutes();
-    const clamp = (v) => Math.min(1439, Math.max(0, v));
-    const hhmm = (v) => {
-      const w = clamp(v);
-      return `${String(Math.floor(w / 60)).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`;
-    };
+    // sessionOf() cannot represent windows that cross midnight, so
+    // hhmm/awayWindow (see sessionWindowTestUtils) keep the window in-day —
+    // otherwise this test would be flaky right around midnight.
+    const mins = nowMinutes();
     const set = (k, v) =>
       db
         .prepare(
@@ -67,7 +62,7 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
         .run(k, String(v));
     set('morning_session_start', hhmm(mins - 60));
     set('morning_session_end', hhmm(mins + 60));
-    const [evS, evE] = mins < 720 ? [mins + 240, mins + 300] : [mins - 300, mins - 240];
+    const [evS, evE] = awayWindow(mins, 240, 300);
     set('evening_session_start', hhmm(evS));
     set('evening_session_end', hhmm(evE));
     await settingsCache.refresh();

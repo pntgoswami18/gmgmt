@@ -12,8 +12,8 @@ Run the following commands in order and report results. Stop and surface failure
    ```
    Preflight: if suites fail with `NODE_MODULE_VERSION` errors, that is an
    environment problem, not a code regression — better-sqlite3's native module
-   needs Node >= 20 (e.g. `~/.nvm/versions/node/v22.21.1/bin/node`). Switch
-   node versions and rerun before reporting failures.
+   needs Node >= 20. Switch to any Node >= 20 (e.g. via `nvm use 20` or later)
+   and rerun before reporting failures.
 
 2. **ESP32 integration tests** (needs the server up — start it first if it isn't:
    `JWT_SECRET=<any> ENABLE_BIOMETRIC=true BIOMETRIC_PORT=5005 node src/app.js`):

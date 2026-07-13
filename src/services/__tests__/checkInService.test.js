@@ -2,21 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { setup, teardown } = require('./testDb');
 const settingsCache = require('../settingsCache');
+const { hhmm, nowMinutes, awayWindow } = require('./sessionWindowTestUtils');
 
 let db;
 let checkInService;
-
-// Session windows are wall-clock based; tests pin them relative to "now" so
-// they are deterministic at any time of day.
-const wrap = (mins) => ((mins % 1440) + 1440) % 1440;
-const hhmm = (mins) => {
-  const m = wrap(mins);
-  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-};
-const nowMinutes = () => {
-  const d = new Date();
-  return d.getHours() * 60 + d.getMinutes();
-};
 
 // The service derives its "today" from the LOCAL calendar date — attendance
 // days and session windows are both local concepts. (The UTC-derived date the
@@ -45,30 +34,27 @@ async function setSetting(key, value) {
 // MIDNIGHT SAFETY: sessionOf() uses non-wrapping start<=t<=end comparisons, so
 // helper windows must never cross midnight — naive `hhmm(m - 60)` at 00:20
 // produces a 23:20–01:20 "window" that matches nothing and every session-gated
-// test fails between roughly 21:00 and 03:00 wall-clock. Clamp to [0, 1439]
-// and place the away-window on whichever side of "now" has room.
-const clamp = (v) => Math.min(1439, Math.max(0, v));
-
+// test fails between roughly 21:00 and 03:00 wall-clock. clamp/awayWindow (see
+// sessionWindowTestUtils) keep every derived minute inside a single day.
 async function openSessionWindowNow() {
   const m = nowMinutes();
-  await setSetting('morning_session_start', hhmm(clamp(m - 60)));
-  await setSetting('morning_session_end', hhmm(clamp(m + 60)));
+  await setSetting('morning_session_start', hhmm(m - 60));
+  await setSetting('morning_session_end', hhmm(m + 60));
   // "Evening" only needs to exist somewhere that does NOT contain now.
-  const [evStart, evEnd] = m < 720 ? [m + 240, m + 300] : [m - 300, m - 240];
-  await setSetting('evening_session_start', hhmm(clamp(evStart)));
-  await setSetting('evening_session_end', hhmm(clamp(evEnd)));
+  const [evStart, evEnd] = awayWindow(m, 240, 300);
+  await setSetting('evening_session_start', hhmm(evStart));
+  await setSetting('evening_session_end', hhmm(evEnd));
 }
 
 // Closes both windows: places them on whichever side of "now" fits in-day.
 async function closeAllSessionWindowsNow() {
   const m = nowMinutes();
-  const away = (lo, hi) => (m < 720 ? [m + lo, m + hi] : [m - hi, m - lo]);
-  const [aStart, aEnd] = away(120, 180);
-  const [bStart, bEnd] = away(240, 300);
-  await setSetting('morning_session_start', hhmm(clamp(aStart)));
-  await setSetting('morning_session_end', hhmm(clamp(aEnd)));
-  await setSetting('evening_session_start', hhmm(clamp(bStart)));
-  await setSetting('evening_session_end', hhmm(clamp(bEnd)));
+  const [aStart, aEnd] = awayWindow(m, 120, 180);
+  const [bStart, bEnd] = awayWindow(m, 240, 300);
+  await setSetting('morning_session_start', hhmm(aStart));
+  await setSetting('morning_session_end', hhmm(aEnd));
+  await setSetting('evening_session_start', hhmm(bStart));
+  await setSetting('evening_session_end', hhmm(bEnd));
 }
 
 function insertMember({ name = 'Test', isActive = 1, isAdmin = 0, planId = null, joinDate }) {
