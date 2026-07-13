@@ -318,12 +318,25 @@ test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.
   const memberId = insertMember({ name: 'AlmostOut' });
   // 14.5 min into a 15-min dwell → raw ceil(0.5) = 1; the sub-minute remainder
   // must surface as "1 minute until checkout", not "0".
-  const checkIn = new Date(Date.now() - 14.5 * 60000);
-  insertAttendance(memberId, checkIn);
+  //
+  // Both the check-in row and the scan are pinned to the SAME fixed reference
+  // instant, 14.5 minutes apart, via explicit full-precision timestamps
+  // (rawCheckInTime / timestamp) — NOT via localIso(), which hardcodes ":00"
+  // seconds and so truncates to whole minutes. Truncating both sides down to
+  // their respective minute starts turns the intended 14.5-minute gap into
+  // anywhere from ~14 to ~15+ minutes depending on the seconds-value of `now`
+  // when the test happens to run, occasionally tipping dwellMinutes to >= 15
+  // and flipping this to a checkout (observed as a flake correlated with wall
+  // time, not DB load). Full-precision timestamps make the gap exactly 14.5
+  // minutes regardless of when the test runs.
+  const now = new Date();
+  const checkIn = new Date(now.getTime() - 14.5 * 60000);
+  insertAttendance(memberId, checkIn, { rawCheckInTime: checkIn.toISOString() });
 
   const result = await checkInService.processCheckIn(memberId, {
     modality: 'face',
     minCheckoutDwellMinutes: 15,
+    timestamp: now.toISOString(),
     eventContext: { biometricRef: 'face' },
   });
   assert.equal(result.authorized, true, JSON.stringify(result));
