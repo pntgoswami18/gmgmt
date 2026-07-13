@@ -346,6 +346,16 @@ test('faceCheckIn: missing or malformed probe embedding fails closed', async () 
     assert.equal(res._status, 400, JSON.stringify(res._body));
     assert.equal(res._body.authorized, false);
     assert.equal(res._body.reason, 'invalid_probe_embedding');
+
+    // Rejection must be audited like every other denial reason — a kiosk
+    // sending malformed probes shouldn't be invisible to the event log.
+    const ev = db
+      .prepare(
+        "SELECT raw_data FROM biometric_events WHERE member_id = ? AND event_type = 'face_match_rejected' ORDER BY id DESC LIMIT 1"
+      )
+      .get(memberId);
+    assert.ok(ev, 'invalid probe rejection should be logged');
+    assert.equal(JSON.parse(ev.raw_data).reason, 'invalid_probe_embedding');
   }
 });
 

@@ -367,6 +367,9 @@ const faceCheckIn = async (req, res) => {
     // re-score, so fail closed — a compromised or buggy kiosk must not be able
     // to fall back to an unverifiable self-reported score to open the door.
     if (!faceMatch.isValidEmbedding(probe)) {
+      await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
+        reason: 'invalid_probe_embedding',
+      });
       return res.status(400).json({ authorized: false, reason: 'invalid_probe_embedding' });
     }
 
