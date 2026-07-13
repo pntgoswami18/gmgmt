@@ -1,6 +1,6 @@
 const { pool, runInTransaction } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
-const { uploadSingle } = require('../../config/multer');
+const { uploadSingle, writeUploadedFile } = require('../../config/multer');
 const settingsCache = require('../../services/settingsCache');
 const logger = require('../../utils/logger').child({ service: 'memberController' });
 
@@ -466,12 +466,29 @@ exports.deleteMember = async (req, res) => {
     if (!existing.rows?.length) {
       return res.status(404).json({ message: 'Member not found' });
     }
+    let hadFaceData = false;
     await runInTransaction(async () => {
       // access_logs references members without ON DELETE CASCADE — remove first or FK fails
       await pool.query('DELETE FROM access_logs WHERE member_id = $1', [id]);
       // Legacy DBs may have security_logs / biometric_events without CASCADE
       await pool.query('DELETE FROM security_logs WHERE member_id = $1', [id]);
       await pool.query('DELETE FROM biometric_events WHERE member_id = $1', [id]);
+      // Face embeddings are biometric PII and FK enforcement is off in
+      // better-sqlite3 by default (the schema's ON DELETE CASCADE is inert),
+      // so delete explicitly — and write a sync tombstone so check-in kiosks
+      // prune this member from their local gallery on next delta sync.
+      const faceDeleted = await pool.query(
+        'DELETE FROM member_face_embeddings WHERE member_id = $1',
+        [id]
+      );
+      hadFaceData = faceDeleted.rowCount > 0;
+      if (hadFaceData) {
+        await pool.query(
+          "INSERT INTO face_sync_tombstones(member_id, deleted_at) VALUES($1, datetime('now')) " +
+            'ON CONFLICT(member_id) DO UPDATE SET deleted_at = excluded.deleted_at',
+          [id]
+        );
+      }
       await pool.query('DELETE FROM members WHERE id = $1', [id]);
     });
     try {
@@ -481,6 +498,14 @@ exports.deleteMember = async (req, res) => {
       }
     } catch (cacheErr) {
       logger.error({ err: cacheErr }, 'eSP32 cache invalidation after member delete');
+    }
+    if (hadFaceData) {
+      try {
+        const { notifyFaceCacheInvalidated } = require('./faceBiometricController');
+        notifyFaceCacheInvalidated(Number(id));
+      } catch (faceErr) {
+        logger.error({ err: faceErr }, 'face cache invalidation after member delete');
+      }
     }
     res.json({ message: 'Member deleted successfully' });
   } catch (err) {
@@ -537,20 +562,33 @@ exports.setActiveStatus = async (req, res) => {
 };
 // Upload member photo
 exports.uploadMemberPhoto = [
-  uploadSingle('photo', (req) => `member-${req.params.id || 'unknown'}`),
+  uploadSingle('photo'),
   async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
       }
       const { id } = req.params;
-      const photoUrl = `/uploads/${req.file.filename}`;
+      // Derive the filename prefix from the route param, never from
+      // req.body — multer resets req.body while parsing the multipart
+      // stream, so a value set there by earlier middleware (or a client)
+      // is unreliable and shouldn't be trusted for naming.
+      const filename = await writeUploadedFile(req.file, `member-${id || 'unknown'}`);
+      const photoUrl = `/uploads/${filename}`;
       if (id) {
         await pool.query('UPDATE members SET photo_url = $1 WHERE id = $2', [photoUrl, id]);
       }
       res.json({ message: 'Photo uploaded successfully', photo_url: photoUrl });
     } catch (err) {
-      res.status(500).json({ message: err.message });
+      if (err.statusCode) {
+        res.status(err.statusCode).json({ message: err.message });
+      } else {
+        // Unexpected failure (e.g. fs write error) — err.message can contain
+        // raw filesystem paths, so log it server-side and return a generic
+        // message to avoid leaking directory layout to the client.
+        logger.error({ err }, 'error uploading member photo');
+        res.status(500).json({ message: 'Failed to store uploaded file' });
+      }
     }
   },
 ];
