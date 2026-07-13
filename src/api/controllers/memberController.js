@@ -1,6 +1,6 @@
 const { pool, runInTransaction } = require('../../config/sqlite');
 const { sendEmail } = require('../../services/emailService');
-const { uploadSingle } = require('../../config/multer');
+const { uploadSingle, writeUploadedFile } = require('../../config/multer');
 const settingsCache = require('../../services/settingsCache');
 const logger = require('../../utils/logger').child({ service: 'memberController' });
 
@@ -573,13 +573,22 @@ exports.uploadMemberPhoto = [
         return res.status(400).json({ message: 'No file uploaded' });
       }
       const { id } = req.params;
-      const photoUrl = `/uploads/${req.file.filename}`;
+      const filename = await writeUploadedFile(req.file, req.body.prefix);
+      const photoUrl = `/uploads/${filename}`;
       if (id) {
         await pool.query('UPDATE members SET photo_url = $1 WHERE id = $2', [photoUrl, id]);
       }
       res.json({ message: 'Photo uploaded successfully', photo_url: photoUrl });
     } catch (err) {
-      res.status(500).json({ message: err.message });
+      if (err.statusCode) {
+        res.status(err.statusCode).json({ message: err.message });
+      } else {
+        // Unexpected failure (e.g. fs write error) — err.message can contain
+        // raw filesystem paths, so log it server-side and return a generic
+        // message to avoid leaking directory layout to the client.
+        logger.error({ err }, 'error uploading member photo');
+        res.status(500).json({ message: 'Failed to store uploaded file' });
+      }
     }
   },
 ];
