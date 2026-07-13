@@ -3,6 +3,10 @@ const { pool } = require('../../config/sqlite');
 const whatsappService = require('../../services/whatsappService');
 const settingsCache = require('../../services/settingsCache');
 const logger = require('../../utils/logger').child({ service: 'biometricController' });
+// toLocalDateStr only — checkInService requires this module back lazily (inside
+// a function body, not at load time) to invalidate the ESP32 cache on
+// grace-period auto-deactivation, so this top-level require does not cycle.
+const { toLocalDateStr } = require('../../services/checkInService');
 
 // Get reference to biometric integration instance
 let biometricIntegration = null;
@@ -1701,6 +1705,14 @@ const validateBiometricId = async (req, res) => {
     // Normalize biometricId to string for consistent lookup (handle "15.0" vs "15")
     const lookupId = String(parseInt(biometricId, 10));
 
+    // Local calendar date, not UTC — matches checkInService's toLocalDateStr.
+    // Deriving "today" from SQLite's date('now') (UTC) bucketed early-morning
+    // scans into the wrong day on UTC-positive timezones (e.g. 05:15 IST is
+    // 23:45Z the previous day), which corrupted today_active_sessions /
+    // cross-session detection below.
+    const now = new Date();
+    const todayDateStr = toLocalDateStr(now);
+
     // OPTIMIZED: Single query with all necessary data including admin status and attendance
     const query = `
       SELECT 
@@ -1720,14 +1732,14 @@ const validateBiometricId = async (req, res) => {
         (SELECT COUNT(*) 
          FROM attendance a 
          WHERE a.member_id = m.id 
-         AND a.date = date('now') 
+         AND a.date = ? 
          AND a.check_out_time IS NULL) as today_active_sessions
       FROM members m
       LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
       WHERE m.biometric_id = ?
     `;
 
-    const result = await pool.query(query, [lookupId]);
+    const result = await pool.query(query, [todayDateStr, lookupId]);
     const member = result.rows[0];
 
     if (!member) {
@@ -1803,7 +1815,6 @@ const validateBiometricId = async (req, res) => {
         );
         const EVENING_END_MINUTES = parseTimeToMinutes(settingsMap.evening_session_end || '22:00');
 
-        const now = new Date();
         const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
         const isInMorningSession =
           minutesSinceMidnight >= MORNING_START_MINUTES &&
@@ -1828,15 +1839,24 @@ const validateBiometricId = async (req, res) => {
           });
         }
 
-        // Check for cross-session violations using already-fetched data
-        // today_active_sessions from the main query tells us if there's an active session
-        if (member.today_active_sessions > 0) {
+        // Check for cross-session violations using already-fetched data.
+        // today_active_sessions from the main query tells us whether the member
+        // currently has an OPEN (not checked-out) session today. A scan while an
+        // open session exists means the member is leaving, not checking in fresh
+        // — and members must always be able to leave (mirrors checkInService's
+        // "DELIBERATE DIVERGENCE" checkout handling), so the cross-session gate
+        // below only runs when there is NO open session, i.e. only for a fresh
+        // check-in attempt into a second session today. Previously this gate ran
+        // whenever today_active_sessions > 0, which is precisely the leaving
+        // case, and could deny a member trying to check out of a still-open
+        // session started in a different session window.
+        if (member.today_active_sessions === 0) {
           // Need to fetch check-in time details for session comparison
           const todayCheckIns = await pool.query(
             `SELECT check_in_time FROM attendance 
-             WHERE member_id = ? AND DATE(check_in_time) = DATE('now') 
+             WHERE member_id = ? AND DATE(check_in_time) = ? 
              ORDER BY check_in_time DESC LIMIT 1`,
-            [member.member_id]
+            [member.member_id, todayDateStr]
           );
 
           if (todayCheckIns.rows.length > 0) {
