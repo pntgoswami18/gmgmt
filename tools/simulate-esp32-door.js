@@ -154,7 +154,9 @@ server.on('error', (e) => {
     console.error(
       '   The backend hard-codes port 80 for the door command channel, so run with sudo:'
     );
-    console.error('     sudo DEVICE_SHARED_SECRET=' + SECRET + ' node simulate-esp32-door.js\n');
+    console.error(
+      '     sudo DEVICE_SHARED_SECRET=' + SECRET + ' node tools/simulate-esp32-door.js\n'
+    );
   } else if (e.code === 'EADDRINUSE') {
     console.error(`\n❌ Port ${LISTEN_PORT} is already in use (another process is bound to it).\n`);
   } else {
@@ -167,6 +169,15 @@ server.listen(LISTEN_PORT, LISTEN_IP, () => {
   log(`🚪 Simulated ESP32 door lock listening on http://${LISTEN_IP}:${LISTEN_PORT}/command`);
   log(`   device_id = "${DEVICE_ID}"   backend = ${BACKEND}`);
   log('   Enter this device_id as the "Door Device ID" in Settings -> Face Check-In.');
+  // The /command channel is unauthenticated (it mirrors the real firmware, which
+  // trusts anything the backend POSTs to it). That's fine on loopback, but on a
+  // routable interface anyone who can reach this port can "unlock the door".
+  if (LISTEN_IP !== '127.0.0.1' && LISTEN_IP !== '::1' && LISTEN_IP !== 'localhost') {
+    log(
+      `⚠️  bound to non-loopback ${LISTEN_IP} — the /command channel is unauthenticated; ` +
+        'anyone who can reach this port can trigger an unlock. Use 127.0.0.1 unless you know why.'
+    );
+  }
   sendHeartbeat();
   setInterval(sendHeartbeat, HEARTBEAT_MS);
 });
