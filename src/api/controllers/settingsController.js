@@ -103,6 +103,14 @@ exports.uploadLogo = async (req, res) => {
     await settingsCache.invalidate();
     res.json({ message: 'Logo uploaded successfully', logoUrl });
   } catch (err) {
-    res.status(err.statusCode || 500).json({ message: err.message });
+    if (err.statusCode) {
+      res.status(err.statusCode).json({ message: err.message });
+    } else {
+      // Unexpected failure (e.g. fs write error) — err.message can contain
+      // raw filesystem paths, so log it server-side and return a generic
+      // message to avoid leaking directory layout to the client.
+      logger.error({ err }, 'error uploading logo');
+      res.status(500).json({ message: 'Failed to store uploaded file' });
+    }
   }
 };

@@ -2,13 +2,19 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const { matchesSignature } = require('../utils/imageSignature');
 
 // Only these extensions/mime types are accepted for image uploads.
 const ALLOWED_EXTENSIONS = new Set(['.jpeg', '.jpg', '.png', '.gif']);
 const ALLOWED_MIMETYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/gif']);
 
-const UPLOAD_DIR = './public/uploads/';
+const UPLOAD_DIR = path.join(__dirname, '../../public/uploads');
+
+// Ensure the upload directory exists at module load time (mirrors the
+// pattern used by src/api/routes/firmware.js). `recursive: true` makes this
+// a no-op if the directory already exists.
+fsSync.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // Sanitize a caller-supplied prefix so it can't be used for path traversal or
 // to inject unexpected characters into the stored filename.

@@ -1,6 +1,11 @@
 // Verifies a file's actual content against known image magic-byte signatures.
 // The client-supplied extension/mimetype are spoofable; this checks what the
 // bytes really are before anything gets written to disk.
+//
+// Note: this is type-confusion protection, not content sanitization — a
+// technically-valid image with an embedded payload (e.g. polyglot files)
+// will still pass. That's acceptable here because uploaded files are only
+// ever served statically and never executed by the server.
 
 const SIGNATURES = {
   '.jpg': [[0xff, 0xd8, 0xff]],
