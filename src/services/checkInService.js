@@ -340,6 +340,21 @@ async function processCheckInLocked(memberId, options = {}) {
         // walked back in). Let them through — the door unlocks because this is
         // authorized — without logging a checkout or a duplicate check-in row.
         // Only after the dwell elapses does a re-scan flip to checkout (below).
+        //
+        // Authorization freshness: re-entry is re-admission INTO the building,
+        // so — unlike checkout (which must never be blocked, plan Section 3.5) —
+        // it must respect deactivation just like a fresh check-in. A member
+        // deactivated after checking in (e.g. by paymentDeactivationService)
+        // does not get re-admitted on the strength of a stale open row. They
+        // can still CHECK OUT once the dwell elapses (that path is intentionally
+        // ungated) — we only refuse to unlock the door to let them back IN.
+        if (enforceAuthorization && member.is_active !== 1) {
+          await logEvent(eventContext, member, 'member_inactive', timeStr, false, {
+            error_message: 'Member is deactivated; re-entry within dwell window refused',
+            details: { dwellMinutes: Math.round(dwellMinutes * 10) / 10 },
+          });
+          return deny('member_inactive', member);
+        }
         const minutesUntilCheckout = Math.max(1, Math.ceil(minCheckoutDwellMinutes - dwellMinutes));
         await updateLastVisit(member.id);
         await logEvent(eventContext, member, 'reentry', timeStr, true, {

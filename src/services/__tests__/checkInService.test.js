@@ -286,6 +286,34 @@ test('re-entry within dwell: scan shortly after check-in is authorized (door unl
   assert.equal(events.at(-1).success, 1);
 });
 
+test('re-entry within dwell: deactivated member is refused re-admission (not authorized), but the open row is untouched', async () => {
+  const memberId = insertMember({ name: 'Lapsed', isActive: 0 });
+  const checkIn = new Date();
+  checkIn.setMinutes(checkIn.getMinutes() - 2);
+  const attendanceId = insertAttendance(memberId, checkIn);
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'face',
+    minCheckoutDwellMinutes: 15,
+    eventContext: { biometricRef: 'face' },
+  });
+  // Re-entry is re-admission INTO the building, so a member deactivated after
+  // check-in must not be let back in on the strength of the stale open row.
+  assert.equal(result.authorized, false, JSON.stringify(result));
+  assert.equal(result.reason, 'member_inactive');
+  assert.equal(result.action, null);
+
+  // The open row is neither closed nor duplicated — they can still check OUT
+  // once the dwell elapses (that path is intentionally ungated).
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must NOT create a duplicate attendance row');
+  assert.equal(rows[0].check_out_time, null, 'open row must be left intact for a later checkout');
+
+  const events = eventsFor(memberId);
+  assert.equal(events.at(-1).event_type, 'member_inactive');
+  assert.equal(events.at(-1).success, 0);
+});
+
 test('fingerprint checkout is blocked outside session windows (historical behavior preserved)', async () => {
   const memberId = insertMember({ name: 'FpCheckout' });
   const checkIn = new Date();
