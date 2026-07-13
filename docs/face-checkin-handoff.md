@@ -4,7 +4,7 @@
 
 **Note on naming:** `phase2-plan.md` / `phase3-plan.md` / `phase4-plan.md` in this same `docs/` directory are an **unrelated** initiative (code-quality/logging/test-coverage remediation). This feature's phases (P0–P5) are sections *inside* `face-checkin-plan.md`, not separate files. Don't confuse the two "Phase 4"s.
 
-Last updated: 2026-07-13 (client#11 merged; gmgmt submodule bump PR open).
+Last updated: 2026-07-13 (gmgmt#23 and gmgmt#24 merged — all face-checkin feature code is now on both repos' `main`).
 
 ---
 
@@ -19,7 +19,8 @@ Last updated: 2026-07-13 (client#11 merged; gmgmt submodule bump PR open).
 | P3 | gmgmt | Model deployment — `deploy-models.sh` + manifest | ✅ Merged (#21) |
 | P3 | gmgmt | Verification pass — fixed midnight-fragile tests, verify-skill hardening | ✅ Merged (#22) |
 | P4 | client | Kiosk UI — `/checkin` route, matching/liveness/cache modules, `useFaceCheckin` hook | ✅ Merged ([client#11](https://github.com/pntgoswami18/client/pull/11), commit `b83312f`) |
-| — | gmgmt | Bump `client` submodule pointer to new client `main` | 🟡 PR open — [gmgmt#23](https://github.com/pntgoswami18/gmgmt/pull/23) |
+| — | gmgmt | Bump `client` submodule pointer to new client `main` | ✅ Merged ([gmgmt#23](https://github.com/pntgoswami18/gmgmt/pull/23), commit `af6283d`) |
+| — | gmgmt | Add missing `.gitmodules` + check-in trust-model doc note | ✅ Merged ([gmgmt#24](https://github.com/pntgoswami18/gmgmt/pull/24), commit `3803945`) |
 | — | ops | Run `deploy-models.sh` on the actual deployment target | ⬜ Not started |
 | — | ops | Set `DEVICE_SHARED_SECRET` env var + provision kiosk browser | ⬜ Not started |
 | — | gmgmt+client | Staff-facing Settings UI for face config | ⬜ **Not started — no code exists yet** (see §3.3) |
@@ -27,22 +28,22 @@ Last updated: 2026-07-13 (client#11 merged; gmgmt submodule bump PR open).
 | — | human | Real-camera walk-up test (enroll → kiosk scan → unlock) | ⬜ Not started |
 | — | docs | Rollout doc: name the tailgating limitation explicitly | ⬜ Not started |
 
-**Bottom line:** all backend, pure-logic, and kiosk-UI code for face check-in is written, unit-tested, and merged into both repos' `main`. The only code-side loose end is [gmgmt#23](https://github.com/pntgoswami18/gmgmt/pull/23) (submodule pointer bump, needs a review click) and §3.3 (no settings UI exists to turn the feature on without hand-editing the DB). Everything else left is deployment/config/ops work, not code.
+**Bottom line:** all backend, pure-logic, and kiosk-UI code for face check-in is written, unit-tested, and merged into both repos' `main`. **No more face-checkin feature code is pending** except §3.3 (no settings UI exists to turn the feature on without hand-editing the DB) — that's the active work as of this update. Everything else left is deployment/config/ops work, not code.
 
 ---
 
 ## 2. Repo/branch/PR map
 
-**gmgmt** (backend + docs), `main` tip as of this doc: `fcd6b36`
-- `f80bd90` P1 (#17) → `3340ad3` P2 (#18) → `21e1639` P3 model-deploy (#21) → `fcd6b36` P3 verify (#22)
-- All merged. No open face-checkin work on the gmgmt side right now.
+**gmgmt** (backend + docs), `main` tip: `3803945`
+- `f80bd90` P1 (#17) → `3340ad3` P2 (#18) → `21e1639` P3 model-deploy (#21) → `fcd6b36` P3 verify (#22) → `af6283d` submodule bump (#23) → `3803945` `.gitmodules` + trust-model doc (#24)
+- No open face-checkin work on the gmgmt side right now.
 
 **client** (frontend, git submodule `github.com/pntgoswami18/client.git`), `main` tip: `b83312f`
 - `5a421f1` P3 enrollment (#10, **squash-merged** — old commit SHAs `19b653b`/`b794545` are *not* ancestors of `main`, see §5 gotcha)
 - `b83312f` P4 kiosk (#11, squash-merged) — CheckIn.js, useFaceCheckin.js, faceStation.js, faceMatching.js, faceLiveness.js, faceCacheDb.js + tests
 - No open PRs on client right now.
 
-**gmgmt's submodule pointer** for `client`: bump is in [gmgmt#23](https://github.com/pntgoswami18/gmgmt/pull/23) (branch `bump-client-checkin-kiosk`, commit `a848f61`), `0516404` → `b83312f`. Needs a review/merge click — same "no branch protection but review required" pattern as client#11 was.
+**gmgmt's submodule pointer** for `client` is `b83312f` — up to date, includes both P3 and P4. `.gitmodules` (previously missing — a fresh clone couldn't resolve the submodule URL) is now committed via #24.
 
 ---
 
@@ -51,10 +52,10 @@ Last updated: 2026-07-13 (client#11 merged; gmgmt submodule bump PR open).
 ### 3.1 ~~Merge client PR #11~~ — done
 Merged 2026-07-13 as `b83312f`.
 
-### 3.2 Merge gmgmt#23 (submodule bump)
-[gmgmt#23](https://github.com/pntgoswami18/gmgmt/pull/23) — branch `bump-client-checkin-kiosk`, bumps the pointer `0516404` → `b83312f`. Needs a review/approve click, same as #11 did. No code changes needed.
+### 3.2 ~~Merge gmgmt#23 (submodule bump)~~ — done
+Merged 2026-07-13 as `af6283d`. `.gitmodules` fix + trust-model doc note also merged separately as gmgmt#24 (`3803945`) — see §3.9.
 
-### 3.3 Staff-facing Settings UI — real gap, not yet built
+### 3.3 Staff-facing Settings UI — real gap, not yet built — **active work**
 Confirmed via grep: **no code anywhere in `client/src/components/Settings.js` references** `face_checkin_enabled`, `face_match_threshold`, `face_liveness_mode`, `face_door_device_id`, or `face_checkout_min_dwell_minutes`. The backend already has these as real settings rows (`src/config/sqlite.js:287-292`) and `GET/PUT /api/settings` presumably supports arbitrary keys (verify), but **there is no admin-facing form to change them** — today a gym admin can only turn the feature on by hand-editing the `settings` table or scripting a PUT to `/api/settings`.
 
 This blocks any real rollout: without a UI, nobody can flip `face_checkin_enabled` to `true` or set `face_door_device_id` without DB access. Recommend a new "Face Check-In" section in `Settings.js` (or a tab, following the existing pattern) with:
@@ -92,7 +93,7 @@ Flagged during review of gmgmt#23: `POST /api/biometric/face/check-in` does **no
 
 **Backend (gmgmt, all merged):**
 - `src/services/checkInService.js` — `processCheckIn()`, the shared authorization core (asymmetric check-in/checkout rules)
-- `src/api/controllers/faceBiometricController.js` — all `/face/*` and face-enroll endpoints
+- `src/api/controllers/faceBiometricController.js` — all `/face/*` and face-enroll endpoints. Note: `faceCheckIn` trusts the client-submitted `matchScore`/`livenessPassed` (floors/gates them, doesn't recompute the cosine match server-side — see §3.9)
 - `src/config/sqlite.js:287-292` — face settings defaults
 - `src/app.js:110-163` — auth routing: `FACE_STATION_PATHS` (device-secret-only, fail-closed), `FACE_BOOTSTRAP_PATHS` (device-secret OR staff session)
 - `tools/face-model/` — P1 conversion/eval scripts + `deploy-models.sh`
@@ -119,7 +120,8 @@ Flagged during review of gmgmt#23: `POST /api/biometric/face/check-in` does **no
 - **`FaceLandmarker` needed `outputFaceBlendshapes: true`** to expose eyeBlink scores for the liveness challenge — it was `false` in the P3 enrollment code (enrollment doesn't need blinks). Already flipped in `faceEngine.js` as part of #11.
 - **The admin MUI theme forces a dark `color` on `h4`/`h5` Typography** (`App.js`'s `buildTheme`), which is unreadable on the kiosk's dark background. `CheckIn.js` overrides it locally via `.MuiTypography-h2/h3/h4/h5 { color: inherit }` on its root container — don't remove that rule.
 - **`FACE_STATION_PATHS` (`/face/sync`, `/face/check-in`) fail closed with 503 if `DEVICE_SHARED_SECRET` is unset** — this is intentional (see `app.js` comment), not a deployment bug. `FACE_BOOTSTRAP_PATHS` (`/face/config`, `/face/model-manifest`) is more permissive by design — it accepts either the device secret or a staff session, so the admin enrollment UI and the kiosk can both call it.
-- **`data/data/gmgmt.sqlite` and the `client` submodule pointer show as locally modified on the `p3-verify` branch** in the gmgmt working tree — this is pre-existing local runtime state (DB file grew from local testing) unrelated to the face-checkin work; don't commit it accidentally with a broad `git add -A`.
+- **`data/data/gmgmt.sqlite` shows as locally modified** in the gmgmt working tree on most branches — pre-existing local runtime state (DB file grew from local testing) unrelated to the face-checkin work; don't commit it accidentally with a broad `git add -A`.
+- **This repo's working directory can be shared by more than one concurrent session.** During this work, a parallel session committed unrelated `.gitmodules`/trust-model-doc work (gmgmt#24) on a new branch and, via a broad `git add`, incidentally scooped up this handoff file mid-edit — it landed in that PR as a stale snapshot, requiring a manual reconcile (`git pull` after backing up the local copy, then re-applying edits to the now-tracked file) to avoid losing either version. Run `git status` before any branch switch, and don't assume you're the only writer in this directory.
 
 ---
 
