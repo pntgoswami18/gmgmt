@@ -10,8 +10,10 @@
  *      Repeated on an interval to stay "online".
  *
  *   2. Command channel: the backend unlocks by POSTing to  http://<ip>:80/command
- *      { deviceId, command:'unlock_door', data:{ reason } }.  We serve that here
- *      and "toggle the relay" (just logging), then re-lock after the duration.
+ *      { deviceId, command, data, ... }.  The two unlock commands are
+ *      'unlock_door' (data:{ reason, duration }) and 'access_granted'
+ *      (data:{ memberName, memberId }).  We serve that here and "toggle the
+ *      relay" (just logging), then re-lock after the hold duration.
  *
  * Because the backend hard-codes port 80 for the command channel, this HTTP
  * server MUST listen on port 80 — which on macOS/Linux needs root, so run with
@@ -20,14 +22,28 @@
 
 const http = require('http');
 
+// Parse a positive-integer env var, falling back to `def` on unset/blank/NaN.
+// Guards against e.g. LISTEN_PORT=abc crashing server.listen with a raw
+// RangeError, or HEARTBEAT_MS=abc becoming NaN → a ~1ms hot loop.
+function intEnv(name, def) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.error(`⚠️  ${name}="${raw}" is not a positive number — using default ${def}.`);
+    return def;
+  }
+  return n;
+}
+
 // Use 127.0.0.1, not "localhost": Node may resolve localhost to IPv6 ::1, but
 // the backend binds IPv4 (0.0.0.0), so localhost would ECONNREFUSED on ::1.
 const BACKEND = process.env.BACKEND || 'http://127.0.0.1:3001';
 const SECRET = process.env.DEVICE_SHARED_SECRET || 'dev-face-secret';
 const DEVICE_ID = process.env.DEVICE_ID || 'SIM_DOOR_01';
 const LISTEN_IP = process.env.LISTEN_IP || '127.0.0.1';
-const LISTEN_PORT = Number(process.env.LISTEN_PORT || 80); // backend hard-codes 80
-const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS || 30000);
+const LISTEN_PORT = intEnv('LISTEN_PORT', 80); // backend hard-codes 80
+const HEARTBEAT_MS = intEnv('HEARTBEAT_MS', 30000);
 
 let relayLocked = true; // HIGH = locked, matching the firmware's default
 let reLockTimer = null;
@@ -84,10 +100,15 @@ function sendHeartbeat() {
       });
     }
   );
-  req.on('error', (e) =>
-    log(`⚠️  heartbeat failed: ${e.message} (is the backend up at ${BACKEND}?)`)
-  );
+  let timedOut = false;
+  req.on('error', (e) => {
+    // destroy() below tears the socket down, which re-surfaces here as
+    // ECONNRESET — skip the redundant line since 'timeout' already logged.
+    if (timedOut) return;
+    log(`⚠️  heartbeat failed: ${e.message} (is the backend up at ${BACKEND}?)`);
+  });
   req.on('timeout', () => {
+    timedOut = true;
     log(`⚠️  heartbeat timed out after 10s (backend accepted the connection but never replied)`);
     req.destroy();
   });
@@ -185,10 +206,20 @@ server.listen(LISTEN_PORT, LISTEN_IP, () => {
   // The /command channel is unauthenticated (it mirrors the real firmware, which
   // trusts anything the backend POSTs to it). That's fine on loopback, but on a
   // routable interface anyone who can reach this port can "unlock the door".
-  if (LISTEN_IP !== '127.0.0.1' && LISTEN_IP !== '::1' && LISTEN_IP !== 'localhost') {
+  const isLoopback = (ip) => ip === '::1' || ip === 'localhost' || /^127\./.test(ip);
+  if (!isLoopback(LISTEN_IP)) {
     log(
       `⚠️  bound to non-loopback ${LISTEN_IP} — the /command channel is unauthenticated; ` +
         'anyone who can reach this port can trigger an unlock. Use 127.0.0.1 unless you know why.'
+    );
+  }
+  // The backend always POSTs unlock commands to port 80 (it can't discover any
+  // other port), so a non-80 bind still registers "online" via heartbeats but
+  // the door will never actually fire — warn rather than let it look healthy.
+  if (LISTEN_PORT !== 80) {
+    log(
+      `⚠️  LISTEN_PORT=${LISTEN_PORT} but the backend only ever POSTs commands to :80 — ` +
+        'unlock commands will NOT reach this simulator. Run on port 80 for the door to fire.'
     );
   }
   sendHeartbeat();
