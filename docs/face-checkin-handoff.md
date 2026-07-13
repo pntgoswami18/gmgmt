@@ -4,7 +4,7 @@
 
 **Note on naming:** `phase2-plan.md` / `phase3-plan.md` / `phase4-plan.md` in this same `docs/` directory are an **unrelated** initiative (code-quality/logging/test-coverage remediation). This feature's phases (P0–P5) are sections *inside* `face-checkin-plan.md`, not separate files. Don't confuse the two "Phase 4"s.
 
-Last updated: 2026-07-13 (§3.3 Settings UI built and live-verified, PR open as client#12; dev launch.json Node-version fix PR open as gmgmt#26).
+Last updated: 2026-07-13 (§3.9 revised — gmgmt#27 + kiosk client#13 recompute the match server-side, but multi-agent review found this only defends against a buggy honest kiosk, not a malicious device-secret holder, who can still impersonate via `/face/sync` + embedding replay).
 
 ---
 
@@ -77,8 +77,18 @@ Once 3.1–3.6 are done: enroll a real face via `/biometric` → Face tab, then 
 ### 3.8 Rollout documentation
 Plan explicitly calls out (§3.2): tailgating (a second person walking in behind an authorized scan) is a known, unaddressed limitation — "not a blocker, but should be called out in rollout docs so it's a known trade-off, not a surprise." No rollout doc exists yet; write one before enabling this at a real front desk.
 
-### 3.9 Check-in trust model — clarify in rollout docs
-Flagged during review of gmgmt#23: `POST /api/biometric/face/check-in` does **not** independently recompute the face match. It trusts the client-submitted `matchScore` (checked only against `face_match_threshold`) and the client-submitted `livenessPassed` boolean as-is (`faceBiometricController.js`, the `checkIn` handler). The real security boundary is the `X-Device-Secret` header plus server-side business rules (member is enrolled, plan active, inside the allowed session window) — not a server-side biometric re-verification. That's a reasonable tradeoff for a single trusted-kiosk deployment where the device secret is the thing being protected, but the `faceStation.js` comment ("the server decides authorization") reads stronger than what's actually happening, and should be documented explicitly in the eventual rollout doc (§3.8) alongside the tailgating caveat so it's a known trade-off, not a surprise.
+### 3.9 Check-in trust model — match now recomputed server-side (narrower fix than first described)
+**Flagged during review of gmgmt#23, partially fixed in gmgmt#27 + client#13:** `POST /api/biometric/face/check-in` previously did **not** independently recompute the face match — it trusted the client-submitted `matchScore` (checked only against `face_match_threshold`). That's now closed **for an honestly-behaving-but-buggy kiosk**: the kiosk submits the probe `embedding`, and the server recomputes the best cosine similarity against the member's stored gallery (pinned model version only) and authorizes on **its** score, not the client's claim. The client `matchScore` is advisory — recorded in the event log as `claimedScore` so a large divergence flags a misbehaving kiosk — and a missing/invalid probe fails closed (`400 invalid_probe_embedding`). The re-scoring lives in the pure, unit-tested `src/utils/faceMatch.js` (a mirror of the kiosk's `faceMatching.js` cosine definition).
+
+**This does NOT close the gap against a genuinely malicious device-secret holder, and gmgmt#27's PR description overstated this** (caught by multi-agent review of gmgmt#27): `POST /api/biometric/face/sync` is gated by the exact same `X-Device-Secret` credential as `/face/check-in` (`FACE_STATION_PATHS` in `src/app.js`) and returns every enrolled member's raw embeddings by design — the kiosk needs the full gallery locally for real-time on-device matching (plan 3.2/3.3). So anyone who holds the device secret can call `/face/sync` once, pull a target member's real embedding, and replay it verbatim as the `embedding` in `/face/check-in` (with `livenessPassed: true`) to impersonate that member — no camera, no physical presence required. The server-side recompute adds zero friction here because a valid-looking embedding was never the scarce resource; the device secret always was.
+
+Net effect: **the actual security boundary remains the device secret itself** (unchanged from the original §3.9 framing before gmgmt#27) — protecting *that* is the deployment's job, not a server-side biometric re-verification. What gmgmt#27 actually buys is defense against an honest kiosk with a scoring bug or miscalibrated local threshold, plus an audit trail (`claimedScore` vs. `serverScore` divergence) — not defense against a compromised/malicious kiosk or a leaked secret.
+
+Caveats that remain and still belong in the rollout doc (§3.8):
+- **A device-secret leak (or kiosk compromise) still allows full impersonation** via `/face/sync` + replay, as above — this is the primary caveat, not a footnote.
+- **Liveness is still a client-asserted boolean.** `livenessPassed` cannot be recomputed server-side without the raw frames, so the anti-spoof guarantee still lives in the kiosk's challenge loop, gated server-side only by `face_liveness_mode`. A trusted-kiosk assumption still underpins liveness even though it no longer underpins the honest-kiosk identity-scoring path.
+- **The re-scored probe is not temporally bound to the liveness-proven frame.** In `useFaceCheckin.js`, the probe embedding is captured when the K-consecutive-frame `MatchAccumulator` first accepts an identity (in `tick()`, during the `idle` phase) and stashed in `pendingRef`. The liveness challenge (blink/head-turn) then runs against *subsequent* frames, and on success `verify(pendingRef.current, true)` submits that original, pre-challenge probe — not a frame captured during or after the liveness proof. So the embedding the server re-scores and the frames that proved liveness come from two disjoint moments with nothing binding them together; an honest kiosk's liveness proof doesn't guarantee it's the same live subject the embedding was drawn from.
+- **Tailgating** (a second person entering behind an authorized scan) is unaddressed — see the §3.8 note above.
 
 ---
 
@@ -86,7 +96,8 @@ Flagged during review of gmgmt#23: `POST /api/biometric/face/check-in` does **no
 
 **Backend (gmgmt, all merged):**
 - `src/services/checkInService.js` — `processCheckIn()`, the shared authorization core (asymmetric check-in/checkout rules)
-- `src/api/controllers/faceBiometricController.js` — all `/face/*` and face-enroll endpoints. Note: `faceCheckIn` trusts the client-submitted `matchScore`/`livenessPassed` (floors/gates them, doesn't recompute the cosine match server-side — see §3.9)
+- `src/api/controllers/faceBiometricController.js` — all `/face/*` and face-enroll endpoints. `faceCheckIn` recomputes the cosine match server-side from the client's probe `embedding` (via `src/utils/faceMatch.js`); the client `matchScore` is advisory and `livenessPassed` is still a client-asserted gate (see §3.9)
+- `src/utils/faceMatch.js` — pure server-side cosine match / probe validation, the authoritative re-scoring the door unlock hangs on (mirror of the kiosk's `faceMatching.js`)
 - `src/config/sqlite.js:287-292` — face settings defaults
 - `src/app.js:110-163` — auth routing: `FACE_STATION_PATHS` (device-secret-only, fail-closed), `FACE_BOOTSTRAP_PATHS` (device-secret OR staff session)
 - `tools/face-model/` — P1 conversion/eval scripts + `deploy-models.sh`

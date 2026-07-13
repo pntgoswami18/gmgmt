@@ -3,6 +3,7 @@ const path = require('path');
 const { pool, runInTransaction } = require('../../config/sqlite');
 const settingsCache = require('../../services/settingsCache');
 const checkInService = require('../../services/checkInService');
+const faceMatch = require('../../utils/faceMatch');
 const logger = require('../../utils/logger').child({ service: 'faceBiometric' });
 
 // Wired from app.js when ENABLE_BIOMETRIC=true, same pattern as
@@ -13,7 +14,7 @@ const setBiometricIntegration = (integration) => {
   biometricIntegration = integration;
 };
 
-const EMBEDDING_DIM = 128;
+const { EMBEDDING_DIM } = faceMatch;
 const MAX_SAMPLES = 5;
 const POSE_LABELS = new Set(['front', 'left', 'right']);
 const MAX_DEVICE_ID_LENGTH = 128;
@@ -349,7 +350,7 @@ const faceCheckIn = async (req, res) => {
       return res.status(403).json({ authorized: false, reason: 'face_checkin_disabled' });
     }
 
-    const { memberId, matchScore, livenessPassed } = req.body || {};
+    const { memberId, matchScore: claimedScore, livenessPassed, embedding: probe } = req.body || {};
     // Free-form client string persisted into biometric_events — bound it.
     const deviceId =
       typeof req.body?.deviceId === 'string'
@@ -358,6 +359,18 @@ const faceCheckIn = async (req, res) => {
     const numericId = parseInt(memberId, 10);
     if (!Number.isInteger(numericId) || numericId <= 0) {
       return res.status(400).json({ authorized: false, reason: 'invalid_member_id' });
+    }
+
+    // The authorization score is recomputed here from the probe embedding, not
+    // taken from the client (trust model, handoff §3.9). A client-reported
+    // matchScore is advisory only. Without a valid probe there is nothing to
+    // re-score, so fail closed — a compromised or buggy kiosk must not be able
+    // to fall back to an unverifiable self-reported score to open the door.
+    if (!faceMatch.isValidEmbedding(probe)) {
+      await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
+        reason: 'invalid_probe_embedding',
+      });
+      return res.status(400).json({ authorized: false, reason: 'invalid_probe_embedding' });
     }
 
     // Liveness is a v1 gate on the unlock (plan 3.4): unless the deployment
@@ -373,10 +386,8 @@ const faceCheckIn = async (req, res) => {
       return res.json({ authorized: false, reason: 'liveness_not_passed' });
     }
 
-    // Server-side floor on the claimed match score — a compromised client can
-    // lie, but an honest one is stopped from submitting sub-threshold claims.
-    // A blanked/garbage setting must fail toward the conservative default, not
-    // silently disable the floor (NaN comparisons are always false).
+    // A blanked/garbage threshold must fail toward the conservative default,
+    // not silently disable the floor (NaN comparisons are always false).
     let threshold = parseFloat(settingsCache.get('face_match_threshold', '0.55'));
     if (!Number.isFinite(threshold)) {
       logger.error(
@@ -384,36 +395,28 @@ const faceCheckIn = async (req, res) => {
       );
       threshold = 0.55;
     }
-    if (typeof matchScore !== 'number' || matchScore < threshold) {
-      await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
-        matchScore,
-        threshold,
-      });
-      return res.json({ authorized: false, reason: 'below_match_threshold' });
-    }
 
     // Members can only face-check-in if they are actually enrolled — rejects
     // fabricated memberIds from a client that has no gallery entry for them.
-    // Enrollment must be under the CURRENT pinned model version: after a model
-    // upgrade, old-version embeddings can't have produced this match honestly
-    // (cross-version cosine scores are meaningless — plan 2.2), so stale
+    // Scoring is restricted to embeddings under the CURRENT pinned model
+    // version: after a model upgrade, an old-version vector can't produce a
+    // meaningful cosine score against a new-model probe (plan 2.2), so stale
     // enrollments deny until the member re-enrolls.
     const pinnedVersion = settingsCache.get('face_model_version', '');
     const enrolled = await pool.query(
-      `SELECT COUNT(*) as n,
-              SUM(CASE WHEN model_version = ? THEN 1 ELSE 0 END) as current_n
-       FROM member_face_embeddings WHERE member_id = ?`,
-      [pinnedVersion, numericId]
+      'SELECT embedding, model_version FROM member_face_embeddings WHERE member_id = ?',
+      [numericId]
     );
-    const totalEnrolled = enrolled.rows[0]?.n || 0;
-    const currentEnrolled = enrolled.rows[0]?.current_n || 0;
-    if (totalEnrolled === 0) {
+    if (enrolled.rows.length === 0) {
       await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
         reason: 'not_enrolled',
       });
       return res.json({ authorized: false, reason: 'not_enrolled' });
     }
-    if (pinnedVersion && currentEnrolled === 0) {
+    const scoringRows = pinnedVersion
+      ? enrolled.rows.filter((r) => r.model_version === pinnedVersion)
+      : enrolled.rows;
+    if (scoringRows.length === 0) {
       await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
         reason: 'model_version_mismatch',
         pinnedVersion,
@@ -421,10 +424,27 @@ const faceCheckIn = async (req, res) => {
       return res.json({ authorized: false, reason: 'model_version_mismatch' });
     }
 
+    // Authoritative match: recompute the best cosine similarity between the
+    // probe and the member's enrolled samples server-side. `!(score >= threshold)`
+    // denies a -1 (empty/zero-magnitude) or NaN, matching the fail-closed floor.
+    const gallery = scoringRows.map((r) => blobToEmbedding(r.embedding));
+    const serverScore = faceMatch.bestMatchScore(probe, gallery);
+    if (!(serverScore >= threshold)) {
+      await logFaceEvent(numericId, 'face_match_rejected', deviceId, false, {
+        reason: 'below_match_threshold',
+        serverScore,
+        claimedScore: typeof claimedScore === 'number' ? claimedScore : null,
+        threshold,
+      });
+      return res.json({ authorized: false, reason: 'below_match_threshold' });
+    }
+
     const result = await checkInService.processCheckIn(numericId, {
       modality: 'face',
       deviceId,
-      matchScore,
+      // Server-recomputed score, not the client's — this is what the event log
+      // and any downstream audit records as the match strength.
+      matchScore: serverScore,
       enforceAuthorization: true,
       enforceSessionWindowsOnCheckout: false,
       minCheckoutDwellMinutes: settingsCache.getInt('face_checkout_min_dwell_minutes', 15),
@@ -432,7 +452,13 @@ const faceCheckIn = async (req, res) => {
       allowCrossDateCheckout: true,
       eventContext: {
         biometricRef: 'face',
-        raw: { modality: 'face', matchScore, livenessPassed: livenessPassed === true },
+        raw: {
+          modality: 'face',
+          matchScore: serverScore,
+          // Kept for audit: a large gap from serverScore flags a misbehaving kiosk.
+          claimedScore: typeof claimedScore === 'number' ? claimedScore : null,
+          livenessPassed: livenessPassed === true,
+        },
       },
     });
 
