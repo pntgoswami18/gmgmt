@@ -87,8 +87,11 @@ lock so you can test the full loop without hardware:
 - Runs its own tiny HTTP server on **port 80** to receive the backend's
   `unlock_door` / `access_granted` commands — the same command channel
   described in the deployment guide. Because port 80 needs elevated
-  privileges, run it with `sudo` on macOS/Linux or as Administrator on
-  Windows; the script prints this hint on bind failure.
+  privileges, run it with `sudo -E node tools/simulate-esp32-door.js` (the
+  `-E` preserves `DEVICE_SHARED_SECRET` across the privilege escalation);
+  the script prints this hint on an `EACCES` bind failure. The hint is
+  macOS/Linux-specific — there's no Windows/Administrator equivalent in the
+  script.
 - Listens on `127.0.0.1` explicitly rather than `localhost`, since Node can
   resolve `localhost` to IPv6 `::1` while the backend binds IPv4 — see the
   comment at the top of the file for the full reasoning.
