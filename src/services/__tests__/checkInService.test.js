@@ -102,6 +102,17 @@ test.after(async () => {
   await teardown();
 });
 
+// Safety net for tests that fake the clock via `mock.timers` (the global
+// tracker imported above, not a test-context-scoped one, so it does NOT
+// auto-reset between tests): a test that throws before its own try/finally
+// resets the clock — or a future test that forgets to reset at all — would
+// otherwise leak fake time into every test that runs after it. `reset()` is
+// a no-op when the clock isn't currently mocked, so this is safe to run
+// unconditionally after every test.
+test.afterEach(() => {
+  mock.timers.reset();
+});
+
 test('face check-in: authorized happy path inserts attendance and logs event', async () => {
   const memberId = insertMember({ name: 'Alice' });
   const result = await checkInService.processCheckIn(memberId, {
