@@ -20,14 +20,16 @@ const todayStr = () => dateStrOf(new Date());
 // Local-time ISO string (no Z) — parsed as local time, like ESP32 timestamps.
 // Seconds are preserved (not zeroed) so sub-minute dwell math in the service
 // isn't skewed by up to a minute depending on when the test happens to run.
-// This was the root cause of the flaky failure in "re-entry near the top of
-// the dwell window reports 1 minute, never 0" below: zeroing seconds could
-// push a nominal 14.5-minute-old check-in stamp up to 59s earlier, tipping
-// dwellMinutes over the 15-minute checkout threshold on roughly half of all
-// real-clock runs. Every other dwell-relative test in this file (e.g. "dwell
-// boundary", "re-entry within dwell") shares this same helper and benefits
-// from the same fix, even though only the near-boundary test was tight
-// enough on margin to actually flip.
+// Zeroing seconds was originally the root cause of a flaky failure in
+// "re-entry near the top of the dwell window reports 1 minute, never 0"
+// below: it could push a nominal 14.5-minute-old check-in stamp up to 59s
+// earlier, tipping dwellMinutes over the 15-minute checkout threshold on
+// roughly half of all real-clock runs. That test has since been reworked to
+// bypass localIso entirely (it pins check-in and scan to the same reference
+// instant via explicit full-precision timestamps, for a margin of exactly
+// 30s every run instead of "usually enough"), but this fix still applies to
+// every other dwell-relative test in the file that goes through localIso's
+// default insertAttendance() path.
 const localIso = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` +
   `T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
@@ -324,28 +326,55 @@ test('re-entry within dwell: deactivated member is refused re-admission (not aut
   assert.equal(events.at(-1).success, 0);
 });
 
-test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.max floor)', async (t) => {
-  const memberId = insertMember({ name: 'AlmostOut' });
+test('re-entry within dwell: fingerprint (enforceAuthorization=false) admits a deactivated member, unlike face', async () => {
+  const memberId = insertMember({ name: 'LapsedFingerprint', isActive: 0 });
+  const checkIn = new Date();
+  checkIn.setMinutes(checkIn.getMinutes() - 2);
+  insertAttendance(memberId, checkIn);
 
-  // This test's margin against the 15-minute checkout threshold is only 30s
-  // (14.5 min dwell vs. a 15 min floor), which used to make it flaky against
-  // the real wall clock — see the localIso comment above. Rather than lean on
-  // localIso's fix plus hoping real execution time doesn't drift, freeze Date
-  // at the real "now" and advance it by an exact, synthetic 14.5 minutes, so
-  // the service always observes precisely 14.5 minutes of dwell — no matter
-  // how long insertAttendance/processCheckIn actually take to run.
-  const start = Date.now();
-  t.mock.timers.enable({ apis: ['Date'], now: start });
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    minCheckoutDwellMinutes: 15,
+    eventContext: { biometricRef: 'fingerprint' },
+  });
+  // Fingerprint's is_active gate on re-entry is intentionally skipped
+  // (enforceAuthorization: false, matching its historical "always logs
+  // attendance" behavior) — unlike face, which denies this same scenario
+  // with member_inactive (see the preceding test).
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(result.action, 'reentry');
+  assert.equal(result.reason, 'already_checked_in');
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must NOT create a duplicate attendance row');
+  assert.equal(rows[0].check_out_time, null, 'must NOT be flipped to checked out');
+});
+
+test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.max floor)', async () => {
+  const memberId = insertMember({ name: 'AlmostOut' });
 
   // 14.5 min into a 15-min dwell → raw ceil(0.5) = 1; the sub-minute remainder
   // must surface as "1 minute until checkout", not "0".
-  const checkIn = new Date(start);
-  insertAttendance(memberId, checkIn);
-  t.mock.timers.tick(14.5 * 60000);
+  //
+  // Both the check-in row and the scan are pinned to the SAME fixed reference
+  // instant, 14.5 minutes apart, via explicit full-precision timestamps
+  // (rawCheckInTime / timestamp) — NOT via localIso(), which hardcodes ":00"
+  // seconds and so truncates to whole minutes. Truncating both sides down to
+  // their respective minute starts turns the intended 14.5-minute gap into
+  // anywhere from ~14 to ~15+ minutes depending on the seconds-value of `now`
+  // when the test happens to run, occasionally tipping dwellMinutes to >= 15
+  // and flipping this to a checkout (observed as a flake correlated with wall
+  // time, not DB load). Full-precision timestamps make the gap exactly 14.5
+  // minutes regardless of when the test runs.
+  const now = new Date();
+  const checkIn = new Date(now.getTime() - 14.5 * 60000);
+  insertAttendance(memberId, checkIn, { rawCheckInTime: checkIn.toISOString() });
 
   const result = await checkInService.processCheckIn(memberId, {
     modality: 'face',
     minCheckoutDwellMinutes: 15,
+    timestamp: now.toISOString(),
     eventContext: { biometricRef: 'face' },
   });
   assert.equal(result.authorized, true, JSON.stringify(result));
@@ -458,6 +487,40 @@ test('dwell boundary: scan at exactly the dwell minimum is a checkout, not a dup
   });
   assert.equal(result.authorized, true, JSON.stringify(result));
   assert.equal(result.action, 'checkout');
+});
+
+test('dwell decision ignores a skewed device clock: a fingerprint unit reporting a timestamp far ahead of real time must not force an immediate checkout', async () => {
+  const memberId = insertMember({ name: 'SkewedDevice' });
+  // Real check-in 2 minutes ago (server-observed time), well within a 15-min dwell.
+  const checkIn = new Date(Date.now() - 2 * 60000);
+  insertAttendance(memberId, checkIn, { rawCheckInTime: checkIn.toISOString() });
+
+  // Simulates a second ESP32 unit whose onboard clock is 30 minutes ahead of
+  // real time. Pre-fix, dwell math used this device-reported value directly,
+  // so (skewed "now" - real checkInTime) would read as ~32 minutes elapsed —
+  // past the 15-min dwell — and wrongly flip this to a checkout.
+  const skewedDeviceTimestamp = new Date(Date.now() + 30 * 60000).toISOString();
+
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    minCheckoutDwellMinutes: 15,
+    timestamp: skewedDeviceTimestamp,
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(
+    result.action,
+    'reentry',
+    'must be a re-entry — the real elapsed time is ~2 minutes, not ~32'
+  );
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(rows.length, 1, 'must NOT create a duplicate attendance row');
+  assert.equal(
+    rows[0].check_out_time,
+    null,
+    'must NOT be flipped to checked out by a skewed device clock'
+  );
 });
 
 test('corrupt check_in_time on the open row denies with invalid_attendance_record, not a dwell lie', async () => {

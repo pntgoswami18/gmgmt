@@ -33,13 +33,13 @@ npm run esp32:test:api      # Test REST API endpoints only
 # Backend unit tests (node:test — the repo does not use jest). Requires
 # Node >= 20: on Node 18 the better-sqlite3 native module fails to load
 # (NODE_MODULE_VERSION ABI mismatch) and every DB-touching suite errors out.
-node --test 'src/services/__tests__/*.test.js'
+node --test 'src/**/__tests__/*.test.js'
 
 # Single test file
 node --test src/services/__tests__/biometricIntegration.test.js
 ```
 
-Unit + integration tests are expected for all changes — run both `node --test 'src/services/__tests__/*.test.js'` and `npm run esp32:test` before marking work done. The ESP32 integration tests need the server running (`JWT_SECRET=<any> ENABLE_BIOMETRIC=true BIOMETRIC_PORT=5005 node src/app.js`).
+Unit + integration tests are expected for all changes — run both `node --test 'src/**/__tests__/*.test.js'` and `npm run esp32:test` before marking work done. The ESP32 integration tests need the server running (`JWT_SECRET=<any> ENABLE_BIOMETRIC=true BIOMETRIC_PORT=5005 node src/app.js`). Note the recursive glob: test files live under `src/services/__tests__/`, `src/api/controllers/__tests__/`, and `src/api/middleware/__tests__/`, not just `src/services/__tests__/`.
 
 No dedicated lint script exists. No Docker setup — runs directly with Node.js.
 

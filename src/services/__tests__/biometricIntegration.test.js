@@ -65,6 +65,10 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
     const [evS, evE] = awayWindow(mins, 240, 300);
     set('evening_session_start', hhmm(evS));
     set('evening_session_end', hhmm(evE));
+    // Dwell 0 → any second scan checks out immediately (the historical
+    // fingerprint behavior). The re-entry path with a non-zero dwell is covered
+    // by the next test.
+    set('fingerprint_checkout_min_dwell_minutes', 0);
     await settingsCache.refresh();
 
     const memberId = db
@@ -76,6 +80,7 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
     const calls = [];
     integration.notifyCheckIn = (mem) => calls.push(['checkin', mem.id]);
     integration.notifyCheckOut = (mem) => calls.push(['checkout', mem.id]);
+    integration.notifyReentry = (mem) => calls.push(['reentry', mem.id]);
     integration.notifyAlreadyCompleted = (mem) => calls.push(['already_completed', mem.id]);
 
     // 1st scan → check-in broadcast.
@@ -84,7 +89,7 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
       deviceId: 'd',
     });
     assert.equal(first.reason, 'checked_in');
-    // 2nd scan → checkout broadcast (no dwell requirement on fingerprint).
+    // 2nd scan → checkout broadcast (dwell 0, so an immediate re-scan checks out).
     const second = await integration.logMemberAttendance(member, null, {
       userId: '9',
       deviceId: 'd',
@@ -101,6 +106,64 @@ test('logMemberAttendance dispatches the right WebSocket notification per outcom
       ['checkin', memberId],
       ['checkout', memberId],
       ['already_completed', memberId],
+    ]);
+  } finally {
+    await teardown();
+  }
+});
+
+test('logMemberAttendance: a re-scan within the dwell window is a re-entry, not a checkout', async () => {
+  const db = await setup();
+  try {
+    const mins = nowMinutes();
+    const set = (k, v) =>
+      db
+        .prepare(
+          'INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+        )
+        .run(k, String(v));
+    set('morning_session_start', hhmm(mins - 60));
+    set('morning_session_end', hhmm(mins + 60));
+    const [evS, evE] = awayWindow(mins, 240, 300);
+    set('evening_session_start', hhmm(evS));
+    set('evening_session_end', hhmm(evE));
+    set('fingerprint_checkout_min_dwell_minutes', 15);
+    await settingsCache.refresh();
+
+    const memberId = db
+      .prepare('INSERT INTO members (name, is_active) VALUES (?, 1)')
+      .run('Returner').lastInsertRowid;
+    const member = { id: memberId, name: 'Returner' };
+
+    const integration = new BiometricIntegration();
+    const calls = [];
+    integration.notifyCheckIn = (mem) => calls.push(['checkin', mem.id]);
+    integration.notifyCheckOut = (mem) => calls.push(['checkout', mem.id]);
+    integration.notifyReentry = (mem) => calls.push(['reentry', mem.id]);
+    integration.notifyAlreadyCompleted = (mem) => calls.push(['already_completed', mem.id]);
+
+    // 1st scan → check-in.
+    const first = await integration.logMemberAttendance(member, null, {
+      userId: '9',
+      deviceId: 'd',
+    });
+    assert.equal(first.reason, 'checked_in');
+    // 2nd scan, immediately (within the 15-min dwell) → re-entry, NOT checkout.
+    const second = await integration.logMemberAttendance(member, null, {
+      userId: '9',
+      deviceId: 'd',
+    });
+    assert.equal(second.reason, 'already_checked_in');
+    assert.equal(second.action, 'reentry');
+
+    // Attendance is untouched: exactly one open row, never checked out.
+    const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+    assert.equal(rows.length, 1, 'no duplicate attendance row on re-entry');
+    assert.equal(rows[0].check_out_time, null, 'must NOT be flipped to checked out');
+
+    assert.deepEqual(calls, [
+      ['checkin', memberId],
+      ['reentry', memberId],
     ]);
   } finally {
     await teardown();
