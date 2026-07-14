@@ -16,7 +16,7 @@ Last updated: 2026-07-13 (full audit pass: gmgmt#26/#27/#28 and client#12/#13/#1
 | P1 | gmgmt | Model pipeline — SFace ONNX→TFLite conversion, quantization, LFW eval harness | ✅ Merged (#17) |
 | P2 | gmgmt | Backend — `checkInService` extraction, face endpoints, schema | ✅ Merged (#18) |
 | P3 | client | Enrollment UI — `faceEngine.js`, `FaceEnrollment.js` tab | ✅ Merged (#10, squash) |
-| P3 | gmgmt | Model deployment — `deploy-models.sh` + manifest | ✅ Merged (#21) |
+| P3 | gmgmt | Model deployment — `deploy-models.js` + manifest | ✅ Merged (#21) |
 | P3 | gmgmt | Verification pass — fixed midnight-fragile tests, verify-skill hardening | ✅ Merged (#22) |
 | P4 | client | Kiosk UI — `/checkin` route, matching/liveness/cache modules, `useFaceCheckin` hook | ✅ Merged ([client#11](https://github.com/pntgoswami18/client/pull/11), commit `b83312f`) |
 | — | gmgmt | Bump `client` submodule pointer to new client `main` | ✅ Merged ([gmgmt#23](https://github.com/pntgoswami18/gmgmt/pull/23), commit `af6283d`) |
@@ -27,9 +27,11 @@ Last updated: 2026-07-13 (full audit pass: gmgmt#26/#27/#28 and client#12/#13/#1
 | — | client | Companion: kiosk sends probe embedding for server re-scoring | ✅ Merged ([client#13](https://github.com/pntgoswami18/client/pull/13), commit `0f088e4`) |
 | — | gmgmt | Fix: re-entry within checkout dwell window unlocks door, doesn't double-log | ✅ Merged ([gmgmt#28](https://github.com/pntgoswami18/gmgmt/pull/28), commit `b4c24ce`) |
 | — | client | Fix: inverted liveness turn direction, generic denial messages, re-entry UI, face-tracking overlay | ✅ Merged ([client#14](https://github.com/pntgoswami18/client/pull/14), commit `64be0a6`) |
-| — | gmgmt | Bump `client` submodule pointer to pick up client#14 (`64be0a6`) | 🟡 PR open — [gmgmt#32](https://github.com/pntgoswami18/gmgmt/pull/32) |
+| — | gmgmt | Bump `client` submodule pointer to pick up client#14 (`64be0a6`) | ✅ Merged ([gmgmt#32](https://github.com/pntgoswami18/gmgmt/pull/32), commit `c0692b5`) |
+| — | gmgmt | Windows compatibility: port `deploy-models.sh`/`download-models.sh` to Node | 🟡 PR open — [gmgmt#37](https://github.com/pntgoswami18/gmgmt/pull/37) (see §7) |
+| — | gmgmt | Windows compatibility: add missing `ESP32_DEPLOYMENT_GUIDE.md` + `tools/WINDOWS_TESTING_GUIDE.md` | 🟡 PR open — [gmgmt#38](https://github.com/pntgoswami18/gmgmt/pull/38) (see §7) |
 | — | client+gmgmt | **New gap found: admin-UI entry point to the kiosk** (plan §3.6, see §3.11) | ⬜ **Planned only — zero code.** No "Launch kiosk" button, no `deviceSecretConfigured` field |
-| — | ops | Run `deploy-models.sh` on the actual deployment target | ⬜ Not started |
+| — | ops | Run `deploy-models.js` on the actual deployment target | ⬜ Not started |
 | — | ops | Set `DEVICE_SHARED_SECRET` env var + provision kiosk browser | ⬜ Not started |
 | — | ops | Register/pair the ESP32 door device, set `face_door_device_id` | ⬜ Not started (hardware-dependent) |
 | — | human | Real-camera walk-up test (enroll → kiosk scan → unlock) | ⬜ Not started |
@@ -70,7 +72,7 @@ Live-verified end to end against a running local backend: panel loads correct de
 **Known limitation carried into §3.11:** this panel only mentions `/checkin` in caption text — there's no button that takes staff there. See §3.11.
 
 ### 3.4 Deploy models to the target environment
-`tools/face-model/deploy-models.sh` (merged in #21) copies the fp32 embedder + pinned `face_landmarker.task` + WASM runtimes into `public/models/` and writes `manifest.json`. **`public/models/` is gitignored** — this must be *run*, not just merged, on every environment that needs to serve the kiosk (dev, staging, prod). Confirm it's been run wherever `/checkin` will actually be tested/used; `GET /api/biometric/face/model-manifest` 404s otherwise (see `getModelManifest` in `faceBiometricController.js`).
+`tools/face-model/deploy-models.js` (originally `.sh`, merged in #21; **ported to cross-platform Node** — see §7) copies the fp32 embedder + pinned `face_landmarker.task` + WASM runtimes into `public/models/` and writes `manifest.json`. **`public/models/` is gitignored** — this must be *run*, not just merged, on every environment that needs to serve the kiosk (dev, staging, prod). Confirm it's been run wherever `/checkin` will actually be tested/used; `GET /api/biometric/face/model-manifest` 404s otherwise (see `getModelManifest` in `faceBiometricController.js`). Run with `node tools/face-model/deploy-models.js` (requires `build/face_embedder_v1_fp32.tflite` from `convert.py` and `client/node_modules` from `npm install` in `client/` — same prerequisites as before, just no bash/curl/sha256sum dependency now).
 
 ### 3.5 Configure `DEVICE_SHARED_SECRET` + provision the kiosk browser
 - Set `DEVICE_SHARED_SECRET` in the server's env (currently commented out in `.env.sample:29`). Until it's set, `/api/biometric/face/sync` and `/face/check-in` return 503 (see `src/app.js:133-139`) — this is deliberate fail-closed behavior, not a bug.
@@ -127,7 +129,7 @@ This is genuinely unbuilt — worth prioritizing before rollout, since without i
 - `src/utils/faceMatch.js` — pure server-side cosine match / probe validation, the authoritative re-scoring the door unlock hangs on (mirror of the kiosk's `faceMatching.js`)
 - `src/config/sqlite.js:287-292` — face settings defaults
 - `src/app.js:110-163` — auth routing: `FACE_STATION_PATHS` (device-secret-only, fail-closed), `FACE_BOOTSTRAP_PATHS` (device-secret OR staff session)
-- `tools/face-model/` — P1 conversion/eval scripts + `deploy-models.sh`
+- `tools/face-model/` — P1 conversion/eval scripts + `deploy-models.js` (Node, cross-platform — see §7)
 - `tools/simulate-esp32-door.js` — local dev-only ESP32 door simulator (heartbeat self-registration + serves the unlock-command HTTP endpoint on port 80, needs `sudo`), used to manually verify gmgmt#28's re-entry unlock live. Untracked as of this audit; being added to the repo separately.
 
 **Frontend (client):**
@@ -184,3 +186,26 @@ npm run esp32:test   # needs server running with ENABLE_BIOMETRIC=true
 CI=true npx react-scripts test --testPathPattern="utils/(faceStation|faceMatching|faceLiveness|faceCacheDb|faceAlign|faceOverlay)" --watchAll=false
 npx react-scripts build   # full compile/lint check
 ```
+
+---
+
+## 7. Windows compatibility
+
+Audited on request: does the runtime path (server + browser kiosk) and its supporting tooling work on a Windows deployment machine, not just macOS/Linux dev machines?
+
+**Already solid, no changes needed:**
+- `src/config/sqlite.js` has an explicit `win32` branch for the DB data path (`%ProgramData%\gmgmt` fallback, or `WIN_DATA_ROOT` override).
+- `biometricListener.js`'s TCP listener binds `0.0.0.0` — no OS-specific socket code.
+- All npm scripts that set env vars use `cross-env` (both repos) — the common `FOO=bar node x` Windows footgun is already avoided.
+- All file paths in `multer.js`, `app.js`'s static serving, and `sqlite.js` use `path.join`/`path.extname`, never hardcoded `/` concatenation.
+- The kiosk itself (`/checkin`, camera access, MediaPipe/LiteRT WASM) is pure browser code — identical on Windows Chrome/Edge, nothing OS-specific.
+
+**Fixed this round:**
+- **`tools/face-model/deploy-models.sh` and `download-models.sh` were bash-only** (`sha256sum`/`shasum`, `cp -R`, `mkdir -p`, `curl`) — none of which exist in plain `cmd.exe`/PowerShell. Since `public/models/` is gitignored and must be generated on every deployment target, a Windows machine without WSL/Git Bash could not populate it, blocking the kiosk and enrollment UI from loading a model at all. **Ported both to Node** (`deploy-models.js`, `download-models.js` + a shared `tools/face-model/lib/fetchVerify.js` for the sha256/download/verify logic) — `fs`/`crypto`/`https` only, no shell dependency. Verified live: `download-models.js` ran end-to-end against the real pinned URLs (redirect-following + SHA-256 verification all correct) and was confirmed idempotent on a second run; `deploy-models.js`'s guard clauses were exercised (clean exit on missing prerequisite files). The old `.sh` files were removed, not just superseded, to avoid two implementations drifting apart.
+
+**Fixed in a companion PR, not this one:**
+- `ESP32_DEPLOYMENT_GUIDE.md` and `tools/WINDOWS_TESTING_GUIDE.md`, both referenced by `package.json`'s `esp32:help`/`windows:help` scripts, did not exist — pre-existing dead references (predates face check-in). Added in [gmgmt#38](https://github.com/pntgoswami18/gmgmt/pull/38), split out from this PR so the two concerns (script porting vs. missing docs) can be reviewed/merged independently. `tools/WINDOWS_TESTING_GUIDE.md` describes this PR's `deploy-models.js`/`download-models.js` port, so merge both for the doc to be fully accurate.
+
+**Still not addressed (out of scope for this pass, worth knowing):**
+- `tools/simulate-esp32-door.js` needs to bind port 80 and tells the operator to `sudo` — Unix-specific. Not a production blocker (real ESP32 hardware binds its own port 80 as embedded firmware, independent of the host OS; the gmgmt backend only makes *outbound* HTTP calls to it, which need no elevated privilege on any OS) — only affects using this specific dev-only simulator tool on Windows, where the equivalent would be running as Administrator or reserving the port via `netsh http add urlacl`.
+- The Phase 0/1 model-conversion tooling (`convert.py`, `evaluate.py`, the Python `.venv`) is developer-only, one-time tooling for building/updating the models — not something a gym's Windows deployment machine ever runs, so it wasn't in scope for this audit even though it's Python/venv-based and not verified cross-platform.

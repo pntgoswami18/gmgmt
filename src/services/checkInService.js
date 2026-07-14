@@ -306,7 +306,20 @@ async function processCheckInLocked(memberId, options = {}) {
 
   const isAdmin = member.is_admin === 1;
   const windows = getSessionWindows();
-  const currentSession = sessionOf(now.getHours() * 60 + now.getMinutes(), windows);
+  // Session-window membership must not trust a client-reported clock: `now`
+  // above may come straight from a device's own `timestamp` field (e.g. an
+  // ESP32 fingerprint unit's onboard clock), and with multiple physical door
+  // units their clocks can drift independently or be wrong outright. A
+  // skewed device clock deciding this would push a scan into or out of a
+  // session window it isn't really in, producing a wrong
+  // outside_session_windows/cross_session_violation denial (or a wrong
+  // allow). Mirrors the same fix applied to the dwell-minutes calculation
+  // below — this is always measured against the server's own wall clock,
+  // while `now`/`timeStr` are kept as the device-reported time for anything
+  // meant to reflect when the event actually happened (stored
+  // check_in_time/check_out_time, `result.at`).
+  const serverNow = new Date();
+  const currentSession = sessionOf(serverNow.getHours() * 60 + serverNow.getMinutes(), windows);
 
   const existing = await getTodayAttendance(member.id, dateStr);
   let openRow = existing && !existing.check_out_time ? existing : null;

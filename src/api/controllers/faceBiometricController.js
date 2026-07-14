@@ -535,6 +535,7 @@ const getFaceConfig = async (req, res) => {
         modelVersion: settingsCache.get('face_model_version', ''),
         checkoutMinDwellMinutes: settingsCache.getInt('face_checkout_min_dwell_minutes', 15),
         doorDeviceConfigured: settingsCache.get('face_door_device_id', '') !== '',
+        deviceSecretConfigured: !!process.env.DEVICE_SHARED_SECRET,
       },
     });
   } catch (error) {
