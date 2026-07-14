@@ -12,7 +12,8 @@ and what's genuinely not supported yet. For ESP32/firmware specifics see
   mismatch, run `npm rebuild better-sqlite3` under the Node version you're
   actually using.
 - Git for Windows (needed to clone the repo anyway) also provides the Git
-  Bash shell that Husky's pre-commit hooks run under.
+  Bash shell, which any future shell-based git hooks would need — `husky` is
+  a devDependency with a `prepare` script, but no hooks are configured yet.
 
 ## What already works, no workaround needed
 

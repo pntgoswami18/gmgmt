@@ -6,7 +6,7 @@ and test that integration. For Windows-specific setup/diagnostics, see
 
 ## How it works
 
-Two independent channels, both defined in `src/services/biometricIntegration.js`:
+Two independent channels, orchestrated by `src/services/biometricIntegration.js`:
 
 1. **TCP listener** (`biometricListener.js`, default port `8080`, binds
    `0.0.0.0`) — ESP32 devices connect and send JSON events: fingerprint
