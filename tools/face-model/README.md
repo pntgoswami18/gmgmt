@@ -58,7 +58,7 @@ Notes:
 
 Per plan Section 1.1: **SFace (OpenCV Zoo, Apache-2.0)** primary,
 **EdgeFace (MIT)** fallback. Pinned artifacts (fetched by
-`download-models.sh`, SHA-256 verified):
+`download-models.js`, SHA-256 verified):
 
 | Artifact | Size | SHA-256 |
 |---|---|---|
@@ -68,7 +68,7 @@ Per plan Section 1.1: **SFace (OpenCV Zoo, Apache-2.0)** primary,
 | `face_detection_yunet_2023mar.onnx` (OpenCV Zoo, MIT — eval harness only) | 227 KB | `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4` |
 
 The two OpenCV Zoo ONNX files are pinned to opencv_zoo commit `47534e2`, not
-the moving `main` branch, and `download-models.sh` re-verifies every artifact's
+the moving `main` branch, and `download-models.js` re-verifies every artifact's
 SHA-256 on each run (a mismatched local copy is re-fetched, then hard-fails if
 it still doesn't match).
 
@@ -83,7 +83,7 @@ the pinned SFace checkpoint off its recorded hash on every run. Verified
 equivalent in onnxruntime (cosine 1.0, max|Δ| 2e-6 over 5 seeds), so no
 downstream artifact was wrong — but the on-disk checkpoint no longer matched
 its pin. `convert.py` now converts a **disposable copy** and never touches the
-pinned file; `download-models.sh`'s verify-and-refetch is the backstop that
+pinned file; `download-models.js`'s verify-and-refetch is the backstop that
 catches any residual drift.
 
 **Build determinism (onnxsim):** onnx2tf shells out to the `onnxsim` CLI, and
@@ -197,7 +197,7 @@ FAR/FRR sweep. 2200 pairs, zero detection failures.
 ## Running the pipeline
 
 ```bash
-./download-models.sh                      # pinned artifacts (not in git)
+node download-models.js                  # pinned artifacts (not in git)
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python convert.py               # ONNX -> fp32 + int8 tflite + fidelity gate
 .venv/bin/python evaluate.py              # LFW FAR/FRR -> recommended threshold
@@ -207,7 +207,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 ## Running the spike
 
 ```bash
-./download-models.sh          # fetch + verify pinned model artifacts (not in git)
+node download-models.js       # fetch + verify pinned model artifacts (not in git)
 cd spike && npm ci
 npm start                     # http://localhost:4173 — benchmark auto-runs
 ```
@@ -224,7 +224,7 @@ rather than transcribed numbers.
 
 ## Layout
 
-- `download-models.sh` — pinned artifact fetcher + SHA-256 verifier (writes to `spike/models/`)
+- `download-models.js` — pinned artifact fetcher + SHA-256 verifier (writes to `spike/models/`)
 - `spike/` — self-contained LiteRT.js benchmark (static server + page);
   `node_modules/` and `models/` are git-ignored, `package-lock.json` is committed
   so the measured runtime version is reproducible
