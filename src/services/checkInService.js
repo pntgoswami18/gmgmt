@@ -67,20 +67,22 @@ function toLocalDateStr(instant) {
 }
 
 // Mirrors logMemberAttendance's ESP32 timestamp handling: device timestamps are
-// local time and are stored verbatim to avoid timezone conversion; the derived
-// date string is taken from the same local instant. The server-time fallback
-// (always taken by the face path, which sends no device timestamp) uses the
-// same local-date derivation.
+// local time and are stored verbatim to avoid timezone conversion. The
+// server-time fallback (always taken by the face path, which sends no device
+// timestamp) uses the same local-time instant. Deliberately does NOT return a
+// dateStr derived from this instant — see the attendance-day-bucket comment
+// in processCheckInLocked for why day-bucket decisions use the server's own
+// clock instead, even when `now` here is device-reported.
 function resolveEventTime(timestamp) {
   if (timestamp) {
     const parsed = new Date(timestamp);
     if (!isNaN(parsed.getTime())) {
-      return { now: parsed, dateStr: toLocalDateStr(parsed), timeStr: timestamp };
+      return { now: parsed, timeStr: timestamp };
     }
     logger.warn(`⚠️ Failed to parse device timestamp "${timestamp}", using server time instead`);
   }
   const now = new Date();
-  return { now, dateStr: toLocalDateStr(now), timeStr: now.toISOString() };
+  return { now, timeStr: now.toISOString() };
 }
 
 async function logEvent(eventContext, member, eventType, timeStr, success, extra = {}) {
@@ -260,7 +262,19 @@ async function processCheckInLocked(memberId, options = {}) {
   } = options;
   const eventContext = options.eventContext ? { deviceId, ...options.eventContext } : null;
 
-  const { now, dateStr, timeStr } = resolveEventTime(timestamp);
+  const { now, timeStr } = resolveEventTime(timestamp);
+  // Attendance day-bucket must not trust a client-reported clock, same class
+  // of bug as the session-window/dwell clock-trust fixes above: a device
+  // whose onboard clock is wrong by more than a few hours (not just skewed
+  // within a day, but on the wrong calendar day entirely — a dead RTC battery
+  // resetting to an epoch date, or a misconfigured timezone) would bucket
+  // this event under the wrong `date`, corrupting getTodayAttendance's and
+  // getPreviousDayOpenAttendance's lookups and writing a wrong-day `date`
+  // column. Always derive the bucket from the server's own clock; `now`/
+  // `timeStr` still carry the device-reported instant for anything meant to
+  // reflect when the event actually happened (stored check_in_time/
+  // check_out_time, `result.at`).
+  const dateStr = toLocalDateStr(new Date());
   const deny = (reason, member = null, extra = {}) => ({
     authorized: false,
     action: null,

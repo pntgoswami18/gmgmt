@@ -599,3 +599,58 @@ test('attendance date is bucketed by LOCAL calendar date', async () => {
   const row = db.prepare('SELECT date FROM attendance WHERE member_id = ?').get(memberId);
   assert.equal(row.date, todayStr(), 'date column must be the local date, not the UTC one');
 });
+
+test('attendance day bucket ignores a device clock reporting the wrong calendar day', async () => {
+  const memberId = insertMember({ name: 'DateSkewDevice' });
+  // Simulates a device whose onboard clock is wrong by more than a skew
+  // within the day — e.g. a dead RTC battery resetting to the Unix epoch —
+  // not just wrong minutes/hours but a wholly different calendar day. The
+  // event is really happening right now on the server.
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    timestamp: '1970-01-01T10:00:00',
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  const row = db
+    .prepare('SELECT date, check_in_time FROM attendance WHERE member_id = ?')
+    .get(memberId);
+  assert.equal(
+    row.date,
+    todayStr(),
+    'date bucket must be the server local date, not the device-reported one'
+  );
+  // The device-reported instant is still stored verbatim for the record
+  // itself — only the day-BUCKET decision uses the server clock.
+  assert.equal(row.check_in_time, '1970-01-01T10:00:00');
+});
+
+test('re-entry/checkout lookup finds an open row despite a device clock reporting the wrong calendar day', async () => {
+  const memberId = insertMember({ name: 'DateSkewLookup' });
+  // Open row exists under TODAY's real (server) date bucket.
+  insertAttendance(memberId, new Date());
+
+  // Second scan's device clock claims a wholly different calendar day. Pre-fix,
+  // this would have looked up (and found nothing under) the wrong day's
+  // bucket, so the scan landed in the check-in direction — a duplicate open
+  // row for a member who is actually still inside their first, still-open
+  // visit — instead of correctly finding and closing it.
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    timestamp: '1970-01-01T10:00:00',
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(
+    result.action,
+    'checkout',
+    'must find and close the open row despite the device reporting a different calendar day'
+  );
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(
+    rows.length,
+    1,
+    'must not create a duplicate attendance row under the wrong-day bucket'
+  );
+});
