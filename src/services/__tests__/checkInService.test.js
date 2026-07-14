@@ -20,6 +20,14 @@ const todayStr = () => dateStrOf(new Date());
 // Local-time ISO string (no Z) — parsed as local time, like ESP32 timestamps.
 // Seconds are preserved (not zeroed) so sub-minute dwell math in the service
 // isn't skewed by up to a minute depending on when the test happens to run.
+// This was the root cause of the flaky failure in "re-entry near the top of
+// the dwell window reports 1 minute, never 0" below: zeroing seconds could
+// push a nominal 14.5-minute-old check-in stamp up to 59s earlier, tipping
+// dwellMinutes over the 15-minute checkout threshold on roughly half of all
+// real-clock runs. Every other dwell-relative test in this file (e.g. "dwell
+// boundary", "re-entry within dwell") shares this same helper and benefits
+// from the same fix, even though only the near-boundary test was tight
+// enough on margin to actually flip.
 const localIso = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` +
   `T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
@@ -316,12 +324,24 @@ test('re-entry within dwell: deactivated member is refused re-admission (not aut
   assert.equal(events.at(-1).success, 0);
 });
 
-test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.max floor)', async () => {
+test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.max floor)', async (t) => {
   const memberId = insertMember({ name: 'AlmostOut' });
+
+  // This test's margin against the 15-minute checkout threshold is only 30s
+  // (14.5 min dwell vs. a 15 min floor), which used to make it flaky against
+  // the real wall clock — see the localIso comment above. Rather than lean on
+  // localIso's fix plus hoping real execution time doesn't drift, freeze Date
+  // at the real "now" and advance it by an exact, synthetic 14.5 minutes, so
+  // the service always observes precisely 14.5 minutes of dwell — no matter
+  // how long insertAttendance/processCheckIn actually take to run.
+  const start = Date.now();
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+
   // 14.5 min into a 15-min dwell → raw ceil(0.5) = 1; the sub-minute remainder
   // must surface as "1 minute until checkout", not "0".
-  const checkIn = new Date(Date.now() - 14.5 * 60000);
+  const checkIn = new Date(start);
   insertAttendance(memberId, checkIn);
+  t.mock.timers.tick(14.5 * 60000);
 
   const result = await checkInService.processCheckIn(memberId, {
     modality: 'face',
