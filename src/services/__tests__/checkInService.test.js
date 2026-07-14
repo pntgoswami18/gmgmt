@@ -18,9 +18,21 @@ const dateStrOf = (d) => {
 const todayStr = () => dateStrOf(new Date());
 
 // Local-time ISO string (no Z) — parsed as local time, like ESP32 timestamps.
+// Seconds are preserved (not zeroed) so sub-minute dwell math in the service
+// isn't skewed by up to a minute depending on when the test happens to run.
+// Zeroing seconds was originally the root cause of a flaky failure in
+// "re-entry near the top of the dwell window reports 1 minute, never 0"
+// below: it could push a nominal 14.5-minute-old check-in stamp up to 59s
+// earlier, tipping dwellMinutes over the 15-minute checkout threshold on
+// roughly half of all real-clock runs. That test has since been reworked to
+// bypass localIso entirely (it pins check-in and scan to the same reference
+// instant via explicit full-precision timestamps, for a margin of exactly
+// 30s every run instead of "usually enough"), but this fix still applies to
+// every other dwell-relative test in the file that goes through localIso's
+// default insertAttendance() path.
 const localIso = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` +
-  `T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:00`;
+  `T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 
 async function setSetting(key, value) {
   db.prepare(
@@ -341,6 +353,7 @@ test('re-entry within dwell: fingerprint (enforceAuthorization=false) admits a d
 
 test('re-entry near the top of the dwell window reports 1 minute, never 0 (Math.max floor)', async () => {
   const memberId = insertMember({ name: 'AlmostOut' });
+
   // 14.5 min into a 15-min dwell → raw ceil(0.5) = 1; the sub-minute remainder
   // must surface as "1 minute until checkout", not "0".
   //
