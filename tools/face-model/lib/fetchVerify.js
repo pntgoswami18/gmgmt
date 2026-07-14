@@ -30,42 +30,105 @@ function verifySha(filePath, expectedSha, label = filePath) {
  */
 function downloadFile(url, destPath, { maxRedirects = 5, retries = 0 } = {}) {
   return new Promise((resolve, reject) => {
+    // Closes `file` and waits for the fd to actually release before the
+    // caller touches `destPath` again. On Windows, deleting or reopening a
+    // path while its previous write handle is still closing throws
+    // EBUSY/EPERM (POSIX allows it; Windows locks exclusively), so every
+    // redirect/retry/error path must wait for this callback first.
+    const closeThen = (fileHandle, next) => {
+      // Any close error here (already closed/destroyed, e.g. after the stream's
+      // own 'error' event) is irrelevant to the caller's outcome — the point of
+      // waiting is purely to let the OS release the fd before we touch the
+      // path again, so we proceed regardless of what close() reports.
+      fileHandle.close(() => next());
+    };
+
     const attempt = (currentUrl, redirectsLeft, retriesLeft) => {
       const file = fs.createWriteStream(destPath);
-      const req = https.get(currentUrl, (res) => {
-        const { statusCode, headers } = res;
-        if (statusCode >= 300 && statusCode < 400 && headers.location) {
-          file.close();
-          fs.unlinkSync(destPath);
-          if (redirectsLeft <= 0) {
-            reject(new Error(`too many redirects fetching ${url}`));
-            return;
-          }
-          attempt(new URL(headers.location, currentUrl).toString(), redirectsLeft - 1, retriesLeft);
-          return;
-        }
-        if (statusCode !== 200) {
-          file.close();
-          fs.unlinkSync(destPath);
-          if (retriesLeft > 0) {
-            attempt(currentUrl, redirectsLeft, retriesLeft - 1);
-            return;
-          }
-          reject(new Error(`HTTP ${statusCode} fetching ${currentUrl}`));
-          return;
-        }
-        res.pipe(file);
-        file.on('finish', () => file.close(resolve));
-      });
-      req.on('error', (err) => {
-        file.close();
-        fs.rmSync(destPath, { force: true });
+      let settled = false;
+
+      // Marks this attempt as committed to an outcome *synchronously*, before
+      // any async cleanup runs, so a sibling event (e.g. both `req` and `res`
+      // emitting 'error' for the same underlying socket failure) can never
+      // also act on this attempt's file/destPath — which would otherwise let
+      // a stale handler unlink/retry a second time while a fresh attempt is
+      // already writing to the same destPath.
+      const guard = (fn) => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
+
+      const retry = (err) => {
         if (retriesLeft > 0) {
           attempt(currentUrl, redirectsLeft, retriesLeft - 1);
         } else {
           reject(err);
         }
+      };
+
+      file.on('error', (err) =>
+        guard(() => {
+          closeThen(file, () => {
+            fs.rmSync(destPath, { force: true });
+            reject(err);
+          });
+        })
+      );
+
+      const req = https.get(currentUrl, (res) => {
+        const { statusCode, headers } = res;
+        if (statusCode >= 300 && statusCode < 400 && headers.location) {
+          guard(() => {
+            res.resume(); // drain the (empty) redirect body so the socket can close cleanly
+            closeThen(file, () => {
+              fs.rmSync(destPath, { force: true });
+              if (redirectsLeft <= 0) {
+                reject(new Error(`too many redirects fetching ${url}`));
+                return;
+              }
+              attempt(
+                new URL(headers.location, currentUrl).toString(),
+                redirectsLeft - 1,
+                retriesLeft
+              );
+            });
+          });
+          return;
+        }
+        if (statusCode !== 200) {
+          guard(() => {
+            res.resume(); // drain the error body so the socket can close cleanly
+            closeThen(file, () => {
+              fs.rmSync(destPath, { force: true });
+              retry(new Error(`HTTP ${statusCode} fetching ${currentUrl}`));
+            });
+          });
+          return;
+        }
+        res.pipe(file);
+        res.on('error', (err) =>
+          guard(() => {
+            closeThen(file, () => {
+              fs.rmSync(destPath, { force: true });
+              retry(err);
+            });
+          })
+        );
+        file.on('finish', () =>
+          guard(() => {
+            file.close(resolve);
+          })
+        );
       });
+      req.on('error', (err) =>
+        guard(() => {
+          closeThen(file, () => {
+            fs.rmSync(destPath, { force: true });
+            retry(err);
+          });
+        })
+      );
     };
     attempt(url, maxRedirects, retries);
   });
