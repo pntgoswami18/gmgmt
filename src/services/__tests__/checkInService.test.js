@@ -272,6 +272,46 @@ test('session-window decision ignores a skewed device clock: a fingerprint unit 
   assert.equal(row.check_in_time, skewedDeviceTimestamp);
 });
 
+test('cross-session check-in is still blocked when the earlier check-in was recorded by a device with a skewed clock', async () => {
+  // The earlier session's `date` bucket is correctly today (per the
+  // day-bucket fix), but its stored check_in_time is verbatim from a device
+  // clock that was on a wholly different calendar day (e.g. dead RTC battery
+  // at the time of that scan). The cross-session lookup must key off the
+  // `date` column, not DATE(check_in_time) — otherwise it silently stops
+  // matching this row and lets a second, same-day session through.
+  await setSetting('morning_session_start', '08:00');
+  await setSetting('morning_session_end', '11:00');
+  await setSetting('evening_session_start', '17:00');
+  await setSetting('evening_session_end', '19:00');
+  await setSetting('cross_session_checkin_restriction', 'true');
+
+  const memberId = insertMember({ name: 'CrossSessionSkewedEarlier' });
+  insertAttendance(memberId, null, {
+    checkedOut: true,
+    date: todayStr(),
+    rawCheckInTime: '1970-01-01T09:00:00',
+  });
+
+  // currentSession is derived from the server's wall clock (clock-trust fix),
+  // so the server clock — not just the `timestamp` option below — must be
+  // placed in the evening window for this scan to land there.
+  const today = todayStr();
+  mock.timers.enable({ apis: ['Date'], now: new Date(`${today}T18:00:00`) });
+  try {
+    const result = await checkInService.processCheckIn(memberId, {
+      modality: 'face',
+      timestamp: `${today}T18:00:00`, // evening scan, normal device clock
+      eventContext: { biometricRef: 'face' },
+    });
+    assert.equal(result.authorized, false);
+    assert.equal(result.reason, 'cross_session_violation');
+  } finally {
+    mock.timers.reset();
+  }
+
+  await openSessionWindowNow();
+});
+
 test('plan grace expiry denies face check-in and auto-deactivates member', async () => {
   const memberId = insertMember({
     name: 'Expired',
@@ -656,6 +696,10 @@ test('attendance date is bucketed by LOCAL calendar date', async () => {
 });
 
 test('attendance day bucket ignores a device clock reporting the wrong calendar day', async () => {
+  // Must not depend on real wall-clock time being inside the default session
+  // windows (see MIDNIGHT SAFETY note on openSessionWindowNow above) — this
+  // test drives the check-in direction, which is session-gated.
+  await openSessionWindowNow();
   const memberId = insertMember({ name: 'DateSkewDevice' });
   // Simulates a device whose onboard clock is wrong by more than a skew
   // within the day — e.g. a dead RTC battery resetting to the Unix epoch —

@@ -472,9 +472,15 @@ async function processCheckInLocked(memberId, options = {}) {
     }
 
     if (settingsCache.getBoolean('cross_session_checkin_restriction', true)) {
+      // Query the `date` bucket column, not DATE(check_in_time): check_in_time
+      // is stored verbatim from the device-reported instant, while `dateStr`
+      // (and the `date` column it's written into) is now always the server's
+      // own day. Comparing DATE(check_in_time) against dateStr would silently
+      // stop matching a same-day check-in whenever a device's clock lands on
+      // the wrong calendar day, defeating this restriction.
       const todayCheckIns = await pool.query(
         `SELECT check_in_time FROM attendance
-         WHERE member_id = ? AND DATE(check_in_time) = DATE(?)
+         WHERE member_id = ? AND date = ?
          ORDER BY check_in_time DESC LIMIT 1`,
         [member.id, dateStr]
       );
