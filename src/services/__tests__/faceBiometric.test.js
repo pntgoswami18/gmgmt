@@ -651,4 +651,27 @@ test('getFaceStatus and getFaceConfig report current state', async () => {
   assert.equal(typeof res._body.data.enabled, 'boolean');
   assert.equal(res._body.data.matchThreshold, 0.55);
   assert.equal(res._body.data.livenessMode, 'challenge');
+  assert.equal(typeof res._body.data.deviceSecretConfigured, 'boolean');
+});
+
+test('getFaceConfig: deviceSecretConfigured reflects DEVICE_SHARED_SECRET without echoing it', async () => {
+  const original = process.env.DEVICE_SHARED_SECRET;
+  try {
+    delete process.env.DEVICE_SHARED_SECRET;
+    let res = mockRes();
+    await faceController.getFaceConfig({}, res);
+    assert.equal(res._body.data.deviceSecretConfigured, false);
+
+    process.env.DEVICE_SHARED_SECRET = 'super-secret-value';
+    res = mockRes();
+    await faceController.getFaceConfig({}, res);
+    assert.equal(res._body.data.deviceSecretConfigured, true);
+    assert.ok(!JSON.stringify(res._body).includes('super-secret-value'));
+  } finally {
+    if (original === undefined) {
+      delete process.env.DEVICE_SHARED_SECRET;
+    } else {
+      process.env.DEVICE_SHARED_SECRET = original;
+    }
+  }
 });
