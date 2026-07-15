@@ -1701,6 +1701,7 @@ const validateBiometricId = async (req, res) => {
 
     // Import payment validation utilities
     const { checkMemberPaymentStatus } = require('../../utils/dateUtils');
+    const { toLocalDateStr } = require('../../services/checkInService');
 
     // Normalize biometricId to string for consistent lookup (handle "15.0" vs "15")
     const lookupId = String(parseInt(biometricId, 10));
@@ -1715,7 +1716,7 @@ const validateBiometricId = async (req, res) => {
 
     // OPTIMIZED: Single query with all necessary data including admin status and attendance
     const query = `
-      SELECT 
+      SELECT
         m.id as member_id,
         m.name,
         m.biometric_id,
@@ -1725,14 +1726,14 @@ const validateBiometricId = async (req, res) => {
         m.join_date,
         mp.name as plan_name,
         mp.duration_days,
-        (SELECT MAX(p.payment_date) 
-         FROM payments p 
-         JOIN invoices i ON p.invoice_id = i.id 
+        (SELECT MAX(p.payment_date)
+         FROM payments p
+         JOIN invoices i ON p.invoice_id = i.id
          WHERE i.member_id = m.id) as last_payment_date,
-        (SELECT COUNT(*) 
-         FROM attendance a 
-         WHERE a.member_id = m.id 
-         AND a.date = ? 
+        (SELECT COUNT(*)
+         FROM attendance a
+         WHERE a.member_id = m.id
+         AND a.date = ?
          AND a.check_out_time IS NULL) as today_active_sessions
       FROM members m
       LEFT JOIN membership_plans mp ON m.membership_plan_id = mp.id
@@ -1853,8 +1854,8 @@ const validateBiometricId = async (req, res) => {
         if (member.today_active_sessions === 0) {
           // Need to fetch check-in time details for session comparison
           const todayCheckIns = await pool.query(
-            `SELECT check_in_time FROM attendance 
-             WHERE member_id = ? AND DATE(check_in_time) = ? 
+            `SELECT check_in_time FROM attendance
+             WHERE member_id = ? AND date = ?
              ORDER BY check_in_time DESC LIMIT 1`,
             [member.member_id, todayDateStr]
           );
