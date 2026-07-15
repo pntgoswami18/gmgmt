@@ -5,7 +5,9 @@
   "main": "src/app.js",
   "scripts": {
     "prepare": "husky",
+    "prestart": "node tools/face-model/predeploy-models.js",
     "start": "node src/app.js",
+    "predev": "node tools/face-model/predeploy-models.js",
     "dev": "nodemon src/app.js",
     "biometric:start": "node src/startBiometricListener.js",
     "biometric:setup": "node tools/add_biometric_field.js",
