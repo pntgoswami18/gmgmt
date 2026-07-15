@@ -19,6 +19,15 @@
  * Node-native (fs/crypto/https only) so this runs identically on macOS,
  * Linux, and Windows — no bash, no sha256sum/shasum/cp/curl dependency.
  * Run with: node tools/face-model/deploy-models.js
+ *
+ * Also exported as `deploy()`/`checkPrerequisites()` for reuse by
+ * `predeploy-models.js`, the soft, non-fatal wrapper `npm start`/`npm run dev`
+ * invoke automatically (see package.json's `prestart`/`predev`) — that wrapper
+ * needs to distinguish "prerequisites aren't built yet" (quietly skip, don't
+ * block a normal boot) from "deploy attempted and failed" (warn, still don't
+ * block). `checkPrerequisites()` never throws; `deploy()` throws on both a
+ * missing prerequisite and a mid-deploy failure, exactly what the CLI path
+ * below needs for its existing die()-on-any-error behavior.
  */
 const fs = require('fs');
 const path = require('path');
@@ -54,15 +63,25 @@ function die(message) {
   process.exit(1);
 }
 
-async function main() {
-  if (!fs.existsSync(EMBEDDER)) {
-    die(`missing ${EMBEDDER} — run convert.py first`);
-  }
-  if (!fs.existsSync(LITERT_WASM_SRC)) {
-    die(`missing ${LITERT_WASM_SRC} — run 'npm install' in client/ first`);
-  }
-  if (!fs.existsSync(MEDIAPIPE_WASM_SRC)) {
-    die(`missing ${MEDIAPIPE_WASM_SRC} — run 'npm install' in client/ first`);
+/**
+ * Returns { ready: true } if every input `deploy()` needs is present, or
+ * { ready: false, missing: [...] } listing what's absent. Never throws —
+ * safe to call from a startup hook that must not crash the server.
+ */
+function checkPrerequisites() {
+  const missing = [];
+  if (!fs.existsSync(EMBEDDER)) missing.push(EMBEDDER);
+  if (!fs.existsSync(LITERT_WASM_SRC)) missing.push(LITERT_WASM_SRC);
+  if (!fs.existsSync(MEDIAPIPE_WASM_SRC)) missing.push(MEDIAPIPE_WASM_SRC);
+  return missing.length === 0 ? { ready: true } : { ready: false, missing };
+}
+
+async function deploy() {
+  const prereqs = checkPrerequisites();
+  if (!prereqs.ready) {
+    throw new Error(
+      `missing ${prereqs.missing[0]} — run convert.py and 'npm install' in client/ first`
+    );
   }
 
   fs.mkdirSync(OUT, { recursive: true });
@@ -74,11 +93,7 @@ async function main() {
 
   // MediaPipe Face Landmarker (pinned)
   const landmarkerOut = path.join(OUT, 'face_landmarker.task');
-  try {
-    await fetchVerified(LANDMARKER_URL, landmarkerOut, LANDMARKER_SHA256);
-  } catch (err) {
-    die(err.message);
-  }
+  await fetchVerified(LANDMARKER_URL, landmarkerOut, LANDMARKER_SHA256);
   log(`landmarker -> ${landmarkerOut} (sha256 verified)`);
 
   // Runtime wasm bundles, served same-origin (no CDN at runtime)
@@ -115,4 +130,8 @@ async function main() {
   log('done — GET /api/biometric/face/model-manifest will now serve this deployment');
 }
 
-main().catch((err) => die(err.stack || err.message));
+module.exports = { deploy, checkPrerequisites };
+
+if (require.main === module) {
+  deploy().catch((err) => die(err.stack || err.message));
+}
