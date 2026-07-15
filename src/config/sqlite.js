@@ -434,10 +434,14 @@ function initializeDatabase() {
       db.prepare('UPDATE members SET is_admin = 0 WHERE is_admin IS NULL').run();
     }
 
-    // Add biometric_id column if missing
+    // Add biometric_id column if missing. Leave existing NULLs as NULL — don't
+    // backfill to '' here: idx_members_biometric_id is a UNIQUE partial index
+    // (WHERE biometric_id IS NOT NULL) that exempts NULL but not '', so collapsing
+    // more than one member's NULL to '' throws a UNIQUE constraint violation.
+    // NULL is the app's canonical "no biometric assigned" sentinel (see
+    // biometricIntegration.js's explicit `SET biometric_id = NULL` on clear).
     if (!colNames.includes('biometric_id')) {
       db.prepare("ALTER TABLE members ADD COLUMN biometric_id TEXT DEFAULT ''").run();
-      db.prepare("UPDATE members SET biometric_id = '' WHERE biometric_id IS NULL").run();
     }
 
     // Add last_visit column if missing — biometricIntegration.updateLastVisit
@@ -464,11 +468,11 @@ function initializeDatabase() {
       db.prepare('UPDATE attendance SET date = date(check_in_time) WHERE date IS NULL').run();
     }
 
-    // Update existing NULL values to empty strings for text fields
+    // Update existing NULL values to empty strings for text fields.
+    // biometric_id is intentionally excluded — see comment above.
     db.prepare("UPDATE members SET address = '' WHERE address IS NULL").run();
     db.prepare("UPDATE members SET birthday = '' WHERE birthday IS NULL").run();
     db.prepare("UPDATE members SET photo_url = '' WHERE photo_url IS NULL").run();
-    db.prepare("UPDATE members SET biometric_id = '' WHERE biometric_id IS NULL").run();
     db.prepare(
       "UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL"
     ).run();
