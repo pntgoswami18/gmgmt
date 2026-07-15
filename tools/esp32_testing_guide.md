@@ -9,16 +9,15 @@ diagnostics see [`WINDOWS_TESTING_GUIDE.md`](WINDOWS_TESTING_GUIDE.md).
 
 ## Before you run anything
 
-Most of the scripts here talk to a running backend, so start one first:
-
-```bash
-JWT_SECRET=<any> ENABLE_BIOMETRIC=true BIOMETRIC_PORT=5005 node src/app.js
-```
+Most of the scripts here talk to a running backend — start one with the
+same command as the deployment guide's
+[Testing section](../ESP32_DEPLOYMENT_GUIDE.md#testing).
 
 The scripts read the same environment variables the backend does
 (`BIOMETRIC_HOST` / `BIOMETRIC_PORT` for the TCP listener, `PORT` for the
-HTTP API — see `.env`, loaded via `dotenv`), defaulting to `localhost:8080`
-for TCP and `localhost:3001` for the API if unset. If you started the
+HTTP API — see `.env`, loaded via `dotenv`), but default to `localhost:8080`
+for TCP and `localhost:3001` for the API if unset — different from the
+backend's own `BIOMETRIC_HOST` bind default of `0.0.0.0`. If you started the
 backend with a non-default `BIOMETRIC_PORT`, export the same value before
 running the test scripts, or they'll try to connect to the wrong port.
 
@@ -40,22 +39,15 @@ the TCP test if neither tool is available), then five tests in sequence:
 It reports a pass/fail count and a success-rate percentage at the end, and
 exits non-zero if anything failed.
 
-Individual pieces can be run directly instead of the whole suite:
+Individual pieces can be run instead of the whole suite via the npm scripts
+listed in the deployment guide's Testing section (`esp32:test:tcp`, `:api`,
+`:network`, `:system`, `:windows`). Two things that table doesn't cover:
 
-```bash
-npm run esp32:test          # everything above
-npm run esp32:test:tcp      # just the TCP Connection test
-npm run esp32:test:api      # just the API Endpoints test
-npm run esp32:test:network  # just testNetworkConnectivity()
-npm run esp32:test:system   # just checkSystemRequirements()
-npm run esp32:test:windows  # Windows-only: network adapters + firewall rule check for BIOMETRIC_PORT
-```
-
-(`node tools/test_esp32_integration.js fingerprint`,
-`heartbeat`, or `workflow` also work directly but have no corresponding npm
-script.) `esp32:test:windows` exits with an error message if run on a
-non-Windows platform — it calls `showWindowsDebugInfo()`, which shells out
-to `powershell`/`netsh` and only makes sense there.
+- `node tools/test_esp32_integration.js fingerprint`, `heartbeat`, or
+  `workflow` also work directly but have no corresponding npm script.
+- `esp32:test:windows` exits with an error message if run on a non-Windows
+  platform — it calls `showWindowsDebugInfo()`, which shells out to
+  `powershell`/`netsh` and only makes sense there.
 
 ## `npm run esp32:test:webhook` — `tools/test_esp32_webhook.js`
 
