@@ -70,6 +70,11 @@ test('validateBiometricId: cross-session block still fires when the earlier chec
   // today_active_sessions subquery it depends on) must key off the `date`
   // column, not DATE(check_in_time)/date('now') — otherwise it silently
   // stops matching this row and lets a second, same-day session through.
+  //
+  // The earlier session must be checked OUT: an open session is treated as
+  // the member leaving (today_active_sessions > 0 short-circuits the gate,
+  // see biometricController's "members must always be able to leave" logic),
+  // so only a closed earlier session exercises the cross-session gate here.
   await setSetting('morning_session_start', '08:00');
   await setSetting('morning_session_end', '11:00');
   await setSetting('evening_session_start', '17:00');
@@ -79,7 +84,7 @@ test('validateBiometricId: cross-session block still fires when the earlier chec
   const biometricId = 4242;
   const memberId = insertMember({ name: 'CrossSessionSkewedEarlier', biometricId });
   insertAttendance(memberId, {
-    checkedOut: false, // still open, so today_active_sessions counts it
+    checkedOut: true,
     date: todayStr(),
     rawCheckInTime: '1970-01-01T09:00:00',
   });

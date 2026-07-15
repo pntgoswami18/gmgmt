@@ -1701,7 +1701,6 @@ const validateBiometricId = async (req, res) => {
 
     // Import payment validation utilities
     const { checkMemberPaymentStatus } = require('../../utils/dateUtils');
-    const { toLocalDateStr } = require('../../services/checkInService');
 
     // Normalize biometricId to string for consistent lookup (handle "15.0" vs "15")
     const lookupId = String(parseInt(biometricId, 10));
