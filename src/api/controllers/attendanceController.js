@@ -1,6 +1,7 @@
 const { pool } = require('../../config/sqlite');
 const settingsCache = require('../../services/settingsCache');
 const logger = require('../../utils/logger').child({ service: 'attendance' });
+const { toLocalDateStr } = require('../../services/checkInService');
 
 // This endpoint would be called by the biometric device
 const performCheckIn = async (resolvedMemberId, res) => {
@@ -64,13 +65,19 @@ const performCheckIn = async (resolvedMemberId, res) => {
   ]);
   const isAdmin = memberCheck.rows[0]?.is_admin === 1;
 
+  // Server-derived local date bucket — must not be compared against
+  // DATE(check_in_time) (device-reported timestamp, stored verbatim), which
+  // silently breaks whenever a device's clock reports the wrong calendar
+  // day, and DATE('now') is SQLite's UTC date rather than local time.
+  const todayDateStr = toLocalDateStr(new Date());
+
   if (!isAdmin && crossSessionRestrictionEnabled) {
     // Check if member has already checked in during any session today
     const todayCheckIns = await pool.query(
-      `SELECT check_in_time FROM attendance 
-             WHERE member_id = $1 AND DATE(check_in_time) = DATE('now') 
+      `SELECT check_in_time FROM attendance
+             WHERE member_id = $1 AND date = $2
              ORDER BY check_in_time DESC`,
-      [resolvedMemberId]
+      [resolvedMemberId, todayDateStr]
     );
 
     if (todayCheckIns.rows.length > 0) {
@@ -102,8 +109,8 @@ const performCheckIn = async (resolvedMemberId, res) => {
   }
 
   const newAttendance = await pool.query(
-    "INSERT INTO attendance (member_id, check_in_time) VALUES ($1, datetime('now','localtime')) RETURNING *",
-    [resolvedMemberId]
+    "INSERT INTO attendance (member_id, check_in_time, date) VALUES ($1, datetime('now','localtime'), $2) RETURNING *",
+    [resolvedMemberId, todayDateStr]
   );
 
   return res.status(200).json({

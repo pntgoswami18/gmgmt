@@ -312,6 +312,46 @@ test('cross-session check-in is still blocked when the earlier check-in was reco
   await openSessionWindowNow();
 });
 
+test('cross-session check-in is still blocked when the earlier check-in was recorded by a device with a skewed clock', async () => {
+  // The earlier session's `date` bucket is correctly today (server-derived),
+  // but its stored check_in_time is verbatim from a device clock that was on
+  // a wholly different calendar day (e.g. dead RTC battery at the time of
+  // that scan). The cross-session lookup must key off the `date` column, not
+  // DATE(check_in_time) — otherwise it silently stops matching this row and
+  // lets a second, same-day session through.
+  await setSetting('morning_session_start', '08:00');
+  await setSetting('morning_session_end', '11:00');
+  await setSetting('evening_session_start', '17:00');
+  await setSetting('evening_session_end', '19:00');
+  await setSetting('cross_session_checkin_restriction', 'true');
+
+  const memberId = insertMember({ name: 'CrossSessionSkewedEarlier' });
+  insertAttendance(memberId, null, {
+    checkedOut: true,
+    date: todayStr(),
+    rawCheckInTime: '1970-01-01T09:00:00',
+  });
+
+  // currentSession is derived from the server's wall clock, so the server
+  // clock — not just the `timestamp` option below — must be placed in the
+  // evening window for this scan to land there.
+  const today = todayStr();
+  mock.timers.enable({ apis: ['Date'], now: new Date(`${today}T18:00:00`) });
+  try {
+    const result = await checkInService.processCheckIn(memberId, {
+      modality: 'face',
+      timestamp: `${today}T18:00:00`, // evening scan, normal device clock
+      eventContext: { biometricRef: 'face' },
+    });
+    assert.equal(result.authorized, false);
+    assert.equal(result.reason, 'cross_session_violation');
+  } finally {
+    mock.timers.reset();
+  }
+
+  await openSessionWindowNow();
+});
+
 test('plan grace expiry denies face check-in and auto-deactivates member', async () => {
   const memberId = insertMember({
     name: 'Expired',
