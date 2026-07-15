@@ -2,7 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { setup, teardown } = require('../../../services/__tests__/testDb');
 const settingsCache = require('../../../services/settingsCache');
-const { hhmm, nowMinutes, awayWindow } = require('../../../services/__tests__/sessionWindowTestUtils');
+const {
+  hhmm,
+  nowMinutes,
+  awayWindow,
+} = require('../../../services/__tests__/sessionWindowTestUtils');
 const { toLocalDateStr } = require('../../../services/checkInService');
 
 let db;
@@ -18,7 +22,14 @@ async function setSetting(key, value) {
   await settingsCache.refresh();
 }
 
-function insertMember({ name = 'Test', biometricId, isActive = 1, isAdmin = 0, planId = null, joinDate }) {
+function insertMember({
+  name = 'Test',
+  biometricId,
+  isActive = 1,
+  isAdmin = 0,
+  planId = null,
+  joinDate,
+}) {
   const info = db
     .prepare(
       `INSERT INTO members (name, biometric_id, is_active, is_admin, membership_plan_id, join_date)
@@ -108,7 +119,7 @@ test('active member with no open session and no violations is authorized', async
   assert.equal(getJson().authorized, true, JSON.stringify(getJson()));
 });
 
-test('regression (timezone bug): today_active_sessions is computed from the local calendar date, not date(\'now\') (UTC)', async () => {
+test("regression (timezone bug): today_active_sessions is computed from the local calendar date, not date('now') (UTC)", async () => {
   // Before the fix, the SQL used SQLite's date('now') (UTC) to decide "today",
   // which diverges from the JS-local date used everywhere else (attendance
   // rows are written with the local date column, per checkInService's
@@ -180,4 +191,27 @@ test('cross-session gate still blocks a FRESH check-in into a second session (no
   await validateBiometricId(req, res);
   assert.equal(getJson().authorized, false);
   assert.equal(getJson().reason, 'cross_session_violation');
+});
+
+test('member who already completed check-in+check-out THIS session is still authorized to re-enter (door stays permissive; attendance bookkeeping denies separately)', async () => {
+  await setSetting('cross_session_checkin_restriction', 'true');
+  const memberId = insertMember({ name: 'ReturnedFromCall', biometricId: 1006 });
+
+  // Completed (checked out) session in the SAME window as "now" — e.g. the
+  // member checked in, stepped out for a phone call past the checkout dwell
+  // window (recorded as a checkout), and is now scanning again to walk back
+  // in, still within the same session. The door must still unlock: only
+  // cross-session scans should be denied here. checkInService.processCheckIn
+  // separately denies this as 'already_completed' for the attendance record
+  // — that's correct and untouched by this endpoint.
+  const morningTimeStr = hhmm(nowMinutes());
+  insertAttendance(memberId, `${todayStr()}T${morningTimeStr}:00`, { checkedOut: true });
+
+  const { req, res, getJson } = mockReqRes({ biometricId: '1006', deviceId: 'dev1' });
+  await validateBiometricId(req, res);
+  assert.equal(
+    getJson().authorized,
+    true,
+    `same-session re-entry after a completed checkout must still unlock the door: ${JSON.stringify(getJson())}`
+  );
 });

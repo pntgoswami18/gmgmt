@@ -222,7 +222,6 @@ void updateDoorUnlockState();
 void emergencyUnlockWithReason(String reason);
 
 // Cache management functions
-bool checkLocalAuthorization(int biometricId);
 bool validateWithServer(int biometricId);
 void updateMemberCache();
 void handleCacheUpdate(String jsonResponse);
@@ -830,33 +829,31 @@ void checkFingerprint() {
   
   if (fingerprintID > 0) {
     Serial.printf("Fingerprint matched: ID %d\n", fingerprintID);
-    
-    // Check local cache first for fast authorization
-    bool isAuthorized = checkLocalAuthorization(fingerprintID);
-    
-    if (isAuthorized) {
-      // OPTIMIZED: Fast path - unlock immediately using cache, send data async
-      Serial.printf("✅ Cache hit - Authorized member ID %d (INSTANT UNLOCK)\n", fingerprintID);
+
+    // The local cache is identity+plan only (bulk-refreshed every
+    // CACHE_UPDATE_INTERVAL from /api/biometric/cache-update) and carries no
+    // session/cross-session state. Unlocking straight off a cache hit let a
+    // member bypass same-day cross-session restrictions (e.g. completing a
+    // morning session and re-entering in the evening) for up to
+    // CACHE_VALIDITY_TIME after any cache refresh. The door now always
+    // consults the server's per-scan /validate check, which is session-aware,
+    // and fails CLOSED (no fallback to the cache) if the server can't be
+    // reached — an outage blocks entry rather than silently re-opening the
+    // cross-session gap.
+    Serial.printf("📡 Validating member ID %d with server\n", fingerprintID);
+    bool serverAuth = validateWithServer(fingerprintID);
+
+    if (serverAuth) {
+      Serial.printf("✅ Server validation - Authorized member ID %d\n", fingerprintID);
       startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
-      // Send attendance data asynchronously to avoid any blocking
+      // Use async version for faster response
       sendBiometricDataAsync(fingerprintID, "authorized");
     } else {
-      // Slow path - validate with server first
-      Serial.printf("⏳ Cache miss - Validating member ID %d with server\n", fingerprintID);
-      bool serverAuth = validateWithServer(fingerprintID);
-      
-      if (serverAuth) {
-        Serial.printf("✅ Server validation - Authorized member ID %d\n", fingerprintID);
-        startNonBlockingUnlock(DOOR_UNLOCK_TIME, false);
-        // Use async version for faster response
-        sendBiometricDataAsync(fingerprintID, "authorized");
-      } else {
-        Serial.printf("❌ Server validation - Unauthorized member ID %d\n", fingerprintID);
-        accessDenied();
-        // Use async version even for denied access
-        sendBiometricDataAsync(fingerprintID, "unauthorized", "access_revoked");
-        sendBiometricDataAsync(fingerprintID, "unauthorized", "access_revoked");
-      }
+      Serial.printf("❌ Server validation - Unauthorized/unreachable for member ID %d\n", fingerprintID);
+      accessDenied();
+      // Use async version even for denied access
+      sendBiometricDataAsync(fingerprintID, "unauthorized", "access_revoked");
+      sendBiometricDataAsync(fingerprintID, "unauthorized", "access_revoked");
     }
 
     lastScanTime = millis();
@@ -2469,32 +2466,6 @@ void clearCache() {
     memberCache[i].memberId = 0;
   }
   cacheInitialized = true;
-}
-
-bool checkLocalAuthorization(int biometricId) {
-  // Check if cache is initialized
-  if (!cacheInitialized) {
-    Serial.println("⚠️ Cache not initialized, defaulting to server validation");
-    return false;
-  }
-  
-  // Search cache for biometric ID
-  for (int i = 0; i < cacheSize; i++) {
-    if (memberCache[i].biometricId == biometricId) {
-      // Check if cache entry is still valid
-      if (millis() - memberCache[i].lastUpdate < CACHE_VALIDITY_TIME) {
-        Serial.printf("📋 Cache entry found: ID %d, Authorized: %s\n", 
-                     biometricId, memberCache[i].isAuthorized ? "YES" : "NO");
-        return memberCache[i].isAuthorized;
-      } else {
-        Serial.printf("⏰ Cache entry expired for ID %d\n", biometricId);
-        return false;
-      }
-    }
-  }
-  
-  Serial.printf("🔍 Cache miss for biometric ID %d\n", biometricId);
-  return false;
 }
 
 bool validateWithServer(int biometricId) {

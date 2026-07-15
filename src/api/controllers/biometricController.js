@@ -1786,6 +1786,18 @@ const validateBiometricId = async (req, res) => {
     // Check if member is admin (no additional query needed - already in result)
     const isAdmin = member.is_admin === 1;
 
+    // Deliberately no "already completed today's session" check here. This
+    // endpoint gates the physical door unlock (ESP32 checkFingerprint() now
+    // calls this on every scan — see esp32_door_lock.ino), which must stay
+    // more permissive than attendance bookkeeping: a member who checked out
+    // (e.g. stepped out for a call past the dwell window) and scans again
+    // within the SAME session must still be let back in, even though
+    // checkInService.processCheckIn will correctly deny that scan as
+    // 'already_completed' for the attendance record. Only cross-session and
+    // outside-window scans should block the door. If this controller is ever
+    // migrated to delegate to checkInService.processCheckIn (see the
+    // duplication note atop checkInService.js), preserve this exemption —
+    // don't let 'already_completed' become a door-denial reason.
     if (!isAdmin) {
       // Use cached cross-session restriction setting instead of database query
       const crossSessionRestrictionEnabled = settingsCache.getCrossSessionEnabled();
