@@ -272,6 +272,46 @@ test('session-window decision ignores a skewed device clock: a fingerprint unit 
   assert.equal(row.check_in_time, skewedDeviceTimestamp);
 });
 
+test('cross-session check-in is still blocked when the earlier check-in was recorded by a device with a skewed clock', async () => {
+  // The earlier session's `date` bucket is correctly today (per the
+  // day-bucket fix), but its stored check_in_time is verbatim from a device
+  // clock that was on a wholly different calendar day (e.g. dead RTC battery
+  // at the time of that scan). The cross-session lookup must key off the
+  // `date` column, not DATE(check_in_time) — otherwise it silently stops
+  // matching this row and lets a second, same-day session through.
+  await setSetting('morning_session_start', '08:00');
+  await setSetting('morning_session_end', '11:00');
+  await setSetting('evening_session_start', '17:00');
+  await setSetting('evening_session_end', '19:00');
+  await setSetting('cross_session_checkin_restriction', 'true');
+
+  const memberId = insertMember({ name: 'CrossSessionSkewedEarlier' });
+  insertAttendance(memberId, null, {
+    checkedOut: true,
+    date: todayStr(),
+    rawCheckInTime: '1970-01-01T09:00:00',
+  });
+
+  // currentSession is derived from the server's wall clock (clock-trust fix),
+  // so the server clock — not just the `timestamp` option below — must be
+  // placed in the evening window for this scan to land there.
+  const today = todayStr();
+  mock.timers.enable({ apis: ['Date'], now: new Date(`${today}T18:00:00`) });
+  try {
+    const result = await checkInService.processCheckIn(memberId, {
+      modality: 'face',
+      timestamp: `${today}T18:00:00`, // evening scan, normal device clock
+      eventContext: { biometricRef: 'face' },
+    });
+    assert.equal(result.authorized, false);
+    assert.equal(result.reason, 'cross_session_violation');
+  } finally {
+    mock.timers.reset();
+  }
+
+  await openSessionWindowNow();
+});
+
 test('plan grace expiry denies face check-in and auto-deactivates member', async () => {
   const memberId = insertMember({
     name: 'Expired',
@@ -653,4 +693,63 @@ test('attendance date is bucketed by LOCAL calendar date', async () => {
   assert.equal(result.authorized, true);
   const row = db.prepare('SELECT date FROM attendance WHERE member_id = ?').get(memberId);
   assert.equal(row.date, todayStr(), 'date column must be the local date, not the UTC one');
+});
+
+test('attendance day bucket ignores a device clock reporting the wrong calendar day', async () => {
+  // Must not depend on real wall-clock time being inside the default session
+  // windows (see MIDNIGHT SAFETY note on openSessionWindowNow above) — this
+  // test drives the check-in direction, which is session-gated.
+  await openSessionWindowNow();
+  const memberId = insertMember({ name: 'DateSkewDevice' });
+  // Simulates a device whose onboard clock is wrong by more than a skew
+  // within the day — e.g. a dead RTC battery resetting to the Unix epoch —
+  // not just wrong minutes/hours but a wholly different calendar day. The
+  // event is really happening right now on the server.
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    timestamp: '1970-01-01T10:00:00',
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  const row = db
+    .prepare('SELECT date, check_in_time FROM attendance WHERE member_id = ?')
+    .get(memberId);
+  assert.equal(
+    row.date,
+    todayStr(),
+    'date bucket must be the server local date, not the device-reported one'
+  );
+  // The device-reported instant is still stored verbatim for the record
+  // itself — only the day-BUCKET decision uses the server clock.
+  assert.equal(row.check_in_time, '1970-01-01T10:00:00');
+});
+
+test('re-entry/checkout lookup finds an open row despite a device clock reporting the wrong calendar day', async () => {
+  const memberId = insertMember({ name: 'DateSkewLookup' });
+  // Open row exists under TODAY's real (server) date bucket.
+  insertAttendance(memberId, new Date());
+
+  // Second scan's device clock claims a wholly different calendar day. Pre-fix,
+  // this would have looked up (and found nothing under) the wrong day's
+  // bucket, so the scan landed in the check-in direction — a duplicate open
+  // row for a member who is actually still inside their first, still-open
+  // visit — instead of correctly finding and closing it.
+  const result = await checkInService.processCheckIn(memberId, {
+    modality: 'fingerprint',
+    enforceAuthorization: false,
+    timestamp: '1970-01-01T10:00:00',
+  });
+  assert.equal(result.authorized, true, JSON.stringify(result));
+  assert.equal(
+    result.action,
+    'checkout',
+    'must find and close the open row despite the device reporting a different calendar day'
+  );
+
+  const rows = db.prepare('SELECT * FROM attendance WHERE member_id = ?').all(memberId);
+  assert.equal(
+    rows.length,
+    1,
+    'must not create a duplicate attendance row under the wrong-day bucket'
+  );
 });
