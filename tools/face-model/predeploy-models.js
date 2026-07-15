@@ -19,9 +19,12 @@
  *     exactly as it would if this automation didn't exist — not a regression.
  *   - Success -> deploy-models.js's own log lines are the confirmation.
  */
-const { deploy, checkPrerequisites } = require('./deploy-models');
-
 async function main() {
+  // `require` itself (deploy-models.js or anything it pulls in, e.g. lib/fetchVerify.js)
+  // can throw at load time — that must be as non-fatal as a failed deploy() call,
+  // so it's inside main()'s try/catch rather than at module top level.
+  const { deploy, checkPrerequisites } = require('./deploy-models');
+
   const prereqs = checkPrerequisites();
   if (!prereqs.ready) {
     console.log(
@@ -30,16 +33,14 @@ async function main() {
     );
     return;
   }
-  try {
-    await deploy();
-  } catch (err) {
-    console.warn(
-      `[predeploy-models] face model deployment failed, continuing without it: ${err.message}`
-    );
-    console.warn(
-      '[predeploy-models] run `node tools/face-model/deploy-models.js` manually to see full details.'
-    );
-  }
+  await deploy();
 }
 
-main();
+main().catch((err) => {
+  console.warn(
+    `[predeploy-models] face model deployment failed, continuing without it: ${err.message}`
+  );
+  console.warn(
+    '[predeploy-models] run `node tools/face-model/deploy-models.js` manually to see full details.'
+  );
+});
