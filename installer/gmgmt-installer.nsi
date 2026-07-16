@@ -35,14 +35,13 @@ InstallDirRegKey HKLM "Software\${COMPANY}" "Install_Dir"
 ; Variables
 
 Var StartMenuFolder
-Var Architecture
 
 ;--------------------------------
 ; Interface Settings
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "public\uploads\logo.png"
-!define MUI_UNICON "public\uploads\logo.png"
+!define MUI_ICON "installer\gmgmt.ico"
+!define MUI_UNICON "installer\gmgmt.ico"
 
 ;--------------------------------
 ; Pages
@@ -62,9 +61,9 @@ Var Architecture
 !insertmacro MUI_PAGE_INSTFILES
 
 ; Finish page
-!define MUI_FINISHPAGE_RUN "$INSTDIR\scripts\service-install.js"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\node.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Install as Windows Service"
-!define MUI_FINISHPAGE_RUN_PARAMETERS ""
+!define MUI_FINISHPAGE_RUN_PARAMETERS '"$INSTDIR\scripts\service-install.js"'
 !define MUI_FINISHPAGE_LINK "Open GMgmt in browser"
 !define MUI_FINISHPAGE_LINK_LOCATION "http://localhost:3001"
 
@@ -100,14 +99,16 @@ Section "GMgmt Core" SecCore
   File "README.md"
   File "LICENSE.txt"
   
-  ; Copy Node.js runtime based on architecture
-  ${If} $Architecture == "x64"
-    File "vendor\node-win-x64\node.exe"
-    Rename "$INSTDIR\node.exe" "$INSTDIR\vendor\node-win-x64\node.exe"
-  ${Else}
-    File "vendor\node-win-ia32\node.exe"
-    Rename "$INSTDIR\node.exe" "$INSTDIR\vendor\node-win-ia32\node.exe"
-  ${EndIf}
+  ; Copy the bundled Node.js runtime for this build's architecture.
+  ; ${ARCH} is substituted with a literal "x64"/"x86" by build-installer.js
+  ; before makensis ever sees this file, so only the matching runtime's
+  ; File instruction is compiled into each installer (the other branch
+  ; is discarded at compile time, not chosen at install time).
+  !if "${ARCH}" == "x64"
+  File "vendor\node-win-x64\node.exe"
+  !else
+  File "vendor\node-win-ia32\node.exe"
+  !endif
   
   ; Store installation folder
   WriteRegStr HKLM "Software\${COMPANY}" "Install_Dir" "$INSTDIR"
@@ -121,7 +122,7 @@ Section "GMgmt Core" SecCore
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANY}" "Publisher" "${COMPANY}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANY}" "DisplayIcon" "$INSTDIR\public\uploads\logo.png"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANY}" "DisplayIcon" "$INSTDIR\Uninstall.exe"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANY}" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANY}" "NoRepair" 1
 
@@ -145,9 +146,10 @@ Section "Windows Service" SecService
   FileWrite $0 "BIOMETRIC_HOST=0.0.0.0$\r$\n"
   FileClose $0
   
-  ; Install Windows Service
+  ; Install Windows Service (using the bundled node.exe, not a system PATH
+  ; lookup, so this works on a machine with no Node.js installed)
   DetailPrint "Installing GMgmt Windows Service..."
-  nsExec::ExecToLog 'node "$INSTDIR\scripts\service-install.js"'
+  nsExec::ExecToLog '"$INSTDIR\node.exe" "$INSTDIR\scripts\service-install.js"'
   Pop $0
   ${If} $0 != 0
     MessageBox MB_ICONEXCLAMATION "Failed to install Windows Service. You may need to run as Administrator."
@@ -157,12 +159,20 @@ SectionEnd
 
 Section "Firewall Rule" SecFirewall
 
-  ; Add firewall rule
+  ; Add firewall rule for the API/web port
   DetailPrint "Adding Windows Firewall rule..."
   nsExec::ExecToLog 'netsh advfirewall firewall add rule name="GMgmt API" dir=in action=allow protocol=TCP localport=3001'
   Pop $0
   ${If} $0 != 0
     MessageBox MB_ICONEXCLAMATION "Failed to add firewall rule. You may need to run as Administrator."
+  ${EndIf}
+
+  ; Add firewall rule for the biometric TCP listener (ESP32 door locks)
+  DetailPrint "Adding Windows Firewall rule for biometric integration..."
+  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="GMgmt Biometric" dir=in action=allow protocol=TCP localport=8080'
+  Pop $0
+  ${If} $0 != 0
+    MessageBox MB_ICONEXCLAMATION "Failed to add biometric firewall rule. You may need to run as Administrator."
   ${EndIf}
 
 SectionEnd
@@ -187,14 +197,16 @@ LangString DESC_SecFirewall ${LANG_ENGLISH} "Add Windows Firewall rule to allow 
 
 Section "Uninstall"
 
-  ; Stop and remove Windows Service
+  ; Stop and remove Windows Service (before RMDir below removes node.exe
+  ; and the uninstall script it needs to run)
   DetailPrint "Stopping GMgmt Windows Service..."
   nsExec::ExecToLog 'net stop GMgmt'
-  nsExec::ExecToLog 'node "$INSTDIR\scripts\service-uninstall.js"'
-  
-  ; Remove firewall rule
-  DetailPrint "Removing Windows Firewall rule..."
+  nsExec::ExecToLog '"$INSTDIR\node.exe" "$INSTDIR\scripts\service-uninstall.js"'
+
+  ; Remove firewall rules
+  DetailPrint "Removing Windows Firewall rules..."
   nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="GMgmt API"'
+  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="GMgmt Biometric"'
   
   ; Remove files and directories
   RMDir /r "$INSTDIR"
@@ -228,14 +240,17 @@ SectionEnd
 ; Functions
 
 Function .onInit
-  
-  ; Detect system architecture
-  ${If} ${RunningX64}
-    StrCpy $Architecture "x64"
-  ${Else}
-    StrCpy $Architecture "x86"
+
+  ; This build only bundles the ${ARCH} Node.js runtime (decided at compile
+  ; time, see Section "GMgmt Core"). Refuse to run the x64 build on a 32-bit
+  ; OS, since a 64-bit node.exe can't execute there.
+  !if "${ARCH}" == "x64"
+  ${IfNot} ${RunningX64}
+    MessageBox MB_ICONSTOP "This is the 64-bit installer, but your Windows is 32-bit. Please download the x86 installer instead."
+    Abort
   ${EndIf}
-  
+  !endif
+
   ; Check if already installed
   ReadRegStr $0 HKLM "Software\${COMPANY}" "Install_Dir"
   ${If} $0 != ""
