@@ -63,7 +63,7 @@ function initializeDatabase() {
        birthday TEXT DEFAULT '',
        photo_url TEXT DEFAULT '',
        is_active INTEGER DEFAULT 1,
-       biometric_id TEXT DEFAULT '',
+       biometric_id TEXT,
        biometric_sensor_member_id TEXT DEFAULT '',
        is_admin INTEGER DEFAULT 0
      );`,
@@ -331,9 +331,12 @@ function initializeDatabase() {
       'CREATE INDEX IF NOT EXISTS idx_security_logs_event_type ON security_logs(event_type);'
     );
 
-    // Hybrid cache optimization indexes
+    // Hybrid cache optimization indexes. Must be UNIQUE — enforces one member per
+    // biometric_id. Relies on NULL (not '') as the "no biometric" sentinel; see
+    // the legacy-migration block below for DBs that picked up a non-unique
+    // version of this index before that convention was enforced.
     db.exec(
-      'CREATE INDEX IF NOT EXISTS idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;'
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;'
     );
     db.exec(
       'CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active, membership_plan_id);'
@@ -441,7 +444,7 @@ function initializeDatabase() {
     // NULL is the app's canonical "no biometric assigned" sentinel (see
     // biometricIntegration.js's explicit `SET biometric_id = NULL` on clear).
     if (!colNames.includes('biometric_id')) {
-      db.prepare("ALTER TABLE members ADD COLUMN biometric_id TEXT DEFAULT ''").run();
+      db.prepare('ALTER TABLE members ADD COLUMN biometric_id TEXT').run();
     }
 
     // Add last_visit column if missing — biometricIntegration.updateLastVisit
@@ -476,6 +479,30 @@ function initializeDatabase() {
     db.prepare(
       "UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL"
     ).run();
+
+    // One-time cleanup: normalize any biometric_id already sitting as '' (from
+    // the old buggy backfill this fix removed, or from biometric-clearing code
+    // that wrote '' before it was corrected to write NULL) back to the
+    // canonical "no biometric" sentinel. Safe unconditionally — multiple NULLs
+    // never violate the partial UNIQUE index below.
+    db.prepare("UPDATE members SET biometric_id = NULL WHERE biometric_id = ''").run();
+
+    // idx_members_biometric_id must be UNIQUE to actually enforce "one member
+    // per biometric_id". CREATE INDEX IF NOT EXISTS is name-based, so a DB that
+    // picked up the non-unique version of this index (created by an older build
+    // of this file) needs it dropped and rebuilt now that no '' duplicates
+    // remain to block the rebuild.
+    const biometricIdIndex = db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_members_biometric_id'"
+      )
+      .get();
+    if (biometricIdIndex && !/UNIQUE/i.test(biometricIdIndex.sql || '')) {
+      db.exec('DROP INDEX idx_members_biometric_id;');
+      db.exec(
+        'CREATE UNIQUE INDEX idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;'
+      );
+    }
   } catch (migrationError) {
     // Migration errors are non-fatal but must be visible — a silent failure here
     // leaves the DB schema incomplete and causes runtime errors later.

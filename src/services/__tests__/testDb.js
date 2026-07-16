@@ -31,6 +31,12 @@ function makeExecute(db) {
 
 function buildSchema(db) {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS devices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'offline'
+    );
+
     CREATE TABLE IF NOT EXISTS members (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -43,12 +49,13 @@ function buildSchema(db) {
       birthday TEXT DEFAULT '',
       photo_url TEXT DEFAULT '',
       is_active INTEGER DEFAULT 1,
-      biometric_id TEXT DEFAULT '',
+      biometric_id TEXT,
       biometric_sensor_member_id TEXT DEFAULT '',
       is_admin INTEGER DEFAULT 0,
       last_visit TEXT
     );
     CREATE UNIQUE INDEX IF NOT EXISTS ux_members_phone ON members(phone) WHERE phone IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS membership_plans (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
