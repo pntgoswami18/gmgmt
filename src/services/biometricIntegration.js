@@ -674,7 +674,7 @@ class BiometricIntegration {
       // so the sensor templates don't linger and cause stale-slot misidentification.
       await this.deleteAllMemberFingerprints(memberId);
 
-      // Ensure biometric_id is NULL (deleteAllMemberFingerprints sets it to '').
+      // Belt-and-suspenders: deleteAllMemberFingerprints already sets NULL.
       await pool.query('UPDATE members SET biometric_id = NULL WHERE id = ?', [memberId]);
 
       // Log removal event
@@ -1127,8 +1127,10 @@ class BiometricIntegration {
         }
       }
 
-      // Clear biometric_id on the member record (template row stays intact)
-      await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', ['', memberId]);
+      // Clear biometric_id on the member record (template row stays intact).
+      // NULL, not '' — idx_members_biometric_id is a UNIQUE partial index that
+      // exempts NULL but not '', so writing '' here breaks the next member cleared.
+      await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', [null, memberId]);
       logger.info(`✅ biometric_id cleared for member ${memberId}`);
     } catch (error) {
       logger.error({ err: error, memberId }, 'deleteFingerprint failed');
@@ -1180,8 +1182,9 @@ class BiometricIntegration {
         }
       }
 
-      // Clear DB records so the member starts fresh
-      await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', ['', memberId]);
+      // Clear DB records so the member starts fresh. NULL, not '' — see comment
+      // in deleteFingerprint() above.
+      await pool.query('UPDATE members SET biometric_id = ? WHERE id = ?', [null, memberId]);
       await pool.query('DELETE FROM member_biometrics WHERE member_id = ?', [memberId]);
       logger.info(`✅ All ${slotIds.size} fingerprint slot(s) cleared for member ${memberId}`);
     } catch (error) {
@@ -1199,12 +1202,14 @@ class BiometricIntegration {
   async syncBiometricData() {
     const summary = { stale_slots_deleted: 0, db_rows_removed: 0, errors: 0, members_processed: 0 };
     try {
-      // Find member_biometrics rows whose device_user_id no longer matches the member's biometric_id
+      // Find member_biometrics rows whose device_user_id no longer matches the member's
+      // biometric_id. NULL biometric_id means "no active slot" — every remaining row for
+      // that member is orphaned, not just ones that fail to match a nonexistent value.
       const staleResult = await pool.query(`
         SELECT mb.id AS mb_id, mb.member_id, mb.device_user_id, mb.template
         FROM member_biometrics mb
         JOIN members m ON m.id = mb.member_id
-        WHERE m.biometric_id != '' AND mb.device_user_id != m.biometric_id
+        WHERE m.biometric_id IS NULL OR mb.device_user_id != m.biometric_id
       `);
 
       const devicesResult = await pool.query(
