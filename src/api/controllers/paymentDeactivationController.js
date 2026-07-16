@@ -1,4 +1,5 @@
 const PaymentDeactivationService = require('../../services/paymentDeactivationService');
+const logger = require('../../utils/logger').child({ service: 'paymentDeactivationController' });
 
 // Create a singleton instance
 const paymentDeactivationService = new PaymentDeactivationService();
@@ -8,7 +9,7 @@ const paymentDeactivationService = new PaymentDeactivationService();
  */
 const triggerPaymentDeactivation = async (req, res) => {
   try {
-    console.log('🔄 Manual payment deactivation triggered');
+    logger.info('🔄 Manual payment deactivation triggered');
     
     const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
     
@@ -18,7 +19,7 @@ const triggerPaymentDeactivation = async (req, res) => {
       data: result
     });
   } catch (error) {
-    console.error('❌ Error in manual payment deactivation:', error);
+    logger.error({ err: error }, 'error in manual payment deactivation');
     res.status(500).json({
       success: false,
       message: 'Failed to run payment deactivation check',
@@ -39,7 +40,7 @@ const getPaymentDeactivationStatus = async (req, res) => {
       data: status
     });
   } catch (error) {
-    console.error('❌ Error getting payment deactivation status:', error);
+    logger.error({ err: error }, 'error getting payment deactivation status');
     res.status(500).json({
       success: false,
       message: 'Failed to get payment deactivation status',
@@ -63,7 +64,7 @@ const getOverdueMembersWithinGracePeriod = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('❌ Error getting overdue members:', error);
+    logger.error({ err: error }, 'error getting overdue members');
     res.status(500).json({
       success: false,
       message: 'Failed to get overdue members',

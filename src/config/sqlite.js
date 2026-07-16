@@ -1,11 +1,14 @@
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const logger = require('../utils/logger').child({ service: 'sqlite' });
 
 // Resolve data root (Windows-friendly default)
-const dataRoot = process.env.WIN_DATA_ROOT || (process.platform === 'win32'
-  ? path.join(process.env.ProgramData || 'C:/ProgramData', 'gmgmt')
-  : path.join(process.cwd(), 'data'));
+const dataRoot =
+  process.env.WIN_DATA_ROOT ||
+  (process.platform === 'win32'
+    ? path.join(process.env.ProgramData || 'C:/ProgramData', 'gmgmt')
+    : path.join(process.cwd(), 'data'));
 
 const dbPath = path.join(dataRoot, 'data', 'gmgmt.sqlite');
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -13,13 +16,16 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
+// Supports both PostgreSQL-style positional placeholders ($1, $2, …) and SQLite
+// native (?) interchangeably — rewrites $N → ? before execution. This shim exists
+// for backward compatibility; new queries should use ? directly.
 function replacePgParamsWithQMarks(sql) {
   // Replace $1, $2 ... with ? for sqlite
   let text = sql.replace(/\$(\d+)/g, '?');
-  
+
   // Replace ILIKE with LIKE for SQLite compatibility
   text = text.replace(/ILIKE/gi, 'LIKE');
-  
+
   return text;
 }
 
@@ -57,7 +63,7 @@ function initializeDatabase() {
        birthday TEXT DEFAULT '',
        photo_url TEXT DEFAULT '',
        is_active INTEGER DEFAULT 1,
-       biometric_id TEXT DEFAULT '',
+       biometric_id TEXT,
        biometric_sensor_member_id TEXT DEFAULT '',
        is_admin INTEGER DEFAULT 0
      );`,
@@ -195,6 +201,52 @@ function initializeDatabase() {
        FOREIGN KEY (device_id) REFERENCES devices(device_id),
        FOREIGN KEY (member_id) REFERENCES members(id)
      );`,
+    `CREATE TABLE IF NOT EXISTS firmware_versions (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       version TEXT NOT NULL,
+       filename TEXT NOT NULL,
+       filepath TEXT NOT NULL,
+       file_size INTEGER,
+       description TEXT,
+       uploaded_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS staff (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       username TEXT UNIQUE NOT NULL,
+       password_hash TEXT NOT NULL,
+       role TEXT NOT NULL DEFAULT 'staff',
+       is_active INTEGER DEFAULT 1,
+       failed_attempts INTEGER DEFAULT 0,
+       locked_until TEXT,
+       last_login_at TEXT,
+       created_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS member_face_embeddings (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+       embedding BLOB NOT NULL,
+       model_version TEXT NOT NULL,
+       quality_score REAL,
+       pose_label TEXT,
+       consent_at TEXT,
+       created_at TEXT DEFAULT (datetime('now')),
+       updated_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS face_sync_tombstones (
+       member_id INTEGER PRIMARY KEY,
+       deleted_at TEXT DEFAULT (datetime('now'))
+     );`,
+    `CREATE TABLE IF NOT EXISTS firmware_update_log (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       device_id TEXT NOT NULL,
+       firmware_id INTEGER NOT NULL,
+       status TEXT DEFAULT 'pending',
+       started_at TEXT DEFAULT (datetime('now')),
+       completed_at TEXT,
+       error_message TEXT,
+       FOREIGN KEY (device_id) REFERENCES devices(device_id),
+       FOREIGN KEY (firmware_id) REFERENCES firmware_versions(id)
+     );`,
   ];
 
   const insertDefaultSettings = [
@@ -221,51 +273,130 @@ function initializeDatabase() {
     ['referral_system_enabled', 'false'],
     ['referral_discount_amount', '100'],
     ['ask_unlock_reason', 'true'],
-    ['card_order', '["total_members","total_revenue","new_members_this_month","unpaid_members_this_month","active_schedules"]'],
+    [
+      'card_order',
+      '["total_members","total_revenue","new_members_this_month","unpaid_members_this_month","active_schedules"]',
+    ],
     ['esp32_host', 'localhost'],
     ['esp32_port', '5005'],
     ['local_listen_host', '0.0.0.0'],
     ['local_listen_port', '5005'],
     ['membership_types', '["standard","premium","vip"]'],
     ['cross_session_checkin_restriction', 'true'],
+    // Minutes after a fingerprint check-in before a re-scan counts as checkout
+    // rather than a re-entry (member stepped out and came back). Mirrors
+    // face_checkout_min_dwell_minutes; 0 = any second scan checks out immediately.
+    ['fingerprint_checkout_min_dwell_minutes', '15'],
     ['whatsapp_welcome_enabled', 'false'],
-    ['whatsapp_welcome_message', 'Welcome to our gym! Your biometric enrollment is complete. You can now access the gym using your fingerprint. Enjoy your workouts!'],
+    ['face_checkin_enabled', 'false'],
+    ['face_match_threshold', '0.55'],
+    ['face_liveness_mode', 'challenge'],
+    ['face_model_version', ''],
+    ['face_checkout_min_dwell_minutes', '15'],
+    ['face_door_device_id', ''],
+    [
+      'whatsapp_welcome_message',
+      'Welcome to our gym! Your biometric enrollment is complete. You can now access the gym using your fingerprint. Enjoy your workouts!',
+    ],
   ];
 
   const trx = db.transaction(() => {
     for (const s of statements) db.prepare(s).run();
-    
+
     // Core indexes
-    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_members_phone ON members(phone) WHERE phone IS NOT NULL;");
-    
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS ux_members_phone ON members(phone) WHERE phone IS NOT NULL;'
+    );
+
     // Biometric events indexes
-    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_timestamp ON biometric_events(timestamp);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_member_id ON biometric_events(member_id);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_biometric_id ON biometric_events(biometric_id);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_sensor_member_id ON biometric_events(sensor_member_id) WHERE sensor_member_id IS NOT NULL;");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_biometric_events_member_timestamp ON biometric_events(member_id, timestamp, event_type);");
-    
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_biometric_events_timestamp ON biometric_events(timestamp);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_biometric_events_member_id ON biometric_events(member_id);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_biometric_events_biometric_id ON biometric_events(biometric_id);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_biometric_events_sensor_member_id ON biometric_events(sensor_member_id) WHERE sensor_member_id IS NOT NULL;'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_biometric_events_member_timestamp ON biometric_events(member_id, timestamp, event_type);'
+    );
+
     // Security logs indexes
-    db.exec("CREATE INDEX IF NOT EXISTS idx_security_logs_timestamp ON security_logs(timestamp);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_security_logs_event_type ON security_logs(event_type);");
-    
-    // Hybrid cache optimization indexes
-    db.exec("CREATE INDEX IF NOT EXISTS idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active, membership_plan_id);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_attendance_member_date ON attendance(member_id, date, check_in_time);");
-    
+    db.exec('CREATE INDEX IF NOT EXISTS idx_security_logs_timestamp ON security_logs(timestamp);');
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_security_logs_event_type ON security_logs(event_type);'
+    );
+
+    // Hybrid cache optimization indexes. Must be UNIQUE — enforces one member per
+    // biometric_id. Relies on NULL (not '') as the "no biometric" sentinel; see
+    // the legacy-migration block below for DBs that picked up a non-unique
+    // version of this index before that convention was enforced.
+    db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active, membership_plan_id);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_attendance_member_date ON attendance(member_id, date, check_in_time);'
+    );
+
     // ESP32 device management indexes
-    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_devices_device_type ON devices(device_type);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_device_id ON device_commands(device_id);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_status ON device_commands(status);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_device_commands_sent_at ON device_commands(sent_at);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_device_id ON access_logs(device_id);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_member_id ON access_logs(member_id);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_timestamp ON access_logs(timestamp);");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_access_logs_access_type ON access_logs(access_type);");
-    
+    db.exec('CREATE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_devices_device_type ON devices(device_type);');
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_device_commands_device_id ON device_commands(device_id);'
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_device_commands_status ON device_commands(status);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_device_commands_sent_at ON device_commands(sent_at);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_access_logs_device_id ON access_logs(device_id);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_access_logs_member_id ON access_logs(member_id);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_access_logs_timestamp ON access_logs(timestamp);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_access_logs_access_type ON access_logs(access_type);');
+
+    // Performance optimization indexes (added for biometric validation speed)
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_members_biometric_lookup ON members(biometric_id, is_active, is_admin) WHERE biometric_id IS NOT NULL AND biometric_id != '' AND biometric_id != '0';"
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_invoices_member_lookup ON invoices(member_id, status);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_payments_invoice_date ON payments(invoice_id, payment_date DESC);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_attendance_member_today ON attendance(member_id, date, check_out_time);'
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_settings_key_lookup ON settings(key);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_members_active_admin ON members(is_active, is_admin);');
+
+    // Face check-in indexes
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_face_embeddings_member ON member_face_embeddings(member_id);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_face_embeddings_updated ON member_face_embeddings(updated_at);'
+    );
+
+    // Firmware table indexes
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_firmware_update_log_device_id ON firmware_update_log(device_id);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_firmware_update_log_status_started ON firmware_update_log(status, started_at);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_firmware_update_log_firmware_id ON firmware_update_log(firmware_id);'
+    );
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_firmware_versions_version ON firmware_versions(version);'
+    );
+
     // Insert default settings
     for (const [k, v] of insertDefaultSettings) {
       db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)').run(k, v);
@@ -273,58 +404,110 @@ function initializeDatabase() {
   });
   trx();
 
+  // Run ANALYZE to update query planner statistics for optimal index usage
+  try {
+    db.exec('ANALYZE;');
+    logger.info('database ANALYZE completed');
+  } catch (analyzeError) {
+    logger.warn({ err: analyzeError }, 'ANALYZE failed');
+  }
+
   // Ensure legacy databases have required columns with defaults
   try {
-    const cols = db.prepare("PRAGMA table_info(members)").all();
-    const colNames = cols.map(c => String(c.name).toLowerCase());
-    
+    const cols = db.prepare('PRAGMA table_info(members)').all();
+    const colNames = cols.map((c) => String(c.name).toLowerCase());
+
     // Add is_active column if missing
     if (!colNames.includes('is_active')) {
-      db.prepare("ALTER TABLE members ADD COLUMN is_active INTEGER DEFAULT 1").run();
-      db.prepare("UPDATE members SET is_active = 1 WHERE is_active IS NULL").run();
+      db.prepare('ALTER TABLE members ADD COLUMN is_active INTEGER DEFAULT 1').run();
+      db.prepare('UPDATE members SET is_active = 1 WHERE is_active IS NULL').run();
     }
-    
+
     // Add membership_type column if missing
     if (!colNames.includes('membership_type')) {
       db.prepare("ALTER TABLE members ADD COLUMN membership_type TEXT DEFAULT 'standard'").run();
-      db.prepare("UPDATE members SET membership_type = 'standard' WHERE membership_type IS NULL").run();
+      db.prepare(
+        "UPDATE members SET membership_type = 'standard' WHERE membership_type IS NULL"
+      ).run();
     }
-    
+
     // Add is_admin column if missing
     if (!colNames.includes('is_admin')) {
-      db.prepare("ALTER TABLE members ADD COLUMN is_admin INTEGER DEFAULT 0").run();
-      db.prepare("UPDATE members SET is_admin = 0 WHERE is_admin IS NULL").run();
+      db.prepare('ALTER TABLE members ADD COLUMN is_admin INTEGER DEFAULT 0').run();
+      db.prepare('UPDATE members SET is_admin = 0 WHERE is_admin IS NULL').run();
     }
-    
-    // Add biometric_id column if missing
+
+    // Add biometric_id column if missing. Leave existing NULLs as NULL — don't
+    // backfill to '' here: idx_members_biometric_id is a UNIQUE partial index
+    // (WHERE biometric_id IS NOT NULL) that exempts NULL but not '', so collapsing
+    // more than one member's NULL to '' throws a UNIQUE constraint violation.
+    // NULL is the app's canonical "no biometric assigned" sentinel (see
+    // biometricIntegration.js's explicit `SET biometric_id = NULL` on clear).
     if (!colNames.includes('biometric_id')) {
-      db.prepare("ALTER TABLE members ADD COLUMN biometric_id TEXT DEFAULT ''").run();
-      db.prepare("UPDATE members SET biometric_id = '' WHERE biometric_id IS NULL").run();
+      db.prepare('ALTER TABLE members ADD COLUMN biometric_id TEXT').run();
     }
-    
+
+    // Add last_visit column if missing — biometricIntegration.updateLastVisit
+    // (and now checkInService) have always written to it, but no migration ever
+    // created it; the UPDATE failed silently inside a try/catch.
+    if (!colNames.includes('last_visit')) {
+      db.prepare('ALTER TABLE members ADD COLUMN last_visit TEXT').run();
+    }
+
     // Add biometric_sensor_member_id column if missing
     if (!colNames.includes('biometric_sensor_member_id')) {
       db.prepare("ALTER TABLE members ADD COLUMN biometric_sensor_member_id TEXT DEFAULT ''").run();
-      db.prepare("UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL").run();
+      db.prepare(
+        "UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL"
+      ).run();
     }
-    
+
     // Ensure attendance table has date column
-    const attendanceCols = db.prepare("PRAGMA table_info(attendance)").all();
-    const attendanceColNames = attendanceCols.map(c => String(c.name).toLowerCase());
-    
+    const attendanceCols = db.prepare('PRAGMA table_info(attendance)').all();
+    const attendanceColNames = attendanceCols.map((c) => String(c.name).toLowerCase());
+
     if (!attendanceColNames.includes('date')) {
       db.prepare("ALTER TABLE attendance ADD COLUMN date TEXT DEFAULT (date('now'))").run();
-      db.prepare("UPDATE attendance SET date = date(check_in_time) WHERE date IS NULL").run();
+      db.prepare('UPDATE attendance SET date = date(check_in_time) WHERE date IS NULL').run();
     }
-    
-    // Update existing NULL values to empty strings for text fields
+
+    // Update existing NULL values to empty strings for text fields.
+    // biometric_id is intentionally excluded — see comment above.
     db.prepare("UPDATE members SET address = '' WHERE address IS NULL").run();
     db.prepare("UPDATE members SET birthday = '' WHERE birthday IS NULL").run();
     db.prepare("UPDATE members SET photo_url = '' WHERE photo_url IS NULL").run();
-    db.prepare("UPDATE members SET biometric_id = '' WHERE biometric_id IS NULL").run();
-    db.prepare("UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL").run();
-    
-  } catch (_) {}
+    db.prepare(
+      "UPDATE members SET biometric_sensor_member_id = '' WHERE biometric_sensor_member_id IS NULL"
+    ).run();
+
+    // One-time cleanup: normalize any biometric_id already sitting as '' (from
+    // the old buggy backfill this fix removed, or from biometric-clearing code
+    // that wrote '' before it was corrected to write NULL) back to the
+    // canonical "no biometric" sentinel. Safe unconditionally — multiple NULLs
+    // never violate the partial UNIQUE index below.
+    db.prepare("UPDATE members SET biometric_id = NULL WHERE biometric_id = ''").run();
+
+    // idx_members_biometric_id must be UNIQUE to actually enforce "one member
+    // per biometric_id". CREATE INDEX IF NOT EXISTS is name-based, so a DB that
+    // picked up the non-unique version of this index (created by an older build
+    // of this file) needs it dropped and rebuilt now that no '' duplicates
+    // remain to block the rebuild.
+    const biometricIdIndex = db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_members_biometric_id'"
+      )
+      .get();
+    if (biometricIdIndex && !/UNIQUE/i.test(biometricIdIndex.sql || '')) {
+      db.exec('DROP INDEX idx_members_biometric_id;');
+      db.exec(
+        'CREATE UNIQUE INDEX idx_members_biometric_id ON members(biometric_id) WHERE biometric_id IS NOT NULL;'
+      );
+    }
+  } catch (migrationError) {
+    // Migration errors are non-fatal but must be visible — a silent failure here
+    // leaves the DB schema incomplete and causes runtime errors later.
+    logger.warn({ err: migrationError }, 'DB schema migration step failed');
+  }
 }
 
 const pool = {
@@ -335,6 +518,40 @@ const pool = {
   }),
 };
 
-module.exports = { db, pool, initializeDatabase };
+/**
+ * Run an async callback inside a database transaction.
+ * better-sqlite3's db.transaction() only supports synchronous callbacks; passing
+ * an async function causes it to commit after the first await. This helper uses
+ * explicit BEGIN/COMMIT/ROLLBACK so async operations stay within the transaction.
+ */
+let _txQueue = Promise.resolve();
 
+async function runInTransaction(callback) {
+  let releaseLock;
+  const lockAcquired = new Promise((resolve) => {
+    releaseLock = resolve;
+  });
+  const prev = _txQueue;
+  _txQueue = lockAcquired;
 
+  await prev;
+  try {
+    db.exec('BEGIN');
+    const result = await callback();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (_) {
+      // Swallow ROLLBACK errors so the original error is what propagates.
+      // A failed ROLLBACK means the transaction was already rolled back or the
+      // connection is broken — either way the original error is what matters.
+    }
+    throw err;
+  } finally {
+    releaseLock();
+  }
+}
+
+module.exports = { db, pool, initializeDatabase, runInTransaction };

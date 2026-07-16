@@ -24,6 +24,7 @@ This is a comprehensive Gym Management Software built with a Node.js backend and
 The application is built with a comprehensive feature set that includes:
 
 ### User Roles & Admin Privileges
+
 - **Admin Users**: Special privileges for gym staff and owners
 - **Multiple Daily Check-ins**: Admin users can enter the gym multiple times per day
 - **Session Bypass**: Admin users are not restricted to morning/evening shift limitations
@@ -31,35 +32,38 @@ The application is built with a comprehensive feature set that includes:
 - **Role Management**: Easy creation and management of admin users through the member interface
 
 ### Backend API Features
-*   **Member Management:** Full CRUD (Create, Read, Update, Delete) operations for gym members with automated welcome emails.
-*   **Biometric Attendance:** API endpoints to log member check-ins from ESP32 fingerprint devices with attendance history tracking and configurable working hours.
-*   **Hybrid Cache Optimization:** Advanced caching system that reduces door unlock time from 2-3 seconds to under 1 second by combining local ESP32 caching with server validation for optimal security and performance.
-*   **Class & Schedule Management:** Complete system for creating fitness classes and scheduling them with capacity management.
-*   **Online Booking System:** Members can book and cancel class spots with overbooking prevention and automated confirmation emails.
-*   **Billing & Payments:** Membership plans, invoices, and manual payment recording.
-*   **Automated Communications:** Email notifications for member registration, class bookings, and payment confirmations.
-*   **Advanced Analytics:** Comprehensive reporting system with member growth, attendance trends, revenue analytics, and popular class rankings.
+
+- **Member Management:** Full CRUD (Create, Read, Update, Delete) operations for gym members with automated welcome emails.
+- **Biometric Attendance:** API endpoints to log member check-ins from ESP32 fingerprint devices with attendance history tracking and configurable working hours.
+- **Hybrid Cache Optimization:** Advanced caching system that reduces door unlock time from 2-3 seconds to under 1 second by combining local ESP32 caching with server validation for optimal security and performance.
+- **Class & Schedule Management:** Complete system for creating fitness classes and scheduling them with capacity management.
+- **Online Booking System:** Members can book and cancel class spots with overbooking prevention and automated confirmation emails.
+- **Billing & Payments:** Membership plans, invoices, and manual payment recording.
+- **Automated Communications:** Email notifications for member registration, class bookings, and payment confirmations.
+- **Advanced Analytics:** Comprehensive reporting system with member growth, attendance trends, revenue analytics, and popular class rankings.
 
 ### Frontend Admin Dashboard Features
-*   **Multi-page Navigation:** Professional dashboard with React Router navigation between different management sections.
-*   **Member Management Interface:** Add, view, edit, and delete gym members with real-time data updates.
-*   **Consolidated Biometric Management:** Unified ESP32 fingerprint enrollment with device selection, guided enrollment process, manual member-device linking, and real-time enrollment monitoring.
-*   **Class & Schedule Management:** Create and manage fitness classes with integrated schedule management (schedules accessible as a tab under Classes).
-*   **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date for regular members. Admin users can check in multiple times per day without session restrictions.
-*   **Financial Management Interface:** Create membership plans and manage billing. Record manual payments against invoices, including auto-creating an invoice if none exists.
-*   **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics. Dashboard cards are clickable and deep-link to filtered sections (e.g., unpaid members, pending payments).
-*   **Advanced Settings Management:** Centralized settings with tabbed interface including General settings and comprehensive ESP32 device management (Device Manager, Monitor, Analytics accessible as tabs under Settings).
-*   **ESP32 Configuration:** User-configurable ESP32 connection settings including device host/port and local listener host/port with clear defaults and help text.
-*   **Material UI Navigation:** Enhanced left navigation with icons and active-route highlighting.
-*   **Branding & Accent Colors:** Configure Primary and Secondary accents as Solid or Gradient in Settings. A gradient editor lets you adjust mode (Linear/Radial), angle, and color stops. Accents are used across buttons, headings, and section headers.
-*   **Dashboard Card Visibility:** Toggle which summary cards are shown on the Dashboard in Settings.
-*   **Invoices:** Click recent payments to open a printable invoice. Print generates a print-out of only the invoice; Download PDF creates a file (no print dialog). Share via WhatsApp opens WhatsApp Web with a prefilled message.
+
+- **Multi-page Navigation:** Professional dashboard with React Router navigation between different management sections.
+- **Member Management Interface:** Add, view, edit, and delete gym members with real-time data updates.
+- **Consolidated Biometric Management:** Unified ESP32 fingerprint enrollment with device selection, guided enrollment process, manual member-device linking, and real-time enrollment monitoring.
+- **Class & Schedule Management:** Create and manage fitness classes with integrated schedule management (schedules accessible as a tab under Classes).
+- **Attendance Tracking Interface:** View member attendance history and simulate biometric check-ins for testing. Enforces session-based check-ins (Morning 05:00–11:00, Evening 16:00–22:00) with a single check-in allowed per calendar date for regular members. Admin users can check in multiple times per day without session restrictions.
+- **Financial Management Interface:** Create membership plans and manage billing. Record manual payments against invoices, including auto-creating an invoice if none exists.
+- **Analytics Dashboard:** Real-time reporting with summary statistics, growth trends, revenue tracking, and popular class analytics. Dashboard cards are clickable and deep-link to filtered sections (e.g., unpaid members, pending payments).
+- **Advanced Settings Management:** Centralized settings with tabbed interface including General settings and comprehensive ESP32 device management (Device Manager, Monitor, Analytics accessible as tabs under Settings).
+- **ESP32 Configuration:** User-configurable ESP32 connection settings including device host/port and local listener host/port with clear defaults and help text.
+- **Material UI Navigation:** Enhanced left navigation with icons and active-route highlighting.
+- **Branding & Accent Colors:** Configure Primary and Secondary accents as Solid or Gradient in Settings. A gradient editor lets you adjust mode (Linear/Radial), angle, and color stops. Accents are used across buttons, headings, and section headers.
+- **Dashboard Card Visibility:** Toggle which summary cards are shown on the Dashboard in Settings.
+- **Invoices:** Click recent payments to open a printable invoice. Print generates a print-out of only the invoice; Download PDF creates a file (no print dialog). Share via WhatsApp opens WhatsApp Web with a prefilled message.
 
 ## Admin Roles & User Privileges
 
 The system implements a comprehensive user role system with admin privileges for gym staff and owners.
 
 ### Admin User Features
+
 - **Multiple Daily Check-ins**: Admin users can enter the gym multiple times per day, bypassing the single daily check-in restriction
 - **Session Bypass**: Admin users are not restricted to morning (05:00–11:00) or evening (16:00–22:00) shift limitations
 - **Visual Recognition**: Admin users are clearly identified across all interfaces with:
@@ -68,19 +72,23 @@ The system implements a comprehensive user role system with admin privileges for
   - Special highlighting in member lists, attendance records, and financial tables
 
 ### Creating Admin Users
+
 1. Navigate to the Members section
 2. Click "Add Member" or edit an existing member
 3. Check the "Admin User" checkbox
 4. Save the member information
 
 ### Admin User Management
+
 - **Filtering**: View admins and regular members separately using filter options
 - **Role Updates**: Change admin status for existing members
 - **Visual Indicators**: Admin users are immediately recognizable in all system interfaces
 - **Privilege Enforcement**: Backend automatically applies admin privileges during check-ins
 
 ### Database Schema
+
 The system automatically adds an `is_admin` column to the members table:
+
 ```sql
 CREATE TABLE members (
     -- ... existing fields ...
@@ -89,23 +97,24 @@ CREATE TABLE members (
 ```
 
 ### API Endpoints
+
 - **Member Management**: All CRUD operations support admin role creation and updates
 - **Attendance**: Admin users bypass session restrictions and daily limits
 - **Filtering**: API supports filtering by member type (admins, members, all)
 
 ## Technology Stack
 
--   **Backend:**
-    -   Node.js with Express.js framework
-    -   SQLite database for local data storage
-    -   (Optional) Payment gateway integration — currently disabled
-    -   Nodemailer for automated email communications
-    -   JWT for authentication (ready for future implementation)
--   **Frontend:**
-    -   React.js with React Router for multi-page navigation
-    -   Axios for API communication
-    -   Responsive design with professional styling
-    -   📖 **See [client/README.md](client/README.md) for detailed frontend documentation**
+- **Backend:**
+  - Node.js with Express.js framework
+  - SQLite database for local data storage
+  - (Optional) Payment gateway integration — currently disabled
+  - Nodemailer for automated email communications
+  - JWT for authentication (ready for future implementation)
+- **Frontend:**
+  - React.js with React Router for multi-page navigation
+  - Axios for API communication
+  - Responsive design with professional styling
+  - 📖 **See [client/README.md](client/README.md) for detailed frontend documentation**
 
 ---
 
@@ -115,8 +124,8 @@ Follow these steps to get the application running on your local machine.
 
 ### Prerequisites
 
--   [Node.js](https://nodejs.org/) (which includes npm)
--   SQLite (automatically included with Node.js dependencies)
+- [Node.js](https://nodejs.org/) (which includes npm)
+- SQLite (automatically included with Node.js dependencies)
 
 ### 1. Install Dependencies
 
@@ -142,8 +151,21 @@ Copy the following into the `.env` file and replace the placeholder values with 
 # SQLite Database (automatically created)
 # No database configuration required
 
-# JSON Web Token Secret (for future authentication features)
+# JSON Web Token Secret — required. Signs staff login session cookies; the
+# server refuses to start without it.
 JWT_SECRET=your_super_secret_jwt_key
+
+# Seeds one staff/admin account on first boot if no staff accounts exist yet.
+# Only used once — ignored after any staff account exists. Log in and change
+# the password afterwards.
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=change_me_after_first_login
+
+# Shared secret ESP32 devices must send when calling the webhook/validate/
+# cache-update/firmware-download endpoints (since devices can't do a staff
+# login). Leave unset during initial setup — see "Authentication & Security"
+# below for the safe rollout sequence.
+# DEVICE_SHARED_SECRET=
 
 # Payment gateway configuration (disabled)
 
@@ -155,11 +177,20 @@ EMAIL_PASS=your_app_password
 ENABLE_BIOMETRIC=true
 BIOMETRIC_PORT=8080
 BIOMETRIC_HOST=0.0.0.0
+# Verbose ESP32 webhook logs (full JSON body + request headers). Omit in normal use.
+# DEBUG_BIOMETRIC_WEBHOOK=1
 ```
 
 **Note for Email Setup:** For Gmail, you'll need to use an "App Password" instead of your regular password. Enable 2-factor authentication and generate an app password in your Google Account settings.
 
 **Note for JWT Secret:** It is critical to use a strong, randomly-generated secret for your JWT key. You can generate one from your terminal with the following command:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+**Note for Device Shared Secret:** Generate the same way:
+
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
@@ -213,49 +244,67 @@ Once both servers are running, you can access the different sections of the admi
 
 The backend provides the following REST API endpoints:
 
-| Feature      | Method | Endpoint                    | Description                                |
-|--------------|--------|-----------------------------|--------------------------------------------|
-| **Members**  | `GET`  | `/api/members`              | Get all members                            |
-|              | `POST` | `/api/members`              | Create a new member                        |
-|              | `GET`  | `/api/members/:id`          | Get a single member by ID                  |
-|              | `PUT`  | `/api/members/:id`          | Update a member                            |
-|              | `DELETE`|`/api/members/:id`          | Delete a member                            |
-| **Attendance**| `POST`| `/api/attendance/check-in`  | Log a member check-in by `memberId` or `device_user_id` (uses configurable working hours; one check-in per calendar date) |
-|              | `POST` | `/api/attendance/device-webhook` | Webhook for device push events (uses `device_user_id` mapping) |
-|              | `GET`  | `/api/attendance/:memberId?start=YYYY-MM-DD&end=YYYY-MM-DD` | Get attendance history for a member filtered by date range |
-| **Classes**  | `GET`  | `/api/classes`              | Get all classes                            |
-|              | `POST` | `/api/classes`              | Create a new class                         |
-| **Schedules**| `GET`  | `/api/schedules`            | Get all class schedules                    |
-|              | `POST` | `/api/schedules`            | Create a new schedule                      |
-| **Bookings** | `POST` | `/api/bookings`             | Book a member into a class                 |
-|              | `GET`  | `/api/bookings/member/:memberId`| Get all bookings for a member           |
-|              | `PATCH`| `/api/bookings/cancel/:bookingId`| Cancel a booking                       |
-| **Plans**    | `GET`  | `/api/plans`                | Get all membership plans                   |
-|              | `POST` | `/api/plans`                | Create a new membership plan               |
-| **Biometrics** | `PUT` | `/api/members/:id/biometric` | Link or update a member's biometric mapping (`device_user_id` and/or template) |
-| **Payments** | `POST` | `/api/payments`             | Card payments disabled (501)               |
-|              | `POST` | `/api/payments/manual`      | Record a manual payment (cash/bank/UPI). Auto-creates an invoice if missing/invalid |
-|              | `POST` | `/api/payments/invoice`     | Create a new invoice for a member          |
-|              | `GET`  | `/api/payments/unpaid?member_id=<id>` | List unpaid invoices for a member |
-|              | `GET`  | `/api/payments/:id/invoice` | Invoice details by payment id (for invoice preview) |
-|              | `GET`  | `/api/payments/invoices/:id` | Invoice details by invoice id (latest payment included) |
-| **Reports**  | `GET`  | `/api/reports/summary`      | Get overall summary statistics (includes unpaidMembersThisMonth) |
-|              | `GET`  | `/api/reports/member-growth`| Get member growth over last 12 months     |
-|              | `GET`  | `/api/reports/attendance-stats`| Get daily attendance for last 30 days  |
-|              | `GET`  | `/api/reports/popular-classes`| Get most popular classes by booking count|
-|              | `GET`  | `/api/reports/revenue-stats`| Get monthly revenue for last 12 months    |
-|              | `GET`  | `/api/reports/financial-summary` | Get outstanding invoices, payment history, member payment status |
-|              | `GET`  | `/api/reports/unpaid-members-this-month` | Members with no payments in the current month |
+
+| Feature        | Method   | Endpoint                                                    | Description                                                                                                               |
+| -------------- | -------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Members**    | `GET`    | `/api/members`                                              | Get all members                                                                                                           |
+|                | `POST`   | `/api/members`                                              | Create a new member                                                                                                       |
+|                | `GET`    | `/api/members/:id`                                          | Get a single member by ID                                                                                                 |
+|                | `PUT`    | `/api/members/:id`                                          | Update a member                                                                                                           |
+|                | `DELETE` | `/api/members/:id`                                          | Delete a member                                                                                                           |
+| **Attendance** | `POST`   | `/api/attendance/check-in`                                  | Log a member check-in by `memberId` or `device_user_id` (uses configurable working hours; one check-in per calendar date) |
+|                | `POST`   | `/api/attendance/device-webhook`                            | Webhook for device push events (uses `device_user_id` mapping)                                                            |
+|                | `GET`    | `/api/attendance/:memberId?start=YYYY-MM-DD&end=YYYY-MM-DD` | Get attendance history for a member filtered by date range                                                                |
+| **Classes**    | `GET`    | `/api/classes`                                              | Get all classes                                                                                                           |
+|                | `POST`   | `/api/classes`                                              | Create a new class                                                                                                        |
+| **Schedules**  | `GET`    | `/api/schedules`                                            | Get all class schedules                                                                                                   |
+|                | `POST`   | `/api/schedules`                                            | Create a new schedule                                                                                                     |
+| **Bookings**   | `POST`   | `/api/bookings`                                             | Book a member into a class                                                                                                |
+|                | `GET`    | `/api/bookings/member/:memberId`                            | Get all bookings for a member                                                                                             |
+|                | `PATCH`  | `/api/bookings/cancel/:bookingId`                           | Cancel a booking                                                                                                          |
+| **Plans**      | `GET`    | `/api/plans`                                                | Get all membership plans                                                                                                  |
+|                | `POST`   | `/api/plans`                                                | Create a new membership plan                                                                                              |
+| **Biometrics** | `PUT`    | `/api/members/:id/biometric`                                | Link or update a member's biometric mapping (`device_user_id` and/or template)                                            |
+| **Payments**   | `POST`   | `/api/payments`                                             | Card payments disabled (501)                                                                                              |
+|                | `POST`   | `/api/payments/manual`                                      | Record a manual payment (cash/bank/UPI). Auto-creates an invoice if missing/invalid                                       |
+|                | `POST`   | `/api/payments/invoice`                                     | Create a new invoice for a member                                                                                         |
+|                | `GET`    | `/api/payments/unpaid?member_id=<id>`                       | List unpaid invoices for a member                                                                                         |
+|                | `GET`    | `/api/payments/:id/invoice`                                 | Invoice details by payment id (for invoice preview)                                                                       |
+|                | `GET`    | `/api/payments/invoices/:id`                                | Invoice details by invoice id (latest payment included)                                                                   |
+| **Reports**    | `GET`    | `/api/reports/summary`                                      | Get overall summary statistics (includes unpaidMembersThisMonth)                                                          |
+|                | `GET`    | `/api/reports/member-growth`                                | Get member growth over last 12 months                                                                                     |
+|                | `GET`    | `/api/reports/attendance-stats`                             | Get daily attendance for last 30 days                                                                                     |
+|                | `GET`    | `/api/reports/popular-classes`                              | Get most popular classes by booking count                                                                                 |
+|                | `GET`    | `/api/reports/revenue-stats`                                | Get monthly revenue for last 12 months                                                                                    |
+|                | `GET`    | `/api/reports/financial-summary`                            | Get outstanding invoices, payment history, member payment status                                                          |
+|                | `GET`    | `/api/reports/unpaid-members-this-month`                    | Members with no payments in the current month                                                                             |
+
 
 ### Authentication & Security
 
-- JWT authentication is ready for future implementation
-- All endpoints are currently public (no authentication required)
-- CORS is configured for development and production use
+There are two independent layers of authentication: a staff login for the web dashboard, and a shared device secret for the ESP32 endpoints devices call directly.
+
+#### Staff login
+
+- All `/api/*` routes require a logged-in staff session **except** `/api/auth/login`, `/api/auth/logout`, and the ESP32 device endpoints listed below.
+- Login is `POST /api/auth/login` with `{ username, password }`. On success the server sets an `httpOnly`, `SameSite=Lax` session cookie (`gmgmt_token`, a JWT signed with `JWT_SECRET`, 12h expiry by default) — there is no token to store or attach manually, the browser sends it automatically on every request.
+- `GET /api/auth/me` returns the current staff identity (or `401`); `POST /api/auth/logout` clears the cookie.
+- Accounts are stored in the `staff` table (`username`, `password_hash`, `role`). Login is rate-limited to 5 attempts per 15 minutes per IP, and an account locks for 15 minutes after 5 failed password attempts.
+- **First-time login**: if the `staff` table is empty, the server seeds one admin account from `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD` on startup. Log in with those, then change the password. If those env vars aren't set and no staff account exists, nobody can log in — set them, restart once, then you can unset them again.
+- The frontend enforces this too: `client/src/context/AuthContext.js` gates the whole app behind a login screen and every API call goes through `client/src/api/client.js`, which sends the cookie and redirects to `/login` on a `401`.
+
+#### ESP32 device secret
+
+- Four endpoints are called directly by ESP32 devices, which can't do an interactive login: `POST /api/biometric/esp32-webhook`, `POST /api/biometric/validate`, `POST /api/biometric/cache-update`, and `GET /api/firmware/download/:id`. These are exempt from staff login but guarded separately by `DEVICE_SHARED_SECRET`.
+- If `DEVICE_SHARED_SECRET` is **unset**, these endpoints are open (dev default — matches how `CORS_ORIGINS` behaves when unset). Once set, requests must include a matching `X-Device-Secret` header (or, for the firmware-download URL specifically, a `?device_secret=` query parameter — the ESP32 OTA library doesn't make custom headers easy to send, so the backend embeds the secret directly in the download URL it hands the device when triggering an OTA update).
+- All devices currently share **one** secret — there's no per-device pairing flow, since devices already self-register on their first webhook/heartbeat.
+- **Safe rollout if you have devices already deployed**: don't just set `DEVICE_SHARED_SECRET` and restart — any device still running old firmware will be locked out immediately. Instead: (1) flash devices with firmware that sends the header/query param (it's a no-op if the backend doesn't enforce it yet), (2) confirm every device has checked in with the new firmware version, (3) only then set `DEVICE_SHARED_SECRET` and restart the backend.
+- CORS is configured for development and production use, independent of the above.
 
 ### Error Handling
 
 The API uses standard HTTP status codes:
+
 - `200` - Success
 - `400` - Bad Request (validation errors)
 - `404` - Not Found
@@ -282,18 +331,21 @@ This project supports ESP32-based fingerprint door lock systems for attendance c
 The system implements a sophisticated hybrid caching strategy that dramatically improves door unlock performance while maintaining security:
 
 #### Performance Benefits
+
 - **Speed Improvement**: Reduces door unlock time from 2-3 seconds to under 1 second
 - **Cache Hit Rate**: 80-90% of authorized members unlock instantly using local cache
 - **Server Validation**: Cache misses trigger real-time server validation for security
 - **Automatic Updates**: Cache refreshes every 5 minutes to maintain accuracy
 
 #### How It Works
+
 1. **Local Cache**: ESP32 stores frequently accessed member authorization data locally
 2. **Fast Path**: Authorized members with valid cache entries unlock immediately
 3. **Secure Fallback**: Cache misses or expired entries trigger server validation
 4. **Cache Synchronization**: Periodic updates ensure cache accuracy and security
 
 #### Security Features
+
 - **Server Validation**: All authorization decisions are ultimately validated by the server
 - **Cache Expiry**: Local cache entries expire after 5 minutes to prevent stale data
 - **Audit Trail**: All access attempts are logged regardless of cache hit/miss
@@ -301,11 +353,16 @@ The system implements a sophisticated hybrid caching strategy that dramatically 
 - **Immediate Cache Invalidation**: When members are deactivated, ESP32 cache is immediately cleared to prevent unauthorized access
 
 #### Technical Implementation
+
 - **ESP32 Cache**: Local storage of member biometric IDs and authorization status
 - **Server Endpoints**: Dedicated `/api/biometric/validate` and `/api/biometric/cache-update` endpoints
 - **Database Optimization**: Performance indexes for fast member lookups
 - **Automatic Migration**: Existing installations automatically get cache optimization
 - **Cache Invalidation**: Server triggers immediate ESP32 cache refresh when member status changes via `/api/cache/invalidate` endpoint
+
+### Backend logs (biometric HTTP)
+
+Validation (`/api/biometric/validate`) and the ESP32 webhook (`/api/biometric/esp32-webhook`) emit one short line per request by default (device, event, outcome; member name when known). Heartbeats stay minimal. Set `DEBUG_BIOMETRIC_WEBHOOK=1` in `.env` to print full webhook bodies and headers again.
 
 ### What We Store
 
@@ -315,12 +372,14 @@ The system implements a sophisticated hybrid caching strategy that dramatically 
 ### Configurable Working Hours
 
 Working hours are editable in Settings and enforced by the backend during check-in:
+
 - Morning session: `morning_session_start`–`morning_session_end` (default 05:00–11:00)
 - Evening session: `evening_session_start`–`evening_session_end` (default 16:00–22:00)
 
 ### Device Communication
 
 ESP32 devices communicate via TCP/IP using JSON messages:
+
 - **Connection**: ESP32 connects to server via WiFi
 - **Protocol**: JSON over TCP/IP
 - **Events**: Real-time fingerprint scan events and device status
@@ -360,13 +419,15 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 #### 1. Install Required Arduino Libraries
 
 **Method 1: Using Arduino IDE Library Manager**
+
 1. Open Arduino IDE
 2. Go to **Tools → Manage Libraries...**
 3. Search and install the following libraries:
-   - `ArduinoJson` by Benoit Blanchon (version 6.x)
-   - `Adafruit Fingerprint Sensor Library` by Adafruit (compatible with R307 sensor)
+  - `ArduinoJson` by Benoit Blanchon (version 6.x)
+  - `Adafruit Fingerprint Sensor Library` by Adafruit (compatible with R307 sensor)
 
 **Method 2: Using Arduino IDE Board Manager**
+
 1. Go to **File → Preferences**
 2. Add ESP32 board URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_dev_index.json`
 3. Go to **Tools → Board → Boards Manager**
@@ -377,32 +438,74 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 1. Open `esp32_door_lock/esp32_door_lock.ino` in Arduino IDE
 2. Select the correct board: **Tools → Board → ESP32 Arduino → ESP32 Dev Module**
 3. **Configuration Options** (choose one):
-   
-   **Option A: Use Web Interface** (Recommended)
-   - Upload firmware with default settings
-   - Configure via web interface after upload (see step 7)
-   
+  **Option A: Use Web Interface** (Recommended)
+  - Upload firmware with default settings
+  - Configure via web interface after upload (see step 7)
    **Option B: Custom Default Configuration**
-   ```bash
-   # Copy configuration template
-   cp esp32_door_lock/config.h.example esp32_door_lock/config.h
-   
-   # Edit config.h with your preferred defaults:
-   # DEFAULT_WIFI_SSID = "YOUR_WIFI_NAME"
-   # DEFAULT_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"  
-   # DEFAULT_GYM_SERVER_IP = "YOUR_SERVER_IP"
-   # DEFAULT_GYM_SERVER_PORT = 3001  # Must match main server PORT in .env
-   ```
+4. **Set Partition Scheme** (required for OTA firmware updates):
+  - Go to **Tools → Partition Scheme → "Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)"**
+  - This must be set before the first USB flash. After that, all subsequent firmware updates can be pushed over-the-air from the gym management UI via **Settings → ESP32 Devices → Firmware Updates**.
+5. Connect ESP32 to computer via USB
+6. Select the correct port: **Tools → Port → (your ESP32 port)**
+7. Click **Upload** button
+8. **Configure Device** (if using Option A):
+  - Open Serial Monitor at **115200 baud** to see device IP
+  - Navigate to `http://ESP32_IP/config` in your browser
+  - Enter your WiFi credentials and server settings
 
-4. Connect ESP32 to computer via USB
-5. Select the correct port: **Tools → Port → (your ESP32 port)**
-6. Click **Upload** button
-7. **Configure Device** (if using Option A):
-   - Open Serial Monitor at **115200 baud** to see device IP
-   - Navigate to `http://ESP32_IP/config` in your browser
-   - Enter your WiFi credentials and server settings
+#### 3. OTA Firmware Updates (After Initial USB Flash)
 
-#### 3. Hardware Connections
+Once the ESP32 has been flashed over USB at least once with the OTA partition scheme, you can push firmware updates over-the-air from the gym management UI.
+
+**1. Build the firmware binary**
+
+1. Open `esp32_door_lock/esp32_door_lock.ino` in Arduino IDE
+2. Set **Tools → Partition Scheme** to **"Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)"**
+3. Select **Tools → Board → ESP32 Dev Module**
+4. Compile without uploading: **Sketch → Verify/Compile** (Ctrl+R)
+5. After a successful compile, the `.bin` file is created. On macOS/Linux it is typically at:
+  ```
+   ~/Arduino/build/esp32_door_lock.ino.bin
+  ```
+   (Check the Arduino IDE output for the exact path on your system.)
+
+**2. Upload the firmware to the server**
+
+1. Open the gym management app in your browser
+2. Go to **Settings → ESP32 Devices**
+3. Open the **Firmware Updates** tab
+4. In the **Upload Firmware** section:
+  - **Version**: Enter a version label (e.g. `1.0.1`)
+  - **Description**: Optional (e.g. "Remote unlock fix")
+  - **File**: Select the `.bin` file from step 1
+5. Click **Upload**
+
+**3. Trigger OTA on the device**
+
+1. In the same **Firmware Updates** tab, find **Device Firmware Status**
+2. Locate your device (e.g. DOOR_001)
+3. Click **Update** next to the device to push the new firmware
+
+**4. What happens during OTA**
+
+- The server sends an OTA command to the ESP32 with the firmware download URL
+- The ESP32 fetches the `.bin` file from the server
+- It flashes the new firmware and reboots
+- The next heartbeat will show the new firmware version
+
+**Requirements**
+
+- The ESP32 must have been flashed at least once over USB with the OTA partition scheme
+- The ESP32 and server must be on the same network (or reachable from each other)
+- The server must be reachable at its IP (e.g. `http://192.168.x.x:3001`) from the ESP32
+
+**Troubleshooting**
+
+- **ESP32 can't reach the server**: Ensure the server IP in the OTA download URL is reachable from the ESP32's network
+- **OTA fails**: Check the **Firmware Update Log** in the UI and the ESP32 Serial Monitor for error messages
+- **No firmware listed**: Upload a firmware binary first in the **Firmware Updates** tab
+
+#### 4. Hardware Connections
 
 > **📋 ESP32 Pin Reference**: For detailed pin capabilities and limitations, see the [ESP32 Pin Reference](http://wiki.fluidnc.com/en/hardware/esp32_pin_reference) documentation.
 
@@ -484,7 +587,7 @@ Wiring Notes:
 • Buzzer can be active (3.3V) or passive (requires driver circuit)
 ```
 
-##### 3.6 Push Button Connection Schematics
+##### 4.6 Push Button Connection Schematics
 
 ###### Enroll Button (Pin 4) - Fingerprint Enrollment Control
 
@@ -605,7 +708,7 @@ Button Specifications:
 • Protection: Consider adding protective cover or key switch
 ```
 
-##### 3.7 Button Integration with ESP32 Firmware
+##### 4.7 Button Integration with ESP32 Firmware
 
 ###### Button State Detection
 
@@ -762,7 +865,7 @@ void loop() {
 }
 ```
 
-##### 3.5 Detailed Connection Schematics
+##### 4.5 Detailed Connection Schematics
 
 ###### R307 Fingerprint Sensor Connection
 
@@ -886,7 +989,7 @@ Safety Features:
 • No current flows through door lock when relay is inactive
 ```
 
-#### 4. Configuration Management
+#### 5. Configuration Management
 
 The ESP32 supports dynamic, environment-driven configuration:
 
@@ -894,15 +997,16 @@ The ESP32 supports dynamic, environment-driven configuration:
 2. **API Endpoints**: REST API for programmatic configuration
 3. **Remote Management**: Configure from gym management system
 4. **Development Defaults**: Optional `config.h` file for custom defaults
+5. **Device Secret**: Optional `Device Secret` field on the same config form — leave blank unless the backend enforces `DEVICE_SHARED_SECRET` (see [Authentication & Security](#api-endpoints)). Must match the backend's value exactly.
 
-#### 5. Critical Port Configuration
+#### 6. Critical Port Configuration
 
 **IMPORTANT**: The ESP32 must connect to the **main server port** (PORT in .env), NOT the BIOMETRIC_PORT:
 
 - **✅ Correct**: ESP32 port = 3001 (matches main server PORT)
 - **❌ Wrong**: ESP32 port = 8080 (causes HTTP timeout errors)
 
-#### 6. Testing Commands
+#### 7. Testing Commands
 
 ```bash
 # Setup and testing
@@ -919,28 +1023,33 @@ npm run biometric:check      # Check service status
 ### Web Interface Features
 
 #### Consolidated Biometric Management (`/biometric`)
+
 - Unified fingerprint enrollment with guided process
 - Device selection and real-time enrollment monitoring
 - Manual member-device linking
 - View biometric events and enrollment status
 
 #### ESP32 Device Management (`/settings/esp32-devices`)
+
 - View all connected ESP32 devices
 - Remote door unlock
 - Device status monitoring
 - Start remote enrollment
 
 #### Real-time Monitor (`/settings/esp32-monitor`)
+
 - Live event stream
 - Device health monitoring
 - Connection status
 
 #### Analytics (`/settings/esp32-analytics`)
+
 - Usage statistics
 - Access logs
 - Performance metrics
 
 #### ESP32 Configuration (`/settings`)
+
 - Configure ESP32 device host and port settings
 - Set local listener host and port  
 - Network configuration with helpful defaults
@@ -967,6 +1076,7 @@ The application automatically creates the following database tables:
 ### Biometric Integration Service
 
 The `biometricIntegration.js` service handles:
+
 - ESP32 device communication
 - WebSocket client management
 - Enrollment mode management
@@ -975,6 +1085,7 @@ The `biometricIntegration.js` service handles:
 ### Email Service
 
 The `emailService.js` service handles:
+
 - Welcome emails for new members
 - Booking confirmation emails
 - Payment confirmation emails
@@ -983,6 +1094,7 @@ The `emailService.js` service handles:
 ### Biometric Listener Service
 
 The `biometricListener.js` service handles:
+
 - TCP socket connections to ESP32 devices
 - Real-time event processing
 - Device status monitoring
@@ -1001,6 +1113,7 @@ The `biometricListener.js` service handles:
 - **❌ Wrong**: ESP32 port = 8080 (causes HTTP timeout errors)
 
 **Verification**:
+
 ```bash
 # Check your .env file - ESP32 should use the PORT value, not BIOMETRIC_PORT
 cat .env | grep PORT
@@ -1034,15 +1147,14 @@ curl -X POST http://YOUR_SERVER_IP:3001/api/biometric/esp32-webhook \
 **Root Cause**: Inconsistent timestamp handling between ESP32 device and server.
 
 **Solution**: 
+
 1. **ESP32 Configuration**: Update `esp32_door_lock/config.h` with your gym's timezone:
-   ```cpp
+  ```cpp
    #define TIMEZONE_OFFSET 19800   // UTC+5:30 (India)
    #define TIMEZONE_OFFSET -18000  // UTC-5 (Eastern US)
    #define TIMEZONE_OFFSET 0       // UTC+0 (UK)
-   ```
-
+  ```
 2. **Server-Side Fix**: Already implemented in `src/services/biometricIntegration.js`
-
 3. **Verification**: Both biometric events and attendance records should show identical timestamps
 
 #### Heartbeat Timestamp Issues
@@ -1052,6 +1164,7 @@ curl -X POST http://YOUR_SERVER_IP:3001/api/biometric/esp32-webhook \
 **Root Cause**: ESP32 sending heartbeats before NTP time synchronization.
 
 **Solution**: 
+
 1. **NTP Time Synchronization Wait**: ESP32 now waits up to 30 seconds for NTP time
 2. **Improved Fallback**: Uses reasonable timestamps instead of raw `millis()`
 3. **Heartbeat Validation**: Skips heartbeats with invalid timestamps
@@ -1061,6 +1174,7 @@ curl -X POST http://YOUR_SERVER_IP:3001/api/biometric/esp32-webhook \
 **Problem**: Date range filtering not providing full-day coverage.
 
 **Solution**: 
+
 - Start date automatically includes 00:00:00 hours
 - End date automatically includes 23:59:59 hours
 - No attendance records are missed due to time precision issues
@@ -1068,7 +1182,9 @@ curl -X POST http://YOUR_SERVER_IP:3001/api/biometric/esp32-webhook \
 ### NTP Time Synchronization Issues
 
 #### Problem Description
+
 The ESP32 door lock system may fail to synchronize time with NTP servers, resulting in the error:
+
 ```
 ⚠️ NTP time synchronization failed - continuing with fallback time
 Device will use approximate time based on uptime
@@ -1077,6 +1193,7 @@ Device will use approximate time based on uptime
 #### Root Causes & Solutions
 
 **1. Network Firewall Issues**
+
 - **Problem**: Corporate networks, routers, or ISPs often block NTP traffic on port 123
 - **Solutions**:
   - Check if port 123 (UDP) is open on your network
@@ -1085,6 +1202,7 @@ Device will use approximate time based on uptime
   - Consider using HTTP-based time services as fallback
 
 **2. DNS Resolution Problems**
+
 - **Problem**: ESP32 cannot resolve NTP server hostnames
 - **Solutions**:
   - Verify DNS server configuration in WiFi settings
@@ -1092,6 +1210,7 @@ Device will use approximate time based on uptime
   - Check if DNS server (8.8.8.8, 1.1.1.1) is accessible
 
 **3. Network Congestion or Slow Connection**
+
 - **Problem**: Network is too slow for NTP requests to complete within timeout
 - **Solutions**:
   - Increased timeout from 10s to 30s in the updated code
@@ -1099,6 +1218,7 @@ Device will use approximate time based on uptime
   - Implemented retry logic with exponential backoff
 
 **4. Router Configuration Issues**
+
 - **Problem**: Router blocks outgoing NTP requests or has restrictive firewall rules
 - **Solutions**:
   - Check router's firewall settings
@@ -1107,6 +1227,7 @@ Device will use approximate time based on uptime
   - Update router firmware
 
 **5. ISP Restrictions**
+
 - **Problem**: Internet Service Provider blocks or throttles NTP traffic
 - **Solutions**:
   - Contact ISP to confirm NTP access
@@ -1118,6 +1239,7 @@ Device will use approximate time based on uptime
 The code has been updated with the following improvements:
 
 **1. Multiple NTP Servers**
+
 ```cpp
 configTime(TIMEZONE_OFFSET, DST_OFFSET, 
            "pool.ntp.org",           // Primary
@@ -1127,16 +1249,19 @@ configTime(TIMEZONE_OFFSET, DST_OFFSET,
 ```
 
 **2. Increased Timeout**
+
 - Initial sync: 30 seconds (was 10 seconds)
 - Manual resync: 15 seconds
 - Periodic resync: Every 30 minutes if time is invalid
 
 **3. Better Error Reporting**
+
 - Detailed error messages with possible causes
 - Network diagnostic information
 - Time validation to detect invalid years
 
 **4. Automatic Recovery**
+
 - Periodic NTP resynchronization attempts
 - Fallback time calculation based on device uptime
 - Manual resync via web interface
@@ -1145,12 +1270,14 @@ configTime(TIMEZONE_OFFSET, DST_OFFSET,
 
 **1. Web Interface Testing**
 Access the ESP32 web interface and use the "Resync Time" button:
+
 ```
 http://[ESP32_IP_ADDRESS]/resync-time
 ```
 
 **2. Serial Monitor Debugging**
 Monitor the serial output for detailed NTP status:
+
 ```
 🔄 Manual NTP resynchronization requested...
 Attempting manual NTP synchronization...
@@ -1160,6 +1287,7 @@ Updated time: 2025-01-01 12:34:56
 
 **3. Network Connectivity Test**
 Test basic network connectivity from ESP32:
+
 ```cpp
 // Add this to your code for testing
 void testNetworkConnectivity() {
@@ -1179,6 +1307,7 @@ void testNetworkConnectivity() {
 
 **1. HTTP-Based Time Service**
 If NTP continues to fail, implement HTTP time service as fallback:
+
 ```cpp
 String getTimeFromHTTP() {
   HTTPClient http;
@@ -1197,12 +1326,14 @@ String getTimeFromHTTP() {
 
 **2. Local Network Time Server**
 Set up a local NTP server on your network:
+
 - Use a Raspberry Pi or other device
 - Configure it as an NTP server
 - Point ESP32 to local IP instead of external servers
 
 **3. RTC Module**
 Add a Real-Time Clock module for offline timekeeping:
+
 - DS3231 or PCF8563 RTC module
 - Battery backup for power outages
 - Manual time setting capability
@@ -1210,12 +1341,14 @@ Add a Real-Time Clock module for offline timekeeping:
 #### Configuration Recommendations
 
 **1. Network Settings**
+
 - Ensure ESP32 has stable WiFi connection
 - Use static IP if DHCP is unreliable
 - Configure DNS servers manually if needed
 
 **2. Timezone Configuration**
 Verify `config.h` settings:
+
 ```cpp
 #define TIMEZONE_OFFSET 19800  // UTC+5:30 (India)
 #define DST_OFFSET 0           // No daylight saving time
@@ -1223,6 +1356,7 @@ Verify `config.h` settings:
 
 **3. Firewall Rules**
 Add these rules to your router/firewall:
+
 ```
 Allow UDP 123 (NTP) outbound to:
 - pool.ntp.org
@@ -1234,18 +1368,21 @@ Allow UDP 123 (NTP) outbound to:
 #### Monitoring & Maintenance
 
 **1. Regular Checks**
+
 - Monitor serial output for NTP failures
 - Check web interface status page
 - Verify timestamp accuracy in server logs
 
 **2. Log Analysis**
 Look for patterns in NTP failures:
+
 - Time of day (network congestion)
 - Specific NTP servers failing
 - Network events coinciding with failures
 
 **3. Performance Metrics**
 Track NTP sync success rate:
+
 - Successful syncs vs. failures
 - Sync duration times
 - Fallback time usage frequency
@@ -1262,15 +1399,15 @@ If NTP issues persist after implementing these solutions:
 
 #### Quick Fix Checklist
 
-- [ ] Verify WiFi connection stability
-- [ ] Check router firewall settings
-- [ ] Test DNS resolution
-- [ ] Verify NTP port 123 access
-- [ ] Update ESP32 code with improved NTP handling
-- [ ] Test manual time resync via web interface
-- [ ] Monitor serial output for detailed error messages
-- [ ] Consider alternative NTP servers
-- [ ] Check timezone configuration in config.h
+- Verify WiFi connection stability
+- Check router firewall settings
+- Test DNS resolution
+- Verify NTP port 123 access
+- Update ESP32 code with improved NTP handling
+- Test manual time resync via web interface
+- Monitor serial output for detailed error messages
+- Consider alternative NTP servers
+- Check timezone configuration in config.h
 
 ### Library Installation Issues
 
@@ -1306,6 +1443,7 @@ SELECT * FROM devices;
 **Root Cause**: Communication gap between ESP32 and frontend via WebSocket.
 
 **Solution**: 
+
 1. **Direct WebSocket Updates**: Modified `biometricController.js` to send WebSocket updates immediately when processing ESP32 webhook events
 2. **Comprehensive Status Handling**: Added WebSocket updates for all enrollment outcomes (success/failure/cancellation)
 3. **Member Name Resolution**: Enhanced member name lookup for better user experience
@@ -1318,6 +1456,7 @@ SELECT * FROM devices;
 **Root Cause**: Frontend relying on polling instead of WebSocket connection.
 
 **Solution**: 
+
 1. **WebSocket Server**: Added WebSocket server to `src/app.js` using the `ws` package
 2. **Enhanced BiometricIntegration Service**: Added WebSocket client management methods
 3. **Frontend WebSocket Integration**: Updated frontend to connect to WebSocket server and handle real-time updates
@@ -1332,6 +1471,7 @@ SELECT * FROM devices;
 **Root Cause**: The `startEnrollmentMode()` function was overwriting the `enrollmentID` with `getNextAvailableID()`.
 
 **Solution**: 
+
 1. **Preserve Member ID**: Modified `startEnrollmentMode()` to only set `enrollmentID` if it hasn't been set by a remote command
 2. **Reset enrollmentID After Completion**: Added logic to reset `enrollmentID` after enrollment completes (success or failure)
 3. **Reset enrollmentID on Cancellation**: Added reset logic when enrollment is cancelled
@@ -1367,8 +1507,15 @@ NODE_ENV=development
 # Database (SQLite - automatically created)
 # No additional configuration required
 
-# JWT Configuration
+# JWT Configuration — required, signs staff session cookies
 JWT_SECRET=your_super_secret_jwt_key
+
+# Bootstrap staff account — seeded once if the staff table is empty
+INITIAL_ADMIN_USERNAME=admin
+INITIAL_ADMIN_PASSWORD=change_me_after_first_login
+
+# ESP32 device secret — see "Authentication & Security" for the rollout sequence
+# DEVICE_SHARED_SECRET=
 
 # Email Configuration
 EMAIL_USER=your_email@gmail.com
@@ -1429,6 +1576,7 @@ setTimeout(() => ws.close(), 3000);
 ### Dependencies
 
 Key dependencies for ESP32 integration:
+
 - `ws` package for WebSocket server functionality
 - `sqlite3` for database operations
 - `nodemailer` for email notifications
@@ -1458,28 +1606,20 @@ This section documents how to ship GMgmt as a self-contained Windows application
 
 The application uses SQLite by default:
 
-   ```bash
-   # SQLite dependency is already included
-   # No additional database setup required
-   ```
-
-2. Add a small adapter `src/config/sqlite.js` that:
-   - Resolves DB path to `%ProgramData%\gmgmt\data\gmgmt.sqlite` (create folders as needed)
-   - On start, creates tables if missing (mirroring the current schema)
-   - Exposes `initializeDatabase()` and a `query(sql, params)` function
-
-3. In `src/app.js` and controllers:
-   - Replace imports from `../../config/database` with `../../config/sqlite`
-   - Change `await pool.query(...)` to `query(...)`
-   - For inserts that relied on `RETURNING *`, run a follow-up `SELECT` by last insert id if needed
-
-4. Simplify `.env` (no DB host/port required):
-
-   ```env
+1. Add a small adapter `src/config/sqlite.js` that:
+  - Resolves DB path to `%ProgramData%\gmgmt\data\gmgmt.sqlite` (create folders as needed)
+  - On start, creates tables if missing (mirroring the current schema)
+  - Exposes `initializeDatabase()` and a `query(sql, params)` function
+2. In `src/app.js` and controllers:
+  - Replace imports from `../../config/database` with `../../config/sqlite`
+  - Change `await pool.query(...)` to `query(...)`
+  - For inserts that relied on `RETURNING *`, run a follow-up `SELECT` by last insert id if needed
+3. Simplify `.env` (no DB host/port required):
+  ```env
    PORT=3001
    EMAIL_USER=your_email
    EMAIL_PASS=your_app_password
-   ```
+  ```
 
 ### 2) Build the frontend and serve static files
 
@@ -1827,16 +1967,16 @@ Each README focuses on its specific domain while maintaining cross-references fo
 
 The current application is feature-complete for gym management. Future development could include:
 
--   **Advanced Role Management**: Multiple admin levels (super admin, manager, staff) with granular permissions
--   **Role-based Access Control (RBAC)**: Fine-grained access control for different admin roles
--   **Admin Dashboard**: Specialized interface for admin users with enhanced analytics and controls
--   **Audit Logging**: Track admin actions and privilege usage for security compliance
--   A dedicated **Member Portal/Mobile App** for clients to manage their own profiles and bookings.
--   **SMS notifications** integration alongside email communications.
--   **Advanced member retention analytics** with churn prediction.
--   **Point of Sale (POS)** integration for merchandise and additional services.
--   **Wearable device integration** for real-time fitness tracking.
--   **Social features** for member community building.
+- **Advanced Role Management**: Multiple admin levels (super admin, manager, staff) with granular permissions
+- **Role-based Access Control (RBAC)**: Fine-grained access control for different admin roles
+- **Admin Dashboard**: Specialized interface for admin users with enhanced analytics and controls
+- **Audit Logging**: Track admin actions and privilege usage for security compliance
+- A dedicated **Member Portal/Mobile App** for clients to manage their own profiles and bookings.
+- **SMS notifications** integration alongside email communications.
+- **Advanced member retention analytics** with churn prediction.
+- **Point of Sale (POS)** integration for merchandise and additional services.
+- **Wearable device integration** for real-time fitness tracking.
+- **Social features** for member community building.
 
 ---
 
@@ -1847,6 +1987,7 @@ For technical support or feature requests, please refer to the API documentation
 ### Additional Resources
 
 #### API Endpoints
+
 - **Device Management**: `/api/biometric/devices/*` for device management
 - **ESP32 Configuration**: 
   - `GET /api/config` - Retrieve device configuration
@@ -1857,17 +1998,21 @@ For technical support or feature requests, please refer to the API documentation
 - **Status Monitoring**: `/status` - Device status and health information
 
 #### Configuration Files
+
 - **ESP32 Firmware**: `esp32_door_lock/esp32_door_lock.ino`
 - **Configuration Template**: `esp32_door_lock/config.h.example`
 - **Environment Variables**: `.env` file for server configuration
 
 #### Frontend Components
+
 - **ESP32 Device Manager**: `/client/src/components/ESP32DeviceManager.js`
 - **Monitor Interface**: `/client/src/components/ESP32Monitor.js`
 - **Analytics Dashboard**: `/client/src/components/ESP32Analytics.js`
 - **Settings Integration**: `/client/src/components/Settings.js`
 
 #### Testing Scripts
-- **`tools/calculate_timezone_offset.js`**: Timezone offset calculator
-- **`tools/test_timestamp_fix.js`**: Timestamp fix verification
-- **`tools/test_esp32_integration.js`**: ESP32 integration testing
+
+- `**tools/calculate_timezone_offset.js`**: Timezone offset calculator
+- `**tools/test_timestamp_fix.js**`: Timestamp fix verification
+- `**tools/test_esp32_integration.js**`: ESP32 integration testing
+

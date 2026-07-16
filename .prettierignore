@@ -1,0 +1,7 @@
+node_modules/
+client/node_modules/
+client/build/
+public/uploads/
+data/
+*.sqlite
+esp32_door_lock/

@@ -1,12 +1,20 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
 const { initializeDatabase } = require('./config/sqlite');
+const requireSameOrigin = require('./api/middleware/requireSameOrigin');
+const requireAuth = require('./api/middleware/requireAuth');
+const requireDeviceSecret = require('./api/middleware/requireDeviceSecret');
 const WebSocket = require('ws');
 const http = require('http');
+const logger = require('./utils/logger');
 const app = express();
 
+const authRoutes = require('./api/routes/auth');
 const attendanceRoutes = require('./api/routes/attendance');
 const bookingRoutes = require('./api/routes/bookings');
 const classRoutes = require('./api/routes/classes');
@@ -20,18 +28,143 @@ const biometricRoutes = require('./api/routes/biometric');
 const referralRoutes = require('./api/routes/referrals');
 const paymentDeactivationRoutes = require('./api/routes/paymentDeactivation');
 
-app.use(cors());
-app.use(express.json());
-app.use(morgan('dev')); // Add this line for logging
+// Security headers. crossOriginResourcePolicy is relaxed so the React app on a
+// different port can still load uploaded images from /uploads.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false, // CSP is managed by the frontend build; avoid breaking it here
+  })
+);
 
-// Add middleware to log all requests
-app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-    console.log('Headers:', JSON.stringify(req.headers, null, 2));
-    next();
+// Restrict CORS to configured origins. Set CORS_ORIGINS to a comma-separated list
+// (e.g. "http://localhost:3000,https://gym.example.com"). When unset, allow all —
+// preserves existing dev behaviour but lets production lock it down.
+const corsOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+if (corsOrigins.includes('*') && corsOrigins.length > 0) {
+  logger.error(
+    '❌ CORS_ORIGINS contains "*" — wildcards cannot be used with credentials. ' +
+      'Set explicit origins or leave CORS_ORIGINS unset for dev.'
+  );
+  process.exit(1);
+}
+app.use(
+  cors(
+    corsOrigins.length > 0
+      ? {
+          origin: corsOrigins,
+          credentials: true,
+        }
+      : {}
+  )
+);
+
+app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
+
+// Redact query-param secrets from access logs. firmware.js embeds DEVICE_SHARED_SECRET
+// as ?device_secret= in the OTA download URL (the ESP32 update library can't send
+// custom headers) — keep this param name in sync with requireDeviceSecret.js's
+// req.query.device_secret check.
+morgan.token('url', (req) => {
+  const [path, query] = req.originalUrl.split('?');
+  if (!query) return path;
+  const params = new URLSearchParams(query);
+  if (params.has('device_secret')) params.set('device_secret', '[redacted]');
+  return `${path}?${params.toString()}`;
+});
+app.use(morgan('dev'));
+
+// Throttle the API to blunt brute-force and abuse. Static assets and the SPA
+// fallback are not rate limited.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: Number(process.env.RATE_LIMIT_MAX) || 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests, please try again later.' },
+});
+app.use('/api', apiLimiter);
+
+// CSRF guard: block cross-origin browser requests that mutate state. Non-browser
+// clients (ESP32 devices, the biometric listener) send no Origin header and pass through.
+app.use('/api', (req, res, next) => {
+  const method = req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+  return requireSameOrigin(req, res, next);
+});
+
+if (!process.env.JWT_SECRET) {
+  logger.error('❌ JWT_SECRET is not set — required to sign staff session tokens.');
+  process.exit(1);
+}
+
+// Staff login (public — auth itself happens here; /me is protected inline in auth.js).
+app.use('/api/auth', authRoutes);
+
+// Auth guard for every other /api route, except the small set of endpoints ESP32
+// devices call directly with no login flow of their own — those get the device-secret
+// check instead (Phase 5 Part B; see requireDeviceSecret.js and DEVICE_SHARED_SECRET).
+const DEVICE_PATHS = new Set([
+  '/api/biometric/esp32-webhook',
+  '/api/biometric/validate',
+  '/api/biometric/cache-update',
+]);
+// Face check-in station routes: the kiosk browser runs unattended with no
+// staff session, so it authenticates with the device secret instead. Unlike
+// the legacy ESP32 routes above, these do NOT inherit the unset-means-
+// permissive dev default: /face/check-in commands the door lock with a
+// client-claimed identity and /face/sync hands out member names + embeddings,
+// so both fail closed (503) until DEVICE_SHARED_SECRET is set.
+const FACE_STATION_PATHS = new Set(['/api/biometric/face/sync', '/api/biometric/face/check-in']);
+// Read-only station bootstrap (model manifest + config). The staff enrollment
+// UI needs these too, so accept EITHER the device secret (kiosk) OR a staff
+// session (admin browser) — device-secret-only would lock staff out the
+// moment the deployment is hardened.
+const FACE_BOOTSTRAP_PATHS = new Set([
+  '/api/biometric/face/config',
+  '/api/biometric/face/model-manifest',
+]);
+if (!process.env.DEVICE_SHARED_SECRET) {
+  logger.warn(
+    '⚠️ DEVICE_SHARED_SECRET is not set — face check-in station endpoints ' +
+      '(/api/biometric/face/check-in, /face/sync) are DISABLED (503) until it is. ' +
+      'Legacy ESP32 endpoints remain open per the existing dev default.'
+  );
+}
+app.use('/api', (req, res, next) => {
+  const requestPath = req.originalUrl.split('?')[0];
+  if (FACE_STATION_PATHS.has(requestPath)) {
+    if (!process.env.DEVICE_SHARED_SECRET) {
+      return res.status(503).json({
+        success: false,
+        message: 'Face station endpoints are disabled until DEVICE_SHARED_SECRET is configured',
+      });
+    }
+    return requireDeviceSecret(req, res, next);
+  }
+  if (FACE_BOOTSTRAP_PATHS.has(requestPath)) {
+    // Kiosk presents the device-secret header; anything else (staff browser)
+    // falls through to the normal session check.
+    if (process.env.DEVICE_SHARED_SECRET && req.headers['x-device-secret']) {
+      return requireDeviceSecret(req, res, next);
+    }
+    return requireAuth(req, res, next);
+  }
+  if (DEVICE_PATHS.has(requestPath) || /^\/api\/firmware\/download\/[^/]+$/.test(requestPath)) {
+    return requireDeviceSecret(req, res, next);
+  }
+  return requireAuth(req, res, next);
 });
 
 app.use('/uploads', express.static('public/uploads'));
+// Face model binaries (.tflite + manifest) for the check-in/enrollment clients.
+app.use('/models', express.static('public/models'));
 
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/bookings', bookingRoutes);
@@ -43,6 +176,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/schedules', scheduleRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/biometric', biometricRoutes);
+app.use('/api/firmware', require('./api/routes/firmware'));
 app.use('/api/referrals', referralRoutes);
 app.use('/api/payment-deactivation', paymentDeactivationRoutes);
 
@@ -50,7 +184,7 @@ app.use('/api/payment-deactivation', paymentDeactivationRoutes);
 const path = require('path');
 app.use(express.static(path.join(__dirname, '../client/build')));
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/build/index.html'));
+  res.sendFile(path.join(__dirname, '../client/build/index.html'));
 });
 
 // Initialize database and start server
@@ -60,150 +194,174 @@ const PORT = process.env.PORT || 3001;
 const server = http.createServer(app);
 
 // Create WebSocket server
-const wss = new WebSocket.Server({ 
-    server,
-    path: '/ws' // Add a specific path for WebSocket connections
+const wss = new WebSocket.Server({
+  server,
+  path: '/ws', // Add a specific path for WebSocket connections
 });
 
 // WebSocket connection handling
 wss.on('connection', (ws, req) => {
-    console.log('🔌 WebSocket client connected from:', req.socket.remoteAddress);
-    console.log('🔌 Biometric integration available:', !!app.biometricIntegration);
-    
-    // Add client to biometric integration if available
+  logger.info(
+    { remoteAddress: req.socket.remoteAddress, biometricAvailable: !!app.biometricIntegration },
+    'WebSocket client connected'
+  );
+
+  // Add client to biometric integration if available
+  if (app.biometricIntegration) {
+    logger.info('🔌 Adding WebSocket client to biometric integration');
+    app.biometricIntegration.addWebSocketClient(ws);
+  } else {
+    logger.info('⚠️ Biometric integration not available - WebSocket client not added');
+  }
+
+  ws.on('close', () => {
+    logger.info('🔌 WebSocket client disconnected');
     if (app.biometricIntegration) {
-        console.log('🔌 Adding WebSocket client to biometric integration');
-        app.biometricIntegration.addWebSocketClient(ws);
-    } else {
-        console.log('⚠️ Biometric integration not available - WebSocket client not added');
+      app.biometricIntegration.removeWebSocketClient(ws);
     }
-    
-    ws.on('close', () => {
-        console.log('🔌 WebSocket client disconnected');
-        if (app.biometricIntegration) {
-            app.biometricIntegration.removeWebSocketClient(ws);
-        }
-    });
-    
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
-        if (app.biometricIntegration) {
-            app.biometricIntegration.removeWebSocketClient(ws);
-        }
-    });
-    
-    // Send welcome message
-    ws.send(JSON.stringify({
-        type: 'connection_established',
-        message: 'WebSocket connection established successfully',
-        timestamp: new Date().toISOString()
-    }));
+  });
+
+  ws.on('error', (error) => {
+    logger.error({ err: error }, 'webSocket error');
+    if (app.biometricIntegration) {
+      app.biometricIntegration.removeWebSocketClient(ws);
+    }
+  });
+
+  // Send welcome message
+  ws.send(
+    JSON.stringify({
+      type: 'connection_established',
+      message: 'WebSocket connection established successfully',
+      timestamp: new Date().toISOString(),
+    })
+  );
 });
 
 const startServer = async () => {
-    try {
-        await initializeDatabase();
-        console.log('Database initialized successfully');
-        
-        server.listen(PORT, '0.0.0.0', () => {
-            console.log(`Server running on port ${PORT} and accessible from all interfaces`);
-            console.log(`🔌 WebSocket server ready for real-time enrollment updates`);
-        });
+  try {
+    await initializeDatabase();
+    logger.info('Database initialized successfully');
 
-        // Start biometric integration if enabled
-        if (process.env.ENABLE_BIOMETRIC === 'true') {
-            console.log('🔐 ENABLE_BIOMETRIC is true, starting biometric integration...');
-            try {
-                const BiometricIntegration = require('./services/biometricIntegration');
-                const { setBiometricIntegration } = require('./api/controllers/biometricController');
-                const biometricPort = process.env.BIOMETRIC_PORT || 8080;
-                
-                console.log('🔐 Creating biometric integration instance on port:', biometricPort);
-                const biometricIntegration = new BiometricIntegration(biometricPort);
-                
-                console.log('🔐 Starting biometric integration...');
-                biometricIntegration.start();
-                
-                console.log('🔐 Connecting integration with controller...');
-                setBiometricIntegration(biometricIntegration);
-                
-                // Store reference for potential cleanup
-                app.biometricIntegration = biometricIntegration;
-                console.log('✅ Biometric integration started successfully');
-            } catch (error) {
-                console.error('❌ Failed to start biometric integration:', error);
-            }
-        } else {
-            console.log('⚠️ ENABLE_BIOMETRIC is not true, biometric integration disabled');
-        }
+    // Initialize settings cache for performance optimization
+    const settingsCache = require('./services/settingsCache');
+    await settingsCache.initialize();
+    logger.info('✅ Settings cache initialized');
 
-        // Start automatic payment deactivation service
-        console.log('🔄 Starting automatic payment deactivation service...');
-        try {
-            const PaymentDeactivationService = require('./services/paymentDeactivationService');
-            const paymentDeactivationService = new PaymentDeactivationService();
-            
-            // Run deactivation check every 6 hours (21600000 ms)
-            const deactivationInterval = 6 * 60 * 60 * 1000; // 6 hours
-            
-            // Run initial check after 1 minute
-            setTimeout(async () => {
-                try {
-                    console.log('🔄 Running initial payment deactivation check...');
-                    const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-                    console.log('✅ Initial payment deactivation check completed:', result);
-                } catch (error) {
-                    console.error('❌ Error in initial payment deactivation check:', error);
-                }
-            }, 60000); // 1 minute delay
-            
-            // Set up recurring deactivation checks every 6 hours
-            setInterval(async () => {
-                try {
-                    console.log('🔄 Running scheduled payment deactivation check...');
-                    const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-                    console.log('✅ Scheduled payment deactivation check completed:', result);
-                } catch (error) {
-                    console.error('❌ Error in scheduled payment deactivation check:', error);
-                }
-            }, deactivationInterval);
-            
-            // Set up daily comprehensive check at 2 AM
-            const dailyCheckInterval = 24 * 60 * 60 * 1000; // 24 hours
-            const now = new Date();
-            const next2AM = new Date(now);
-            next2AM.setHours(2, 0, 0, 0);
-            if (next2AM <= now) {
-                next2AM.setDate(next2AM.getDate() + 1);
-            }
-            const timeUntil2AM = next2AM.getTime() - now.getTime();
-            
-            setTimeout(() => {
-                // Run daily check
-                const runDailyCheck = async () => {
-                    try {
-                        console.log('🔄 Running daily comprehensive payment deactivation check...');
-                        const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
-                        console.log('✅ Daily payment deactivation check completed:', result);
-                    } catch (error) {
-                        console.error('❌ Error in daily payment deactivation check:', error);
-                    }
-                };
-                
-                runDailyCheck();
-                
-                // Set up recurring daily checks
-                setInterval(runDailyCheck, dailyCheckInterval);
-            }, timeUntil2AM);
-            
-            console.log(`✅ Automatic payment deactivation service started (every 6 hours + daily at 2 AM)`);
-        } catch (error) {
-            console.error('❌ Failed to start payment deactivation service:', error);
-        }
-    } catch (error) {
-        console.error('Failed to start server:', error);
-        process.exit(1);
+    const { ensureBootstrapAdmin } = require('./services/authService');
+    await ensureBootstrapAdmin();
+
+    server.listen(PORT, '0.0.0.0', () => {
+      logger.info(`Server running on port ${PORT} and accessible from all interfaces`);
+      logger.info(`🔌 WebSocket server ready for real-time enrollment updates`);
+    });
+
+    // Start biometric integration if enabled
+    if (process.env.ENABLE_BIOMETRIC === 'true') {
+      logger.info('🔐 ENABLE_BIOMETRIC is true, starting biometric integration...');
+      try {
+        const BiometricIntegration = require('./services/biometricIntegration');
+        const { setBiometricIntegration } = require('./api/controllers/biometricController');
+        const {
+          setBiometricIntegration: setFirmwareBiometricIntegration,
+        } = require('./api/routes/firmware');
+        const biometricPort = process.env.BIOMETRIC_PORT || 8080;
+
+        logger.info({ port: biometricPort }, 'creating biometric integration instance');
+        const biometricIntegration = new BiometricIntegration(biometricPort);
+
+        logger.info('🔐 Starting biometric integration...');
+        biometricIntegration.start();
+
+        logger.info('🔐 Connecting integration with controller...');
+        setBiometricIntegration(biometricIntegration);
+        setFirmwareBiometricIntegration(biometricIntegration);
+        // Face check-in needs the integration only for the door-unlock command;
+        // everything else about face check-in works with this flag off.
+        const {
+          setBiometricIntegration: setFaceBiometricIntegration,
+        } = require('./api/controllers/faceBiometricController');
+        setFaceBiometricIntegration(biometricIntegration);
+
+        // Store reference for potential cleanup
+        app.biometricIntegration = biometricIntegration;
+        logger.info('✅ Biometric integration started successfully');
+      } catch (error) {
+        logger.error({ err: error }, 'failed to start biometric integration');
+      }
+    } else {
+      logger.info('⚠️ ENABLE_BIOMETRIC is not true, biometric integration disabled');
     }
+
+    // Start automatic payment deactivation service
+    logger.info('🔄 Starting automatic payment deactivation service...');
+    try {
+      const PaymentDeactivationService = require('./services/paymentDeactivationService');
+      const paymentDeactivationService = new PaymentDeactivationService();
+
+      // Run deactivation check every 6 hours (21600000 ms)
+      const deactivationInterval = 6 * 60 * 60 * 1000; // 6 hours
+
+      // Run initial check after 1 minute
+      setTimeout(async () => {
+        try {
+          logger.info('🔄 Running initial payment deactivation check...');
+          const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
+          logger.info({ result }, 'initial payment deactivation check completed');
+        } catch (error) {
+          logger.error({ err: error }, 'error in initial payment deactivation check');
+        }
+      }, 60000); // 1 minute delay
+
+      // Set up recurring deactivation checks every 6 hours
+      setInterval(async () => {
+        try {
+          logger.info('🔄 Running scheduled payment deactivation check...');
+          const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
+          logger.info({ result }, 'scheduled payment deactivation check completed');
+        } catch (error) {
+          logger.error({ err: error }, 'error in scheduled payment deactivation check');
+        }
+      }, deactivationInterval);
+
+      // Set up daily comprehensive check at 2 AM
+      const dailyCheckInterval = 24 * 60 * 60 * 1000; // 24 hours
+      const now = new Date();
+      const next2AM = new Date(now);
+      next2AM.setHours(2, 0, 0, 0);
+      if (next2AM <= now) {
+        next2AM.setDate(next2AM.getDate() + 1);
+      }
+      const timeUntil2AM = next2AM.getTime() - now.getTime();
+
+      setTimeout(() => {
+        // Run daily check
+        const runDailyCheck = async () => {
+          try {
+            logger.info('🔄 Running daily comprehensive payment deactivation check...');
+            const result = await paymentDeactivationService.checkAndDeactivateOverdueMembers();
+            logger.info({ result }, 'daily payment deactivation check completed');
+          } catch (error) {
+            logger.error({ err: error }, 'error in daily payment deactivation check');
+          }
+        };
+
+        runDailyCheck();
+
+        // Set up recurring daily checks
+        setInterval(runDailyCheck, dailyCheckInterval);
+      }, timeUntil2AM);
+
+      logger.info(
+        `✅ Automatic payment deactivation service started (every 6 hours + daily at 2 AM)`
+      );
+    } catch (error) {
+      logger.error({ err: error }, 'failed to start payment deactivation service');
+    }
+  } catch (error) {
+    logger.error({ err: error }, 'failed to start server');
+    process.exit(1);
+  }
 };
 
 startServer();

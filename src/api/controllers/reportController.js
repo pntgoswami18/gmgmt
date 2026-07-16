@@ -1,9 +1,11 @@
 const { pool } = require('../../config/sqlite');
+const settingsCache = require('../../services/settingsCache');
+const logger = require('../../utils/logger').child({ service: 'report' });
 
 // Get member growth statistics
 exports.getMemberGrowth = async (req, res) => {
-    try {
-        const memberGrowth = await pool.query(`
+  try {
+    const memberGrowth = await pool.query(`
             SELECT 
                 substr(join_date, 1, 7) as month,
                 COUNT(*) as new_members
@@ -11,16 +13,17 @@ exports.getMemberGrowth = async (req, res) => {
             GROUP BY substr(join_date, 1, 7)
             ORDER BY month ASC
         `);
-        res.json(memberGrowth.rows);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+    res.json(memberGrowth.rows);
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 // Get attendance statistics
 exports.getAttendanceStats = async (req, res) => {
-    try {
-        const attendanceStats = await pool.query(`
+  try {
+    const attendanceStats = await pool.query(`
             SELECT 
                 date(check_in_time) as date,
                 COUNT(*) as total_checkins
@@ -30,16 +33,17 @@ exports.getAttendanceStats = async (req, res) => {
             GROUP BY date(check_in_time)
             ORDER BY date(check_in_time) ASC
         `);
-        res.json(attendanceStats.rows);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+    res.json(attendanceStats.rows);
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 // Get popular classes
 exports.getPopularClasses = async (req, res) => {
-    try {
-        const popularClasses = await pool.query(`
+  try {
+    const popularClasses = await pool.query(`
             SELECT 
                 c.name,
                 c.instructor,
@@ -52,16 +56,17 @@ exports.getPopularClasses = async (req, res) => {
             ORDER BY booking_count DESC
             LIMIT 10
         `);
-        res.json(popularClasses.rows);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+    res.json(popularClasses.rows);
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 // Get revenue statistics
 exports.getRevenueStats = async (req, res) => {
-    try {
-        const revenueStats = await pool.query(`
+  try {
+    const revenueStats = await pool.query(`
             SELECT 
                 substr(payment_date, 1, 7) as month,
                 SUM(amount) as total_revenue
@@ -69,40 +74,42 @@ exports.getRevenueStats = async (req, res) => {
             GROUP BY substr(payment_date, 1, 7)
             ORDER BY month ASC
         `);
-        res.json(revenueStats.rows);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+    res.json(revenueStats.rows);
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 // Get overall summary stats
 exports.getSummaryStats = async (req, res) => {
-    try {
-        // Active members: members explicitly marked active
-        const activeMembers = await pool.query(`
+  try {
+    // Active members: members explicitly marked active
+    const activeMembers = await pool.query(`
             SELECT COUNT(*) AS count FROM members WHERE is_active = 1
         `);
 
-        // Total revenue this month
-        const totalRevenueThisMonth = await pool.query(`
+    // Total revenue this month
+    const totalRevenueThisMonth = await pool.query(`
             SELECT COALESCE(SUM(amount), 0) as total
             FROM payments
             WHERE strftime('%Y-%m', payment_date) = strftime('%Y-%m','now','localtime')
         `);
 
-        // New members this month
-        const newMembersThisMonth = await pool.query(`
+    // New members this month
+    const newMembersThisMonth = await pool.query(`
             SELECT COUNT(*) as count 
             FROM members 
             WHERE date(join_date) >= date('now','localtime','start of month')
               AND date(join_date) < date('now','localtime','start of month','+1 month')
         `);
 
-        // Members who have NOT made a payment in the current month (excluding admin users)
-        const unpaidMembersThisMonth = await pool.query(`
+    // Members who have NOT made a payment in the current month (excluding admin users and inactive members)
+    const unpaidMembersThisMonth = await pool.query(`
             SELECT COUNT(*) as count
             FROM members m
             WHERE m.is_admin = 0
+              AND m.is_active = 1
               AND NOT EXISTS (
                 SELECT 1
                 FROM payments p
@@ -112,96 +119,146 @@ exports.getSummaryStats = async (req, res) => {
                   AND date(p.payment_date) < date('now','localtime','start of month','+1 month')
             )
         `);
-        
-        // Active schedules (upcoming from now)
-        const activeSchedules = await pool.query(`
+
+    // Active schedules (upcoming from now)
+    const activeSchedules = await pool.query(`
             SELECT COUNT(*) as count 
             FROM class_schedules 
             WHERE datetime(start_time) > datetime('now','localtime')
         `);
 
-        const summary = {
-            totalMembers: activeMembers.rows[0].count, // active members
-            totalRevenueThisMonth: totalRevenueThisMonth.rows[0].total || 0,
-            newMembersThisMonth: newMembersThisMonth.rows[0].count,
-            activeSchedules: activeSchedules.rows[0].count,
-            unpaidMembersThisMonth: unpaidMembersThisMonth.rows[0].count
-        };
+    const summary = {
+      totalMembers: activeMembers.rows[0].count, // active members
+      totalRevenueThisMonth: totalRevenueThisMonth.rows[0].total || 0,
+      newMembersThisMonth: newMembersThisMonth.rows[0].count,
+      activeSchedules: activeSchedules.rows[0].count,
+      unpaidMembersThisMonth: unpaidMembersThisMonth.rows[0].count,
+    };
 
-        res.json(summary);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+    res.json(summary);
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 // Get financial summary
 exports.getFinancialSummary = async (req, res) => {
-    try {
-        const { startDate, endDate, page = 1, limit = 10, table = 'all' } = req.query;
-        const pageNum = parseInt(page, 10);
-        const limitNum = parseInt(limit, 10);
-        const offset = (pageNum - 1) * limitNum;
+  try {
+    const { startDate, endDate, page = 1, limit = 10, table = 'all', search = '' } = req.query;
+    const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+    if (startDate && !ISO_DATE.test(startDate)) {
+      return res.status(400).json({ message: 'Invalid startDate — expected YYYY-MM-DD' });
+    }
+    if (endDate && !ISO_DATE.test(endDate)) {
+      return res.status(400).json({ message: 'Invalid endDate — expected YYYY-MM-DD' });
+    }
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
+    const offset = (pageNum - 1) * limitNum;
 
-        // Build date filter condition for payment history
-        const dateFilter = startDate && endDate ? `AND p.payment_date >= '${startDate}' AND p.payment_date <= '${endDate}'` : '';
+    // Build date filter condition for payment history.
+    // Parameterized (bound) to prevent SQL injection — never interpolate user input.
+    // Use date() so only the date portion is compared, ensuring the current day is included.
+    const dateFilter =
+      startDate && endDate ? `AND date(p.payment_date) >= ? AND date(p.payment_date) <= ?` : '';
+    const dateParams = startDate && endDate ? [startDate, endDate] : [];
 
-        const result = {};
+    // Build search filter using parameterized queries to prevent SQL injection
+    const searchTerm = search ? `%${search}%` : null;
 
-        // Get outstanding invoices with pagination
-        if (table === 'all' || table === 'outstanding') {
-            const outstandingInvoices = await pool.query(`
+    const result = {};
+
+    // Get outstanding invoices with pagination
+    if (table === 'all' || table === 'outstanding') {
+      const outstandingSearchFilter = searchTerm
+        ? `AND (m.name LIKE ? OR CAST(i.id AS TEXT) LIKE ?)`
+        : '';
+      // One bound value per placeholder in the filter above.
+      const outstandingParams = searchTerm ? [searchTerm, searchTerm] : [];
+
+      const outstandingInvoices = await pool.query(
+        `
                 SELECT i.id, m.name as member_name, i.amount, i.due_date
                 FROM invoices i
                 JOIN members m ON i.member_id = m.id
                 WHERE i.status = 'unpaid'
                   AND m.is_admin = 0
+                  ${outstandingSearchFilter}
                 ORDER BY i.due_date ASC
-                LIMIT ${limitNum} OFFSET ${offset}
-            `);
+                LIMIT ? OFFSET ?
+            `,
+        [...outstandingParams, limitNum, offset]
+      );
 
-            const outstandingCount = await pool.query(`
+      const outstandingCount = await pool.query(
+        `
                 SELECT COUNT(*) as total
                 FROM invoices i
                 JOIN members m ON i.member_id = m.id
                 WHERE i.status = 'unpaid'
                   AND m.is_admin = 0
-            `);
+                  ${outstandingSearchFilter}
+            `,
+        outstandingParams
+      );
 
-            result.outstandingInvoices = outstandingInvoices.rows;
-            result.outstandingInvoicesTotal = outstandingCount.rows[0].total;
-            result.outstandingInvoicesPage = pageNum;
-            result.outstandingInvoicesLimit = limitNum;
-        }
+      result.outstandingInvoices = outstandingInvoices.rows;
+      result.outstandingInvoicesTotal = outstandingCount.rows[0].total;
+      result.outstandingInvoicesPage = pageNum;
+      result.outstandingInvoicesLimit = limitNum;
+    }
 
-        // Get payment history with pagination
-        if (table === 'all' || table === 'payments') {
-            const paymentHistory = await pool.query(`
-                SELECT p.id, m.name as member_name, p.amount, p.payment_date
+    // Get payment history with pagination
+    if (table === 'all' || table === 'payments') {
+      const paymentsSearchFilter = searchTerm
+        ? `AND (m.name LIKE ? OR CAST(p.id AS TEXT) LIKE ? OR CAST(p.invoice_id AS TEXT) LIKE ?)`
+        : '';
+      // One bound value per placeholder in the filter above.
+      const paymentsParams = searchTerm ? [searchTerm, searchTerm, searchTerm] : [];
+
+      const paymentHistory = await pool.query(
+        `
+                SELECT
+                    p.id,
+                    m.name as member_name,
+                    p.amount,
+                    p.payment_date,
+                    i.id as invoice_id,
+                    i.created_at as invoice_date
                 FROM payments p
                 JOIN invoices i ON p.invoice_id = i.id
                 JOIN members m ON i.member_id = m.id
                 WHERE 1=1 ${dateFilter}
+                  ${paymentsSearchFilter}
                 ORDER BY p.payment_date DESC
-                LIMIT ${limitNum} OFFSET ${offset}
-            `);
+                LIMIT ? OFFSET ?
+            `,
+        [...dateParams, ...paymentsParams, limitNum, offset]
+      );
 
-            const paymentCount = await pool.query(`
+      const paymentCount = await pool.query(
+        `
                 SELECT COUNT(*) as total
                 FROM payments p
                 JOIN invoices i ON p.invoice_id = i.id
                 JOIN members m ON i.member_id = m.id
                 WHERE 1=1 ${dateFilter}
-            `);
+                  ${paymentsSearchFilter}
+            `,
+        [...dateParams, ...paymentsParams]
+      );
 
-            result.paymentHistory = paymentHistory.rows;
-            result.paymentHistoryTotal = paymentCount.rows[0].total;
-            result.paymentHistoryPage = pageNum;
-            result.paymentHistoryLimit = limitNum;
-        }
+      result.paymentHistory = paymentHistory.rows;
+      result.paymentHistoryTotal = paymentCount.rows[0].total;
+      result.paymentHistoryPage = pageNum;
+      result.paymentHistoryLimit = limitNum;
+    }
 
-        // Get member payment status with pagination - Optimized query
-        if (table === 'all' || table === 'members') {
-            const memberPaymentStatus = await pool.query(`
+    // Get member payment status with pagination - Optimized query
+    if (table === 'all' || table === 'members') {
+      const memberPaymentStatus = await pool.query(
+        `
                 WITH member_payments AS (
                     SELECT 
                         i.member_id,
@@ -252,34 +309,38 @@ exports.getFinancialSummary = async (req, res) => {
                 LEFT JOIN member_invoices mi ON m.id = mi.member_id
                 WHERE m.is_admin = 0
                 ORDER BY m.name ASC
-                LIMIT ${limitNum} OFFSET ${offset}
-            `);
+                LIMIT ? OFFSET ?
+            `,
+        [...dateParams, limitNum, offset]
+      );
 
-            const memberCount = await pool.query(`
+      const memberCount = await pool.query(`
                 SELECT COUNT(*) as total
                 FROM members m
                 WHERE m.is_admin = 0
             `);
 
-            result.memberPaymentStatus = memberPaymentStatus.rows;
-            result.memberPaymentStatusTotal = memberCount.rows[0].total;
-            result.memberPaymentStatusPage = pageNum;
-            result.memberPaymentStatusLimit = limitNum;
-        }
-
-        res.json(result);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
+      result.memberPaymentStatus = memberPaymentStatus.rows;
+      result.memberPaymentStatusTotal = memberCount.rows[0].total;
+      result.memberPaymentStatusPage = pageNum;
+      result.memberPaymentStatusLimit = limitNum;
     }
+
+    res.json(result);
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
-// Get members who have no payments in the current month
+// Get members who have no payments in the current month (active members only)
 exports.getUnpaidMembersThisMonth = async (_req, res) => {
-    try {
-        const result = await pool.query(`
+  try {
+    const result = await pool.query(`
             SELECT m.id, m.name, m.email
             FROM members m
             WHERE m.is_admin = 0
+              AND m.is_active = 1
               AND NOT EXISTS (
                 SELECT 1
                 FROM payments p
@@ -290,39 +351,39 @@ exports.getUnpaidMembersThisMonth = async (_req, res) => {
             )
             ORDER BY m.name ASC
         `);
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+    res.json(result.rows);
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 // Get members whose birthday is today (month and day match, year ignored)
 exports.getBirthdaysToday = async (_req, res) => {
-    try {
-        const result = await pool.query(`
+  try {
+    const result = await pool.query(`
             SELECT id, name, phone, birthday
             FROM members
             WHERE birthday IS NOT NULL
               AND substr(birthday, 6, 5) = substr(date('now','localtime'), 6, 5)
             ORDER BY name ASC
         `);
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+    res.json(result.rows);
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };
 
 // Get payment reminders - invoices that are overdue based on payment_reminder_days_after_due setting
 exports.getPaymentReminders = async (_req, res) => {
-    try {
-        // Get payment reminder days setting
-        const settingResult = await pool.query(`
-            SELECT value FROM settings WHERE key = 'payment_reminder_days_after_due'
-        `);
-        const reminderDays = parseInt(settingResult.rows[0]?.value || '7', 10);
-        
-        // Get overdue invoices - due date + reminder days <= today
-        const result = await pool.query(`
+  try {
+    // Get payment reminder days setting
+    const reminderDays = settingsCache.getInt('payment_reminder_days_after_due', 7);
+
+    // Get overdue invoices - due date + reminder days <= today
+    const result = await pool.query(
+      `
             SELECT 
                 i.id as invoice_id,
                 i.amount,
@@ -341,13 +402,16 @@ exports.getPaymentReminders = async (_req, res) => {
             WHERE i.status = 'unpaid'
               AND julianday('now') >= julianday(i.due_date, '+' || $1 || ' days')
             ORDER BY i.due_date ASC
-        `, [reminderDays]);
-        
-        res.json({
-            reminder_days: reminderDays,
-            overdue_invoices: result.rows
-        });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+        `,
+      [reminderDays]
+    );
+
+    res.json({
+      reminder_days: reminderDays,
+      overdue_invoices: result.rows,
+    });
+  } catch (err) {
+    logger.error({ err }, 'report query failed');
+    res.status(500).json({ message: 'Internal server error' });
+  }
 };

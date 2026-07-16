@@ -22,8 +22,18 @@ const {
   esp32Webhook,
   // Hybrid cache endpoints
   validateBiometricId,
-  updateMemberCache
+  updateMemberCache,
+  syncBiometricData,
 } = require('../controllers/biometricController');
+const {
+  enrollFace,
+  removeFaceData,
+  getFaceStatus,
+  syncFaceCache,
+  faceCheckIn,
+  getModelManifest,
+  getFaceConfig,
+} = require('../controllers/faceBiometricController');
 
 // System status and info
 router.get('/status', getSystemStatus);
@@ -58,5 +68,19 @@ router.post('/esp32-webhook', esp32Webhook);
 // Hybrid cache endpoints for fast validation
 router.post('/validate', validateBiometricId);
 router.post('/cache-update', updateMemberCache);
+
+// Biometric data sync — cleans stale slots across all online devices
+router.post('/sync', syncBiometricData);
+
+// Face check-in (plan Section 4). Enrollment/removal/status are staff-session
+// routes (requireAuth, like the rest of /api); the /face/* station routes are
+// device-secret guarded — see DEVICE_PATHS in app.js.
+router.post('/members/:memberId/face-enroll', enrollFace);
+router.delete('/members/:memberId/face', removeFaceData);
+router.get('/members/:memberId/face-status', getFaceStatus);
+router.post('/face/sync', syncFaceCache);
+router.post('/face/check-in', faceCheckIn);
+router.get('/face/model-manifest', getModelManifest);
+router.get('/face/config', getFaceConfig);
 
 module.exports = router;
