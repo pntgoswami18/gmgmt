@@ -148,16 +148,13 @@ const stopEnrollment = async (req, res) => {
 
     const { memberId, memberName } = enrollmentSession;
 
-    // Send cancel command to all online ESP32 devices
-    const devicesQuery = `
-      SELECT DISTINCT device_id 
-      FROM biometric_events 
-      WHERE device_id IS NOT NULL 
-        AND timestamp > datetime('now', '-5 minutes')
-      GROUP BY device_id
-    `;
-
-    const devicesResult = await pool.query(devicesQuery);
+    // Send cancel command to all online ESP32 devices. Sourced from the real
+    // device registry, not biometric_events: that log table also carries
+    // 'admin'/'system' as a device_id sentinel for staff/backend-initiated
+    // actions (see removeBiometricId and this function's own cancellation
+    // log below), so scanning it for "recently active device ids" wrongly
+    // targets those non-device sentinels with a real ESP32 command.
+    const devicesResult = await pool.query(`SELECT device_id FROM devices WHERE status = 'online'`);
     const devices = devicesResult.rows || [];
 
     let cancelsSent = 0;
@@ -235,16 +232,10 @@ const cancelEnrollment = async (req, res) => {
     const member = memberResult.rows[0];
     const memberName = member ? member.name : `Member ${memberId}`;
 
-    // Send cancel command to all online ESP32 devices
-    const devicesQuery = `
-      SELECT DISTINCT device_id 
-      FROM biometric_events 
-      WHERE device_id IS NOT NULL 
-        AND timestamp > datetime('now', '-5 minutes')
-      GROUP BY device_id
-    `;
-
-    const devicesResult = await pool.query(devicesQuery);
+    // Send cancel command to all online ESP32 devices. See stopEnrollment's
+    // matching comment: sourced from the device registry, not
+    // biometric_events, to avoid targeting the 'admin'/'system' log sentinels.
+    const devicesResult = await pool.query(`SELECT device_id FROM devices WHERE status = 'online'`);
     const devices = devicesResult.rows || [];
 
     let cancelsSent = 0;
