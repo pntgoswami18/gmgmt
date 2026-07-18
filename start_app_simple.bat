@@ -66,6 +66,9 @@ if not exist ".env" (
     if exist "env.sample" (
         echo Copying env.sample to .env...
         copy "env.sample" ".env" >nul
+        echo .env file created from env.sample
+    ) else (
+        echo WARNING: No .env file found and no env.sample to copy from
     )
 )
 
@@ -109,7 +112,9 @@ start /b npm run start:with-biometric
 REM Wait for backend to start. `timeout` needs a real console input handle and
 REM errors out immediately when one isn't available (e.g. run over SSH); ping
 REM as a sleep has no such dependency and works the same everywhere.
-ping -n 6 127.0.0.1 >nul
+REM -w 1000 caps each reply at 1s so blocked/filtered ICMP can't stretch this
+REM past ~6s, and 2>&1 also silences a missing ping.exe instead of printing.
+ping -n 6 -w 1000 127.0.0.1 >nul 2>&1
 
 REM Start client (this will block until stopped)
 cd client

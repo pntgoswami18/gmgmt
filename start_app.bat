@@ -110,8 +110,14 @@ echo.
 REM Start backend with biometric integration in a new window
 start "GMGMT Backend" cmd /k "npm run start:with-biometric"
 
-REM Wait a moment for backend to start
-timeout /t 3 /nobreak >nul
+REM Wait for backend to start. `timeout` needs a real console input handle and
+REM errors out immediately when one isn't available (e.g. run over SSH); ping
+REM as a sleep has no such dependency and works the same everywhere.
+REM -w 1000 caps each reply at 1s so blocked/filtered ICMP can't stretch this
+REM past ~4s, and 2>&1 also silences a missing ping.exe instead of printing.
+REM -n 4 (not 6, as in start_app_simple.bat) matches this file's original
+REM `timeout /t 3` duration rather than that script's `timeout /t 5`.
+ping -n 4 -w 1000 127.0.0.1 >nul 2>&1
 
 REM Start client in a new window
 start "GMGMT Client" cmd /k "cd client && npm start"
