@@ -18,7 +18,11 @@ if %errorlevel% neq 0 (
 )
 
 REM Check if npm is installed
-npm --version >nul 2>&1
+REM `call` matters here: npm.cmd is itself a batch script, and invoking one
+REM batch file from another without `call` transfers control into it and
+REM never returns - the parent script (this one) would silently stop dead
+REM the moment npm.cmd exits, with no error, no matter what comes after.
+call npm --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERROR: npm is not installed or not in PATH
     pause
@@ -62,13 +66,16 @@ if not exist ".env" (
     if exist "env.sample" (
         echo Copying env.sample to .env...
         copy "env.sample" ".env" >nul
+        echo .env file created from env.sample
+    ) else (
+        echo WARNING: No .env file found and no env.sample to copy from
     )
 )
 
 REM Install dependencies if needed
 if not exist "node_modules" (
     echo Installing backend dependencies...
-    npm install
+    call npm install
     if !errorlevel! neq 0 (
         echo ERROR: Failed to install backend dependencies
         pause
@@ -79,7 +86,7 @@ if not exist "node_modules" (
 if not exist "client\node_modules" (
     echo Installing client dependencies...
     cd client
-    npm install
+    call npm install
     if !errorlevel! neq 0 (
         echo ERROR: Failed to install client dependencies
         pause
@@ -102,12 +109,16 @@ REM own success code, not the launched process's, so it can't detect a
 REM backend crash. Watch the console output above for backend errors.)
 start /b npm run start:with-biometric
 
-REM Wait for backend to start
-timeout /t 5 /nobreak >nul
+REM Wait for backend to start. `timeout` needs a real console input handle and
+REM errors out immediately when one isn't available (e.g. run over SSH); ping
+REM as a sleep has no such dependency and works the same everywhere.
+REM -w 1000 caps each reply at 1s so blocked/filtered ICMP can't stretch this
+REM past ~6s, and 2>&1 also silences a missing ping.exe instead of printing.
+ping -n 6 -w 1000 127.0.0.1 >nul 2>&1
 
 REM Start client (this will block until stopped)
 cd client
-npm start
+call npm start
 if %errorlevel% neq 0 (
     echo ERROR: Client exited with an error
     cd ..

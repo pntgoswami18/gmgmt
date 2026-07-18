@@ -19,7 +19,11 @@ if %errorlevel% neq 0 (
 )
 
 REM Check if npm is installed
-npm --version >nul 2>&1
+REM `call` matters here: npm.cmd is itself a batch script, and invoking one
+REM batch file from another without `call` transfers control into it and
+REM never returns - the parent script (this one) would silently stop dead
+REM the moment npm.cmd exits, with no error, no matter what comes after.
+call npm --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERROR: npm is not installed or not in PATH
     pause
@@ -72,7 +76,7 @@ if not exist ".env" (
 REM Install dependencies if node_modules doesn't exist
 if not exist "node_modules" (
     echo Installing backend dependencies...
-    npm install
+    call npm install
     if !errorlevel! neq 0 (
         echo ERROR: Failed to install backend dependencies
         pause
@@ -83,7 +87,7 @@ if not exist "node_modules" (
 if not exist "client\node_modules" (
     echo Installing client dependencies...
     cd client
-    npm install
+    call npm install
     if !errorlevel! neq 0 (
         echo ERROR: Failed to install client dependencies
         pause
@@ -106,8 +110,14 @@ echo.
 REM Start backend with biometric integration in a new window
 start "GMGMT Backend" cmd /k "npm run start:with-biometric"
 
-REM Wait a moment for backend to start
-timeout /t 3 /nobreak >nul
+REM Wait for backend to start. `timeout` needs a real console input handle and
+REM errors out immediately when one isn't available (e.g. run over SSH); ping
+REM as a sleep has no such dependency and works the same everywhere.
+REM -w 1000 caps each reply at 1s so blocked/filtered ICMP can't stretch this
+REM past ~4s, and 2>&1 also silences a missing ping.exe instead of printing.
+REM -n 4 (not 6, as in start_app_simple.bat) matches this file's original
+REM `timeout /t 3` duration rather than that script's `timeout /t 5`.
+ping -n 4 -w 1000 127.0.0.1 >nul 2>&1
 
 REM Start client in a new window
 start "GMGMT Client" cmd /k "cd client && npm start"
