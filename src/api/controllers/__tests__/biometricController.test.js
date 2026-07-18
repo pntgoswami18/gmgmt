@@ -11,6 +11,9 @@ const { toLocalDateStr } = require('../../../services/checkInService');
 
 let db;
 let validateBiometricId;
+let stopEnrollment;
+let cancelEnrollment;
+let setBiometricIntegration;
 let sqliteModule;
 
 const todayStr = () => toLocalDateStr(new Date());
@@ -81,10 +84,32 @@ function mockReqRes(body) {
   return { req, res, getJson: () => jsonPayload, getStatus: () => statusCode };
 }
 
+// Minimal stand-in for the real BiometricIntegration service: just enough
+// surface (enrollmentMode, sendESP32Command, stopEnrollmentMode,
+// logBiometricEvent) for stopEnrollment/cancelEnrollment, with a record of
+// every device a command was actually sent to.
+function makeFakeIntegration({ enrollmentMode = null } = {}) {
+  const sentCommands = [];
+  return {
+    enrollmentMode,
+    sentCommands,
+    sendESP32Command: async (deviceId, command, data) => {
+      sentCommands.push({ deviceId, command, data });
+    },
+    stopEnrollmentMode: (reason) => ({ active: false, endReason: reason }),
+    logBiometricEvent: async () => {},
+  };
+}
+
 test.before(async () => {
   db = await setup();
   sqliteModule = require('../../../config/sqlite');
-  ({ validateBiometricId } = require('../biometricController'));
+  ({
+    validateBiometricId,
+    stopEnrollment,
+    cancelEnrollment,
+    setBiometricIntegration,
+  } = require('../biometricController'));
   db.prepare(
     "INSERT INTO membership_plans (id, name, price, duration_days) VALUES (1, 'Monthly', 500, 30)"
   ).run();
@@ -214,4 +239,74 @@ test('member who already completed check-in+check-out THIS session is still auth
     true,
     `same-session re-entry after a completed checkout must still unlock the door: ${JSON.stringify(getJson())}`
   );
+});
+
+test('regression: stopEnrollment sends cancel_enrollment only to real online devices, never to the biometric_events "system"/"admin" sentinels', async () => {
+  db.prepare(
+    "INSERT INTO devices (device_id, status, last_heartbeat) VALUES ('ESP32_real1', 'online', datetime('now'))"
+  ).run();
+  db.prepare(
+    "INSERT INTO devices (device_id, status, last_heartbeat) VALUES ('ESP32_offline1', 'offline', datetime('now'))"
+  ).run();
+  // A log row using the 'system' sentinel device_id, as written by this same
+  // controller's own cancellation logging. Before the fix, sourcing "recently
+  // active devices" from biometric_events (instead of the devices table)
+  // would have picked this up and sent it a real ESP32 command.
+  db.prepare(
+    `INSERT INTO biometric_events (member_id, biometric_id, event_type, device_id, timestamp, success)
+     VALUES (NULL, NULL, 'enrollment_cancelled', 'system', ?, 1)`
+  ).run(new Date().toISOString());
+
+  const fake = makeFakeIntegration({
+    enrollmentMode: { active: true, memberId: 42, memberName: 'Stopper' },
+  });
+  setBiometricIntegration(fake);
+  try {
+    const { req, res, getJson } = mockReqRes({});
+    await stopEnrollment(req, res);
+
+    assert.equal(getJson().success, true, JSON.stringify(getJson()));
+    assert.deepEqual(
+      fake.sentCommands.map((c) => c.deviceId),
+      ['ESP32_real1']
+    );
+    assert.ok(
+      fake.sentCommands.every((c) => c.deviceId !== 'system' && c.deviceId !== 'admin'),
+      `must never send an ESP32 command to a bogus 'system'/'admin' device id: ${JSON.stringify(fake.sentCommands)}`
+    );
+  } finally {
+    setBiometricIntegration(null);
+    db.prepare("DELETE FROM devices WHERE device_id IN ('ESP32_real1', 'ESP32_offline1')").run();
+  }
+});
+
+test('regression: cancelEnrollment sends cancel_enrollment only to real online devices, never to the biometric_events "system"/"admin" sentinels', async () => {
+  const memberId = insertMember({ name: 'Canceller', biometricId: 1007 });
+  db.prepare(
+    "INSERT INTO devices (device_id, status, last_heartbeat) VALUES ('ESP32_real2', 'online', datetime('now'))"
+  ).run();
+  db.prepare(
+    `INSERT INTO biometric_events (member_id, biometric_id, event_type, device_id, timestamp, success)
+     VALUES (NULL, NULL, 'enrollment_cancelled', 'admin', ?, 1)`
+  ).run(new Date().toISOString());
+
+  const fake = makeFakeIntegration();
+  setBiometricIntegration(fake);
+  try {
+    const { req, res, getJson } = mockReqRes({ memberId });
+    await cancelEnrollment(req, res);
+
+    assert.equal(getJson().success, true, JSON.stringify(getJson()));
+    assert.deepEqual(
+      fake.sentCommands.map((c) => c.deviceId),
+      ['ESP32_real2']
+    );
+    assert.ok(
+      fake.sentCommands.every((c) => c.deviceId !== 'system' && c.deviceId !== 'admin'),
+      `must never send an ESP32 command to a bogus 'system'/'admin' device id: ${JSON.stringify(fake.sentCommands)}`
+    );
+  } finally {
+    setBiometricIntegration(null);
+    db.prepare("DELETE FROM devices WHERE device_id = 'ESP32_real2'").run();
+  }
 });

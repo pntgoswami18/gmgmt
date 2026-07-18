@@ -15,6 +15,48 @@ const setBiometricIntegration = (integration) => {
   biometricIntegration = integration;
 };
 
+/**
+ * Send a cancel_enrollment command to every online ESP32 device.
+ *
+ * Sourced from the real device registry, not biometric_events: that log
+ * table also carries 'admin'/'system' as a device_id sentinel for
+ * staff/backend-initiated actions (see removeBiometricId and the
+ * enrollment_cancelled log below), so scanning it for "recently active
+ * device ids" would wrongly target those non-device sentinels with a real
+ * ESP32 command.
+ *
+ * The registry query is bounded by last_heartbeat (same guard used by
+ * invalidateESP32Cache) because devices.status is set to 'online' on every
+ * heartbeat/webhook write and never flipped back to 'offline', so an
+ * unbounded status='online' filter would include long-dead devices and add
+ * a 10s HTTP-timeout wait per stale entry.
+ */
+async function cancelEnrollmentOnDevices(integration, memberId, reason) {
+  const devicesResult = await pool.query(
+    `SELECT device_id FROM devices WHERE status = 'online' AND last_heartbeat > datetime('now', '-5 minutes')`
+  );
+  const devices = devicesResult.rows || [];
+
+  let cancelsSent = 0;
+  const results = [];
+
+  for (const device of devices) {
+    try {
+      await integration.sendESP32Command(device.device_id, 'cancel_enrollment', {
+        memberId,
+        reason,
+      });
+      cancelsSent++;
+      results.push({ deviceId: device.device_id, status: 'sent' });
+    } catch (error) {
+      logger.error({ err: error, deviceId: device.device_id }, 'failed to send cancel');
+      results.push({ deviceId: device.device_id, status: 'failed', error: error.message });
+    }
+  }
+
+  return { cancelsSent, results, totalDevices: devices.length };
+}
+
 /** Single-line validation log (replaces separate request + result logs). */
 function logBiometricValidationOutcome({
   biometricId,
@@ -148,34 +190,12 @@ const stopEnrollment = async (req, res) => {
 
     const { memberId, memberName } = enrollmentSession;
 
-    // Send cancel command to all online ESP32 devices
-    const devicesQuery = `
-      SELECT DISTINCT device_id 
-      FROM biometric_events 
-      WHERE device_id IS NOT NULL 
-        AND timestamp > datetime('now', '-5 minutes')
-      GROUP BY device_id
-    `;
-
-    const devicesResult = await pool.query(devicesQuery);
-    const devices = devicesResult.rows || [];
-
-    let cancelsSent = 0;
-    const results = [];
-
-    for (const device of devices) {
-      try {
-        await biometricIntegration.sendESP32Command(device.device_id, 'cancel_enrollment', {
-          memberId: memberId,
-          reason: 'user_cancelled',
-        });
-        cancelsSent++;
-        results.push({ deviceId: device.device_id, status: 'sent' });
-      } catch (error) {
-        logger.error({ err: error, deviceId: device.device_id }, 'failed to send cancel');
-        results.push({ deviceId: device.device_id, status: 'failed', error: error.message });
-      }
-    }
+    // Send cancel command to all online ESP32 devices.
+    const { cancelsSent, results, totalDevices } = await cancelEnrollmentOnDevices(
+      biometricIntegration,
+      memberId,
+      'user_cancelled'
+    );
 
     // Stop the enrollment mode in the backend
     const result = biometricIntegration.stopEnrollmentMode('manual');
@@ -204,7 +224,7 @@ const stopEnrollment = async (req, res) => {
         memberId,
         memberName,
         cancelsSent,
-        totalDevices: devices.length,
+        totalDevices,
         results,
       },
     });
@@ -235,34 +255,12 @@ const cancelEnrollment = async (req, res) => {
     const member = memberResult.rows[0];
     const memberName = member ? member.name : `Member ${memberId}`;
 
-    // Send cancel command to all online ESP32 devices
-    const devicesQuery = `
-      SELECT DISTINCT device_id 
-      FROM biometric_events 
-      WHERE device_id IS NOT NULL 
-        AND timestamp > datetime('now', '-5 minutes')
-      GROUP BY device_id
-    `;
-
-    const devicesResult = await pool.query(devicesQuery);
-    const devices = devicesResult.rows || [];
-
-    let cancelsSent = 0;
-    const results = [];
-
-    for (const device of devices) {
-      try {
-        await biometricIntegration.sendESP32Command(device.device_id, 'cancel_enrollment', {
-          memberId: memberId,
-          reason: reason,
-        });
-        cancelsSent++;
-        results.push({ deviceId: device.device_id, status: 'sent' });
-      } catch (error) {
-        logger.error({ err: error, deviceId: device.device_id }, 'failed to send cancel');
-        results.push({ deviceId: device.device_id, status: 'failed', error: error.message });
-      }
-    }
+    // Send cancel command to all online ESP32 devices.
+    const { cancelsSent, results, totalDevices } = await cancelEnrollmentOnDevices(
+      biometricIntegration,
+      memberId,
+      reason
+    );
 
     // Log cancellation event
     await biometricIntegration.logBiometricEvent({
@@ -287,7 +285,7 @@ const cancelEnrollment = async (req, res) => {
         memberId,
         memberName,
         cancelsSent,
-        totalDevices: devices.length,
+        totalDevices,
         results,
       },
     });

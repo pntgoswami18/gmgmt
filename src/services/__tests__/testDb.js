@@ -34,7 +34,8 @@ function buildSchema(db) {
     CREATE TABLE IF NOT EXISTS devices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       device_id TEXT UNIQUE NOT NULL,
-      status TEXT DEFAULT 'offline'
+      status TEXT DEFAULT 'offline',
+      last_heartbeat TEXT
     );
 
     CREATE TABLE IF NOT EXISTS members (
