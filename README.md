@@ -1641,41 +1641,130 @@ app.get('*', (req, res) => {
 
 ### 3) Bundle a Node.js runtime (x86 and x64)
 
-- Use Node 18 for 32-bit support (Node ≥20 dropped 32-bit Windows).
-- Place runtimes under your install directory:
-  - `vendor/node-win-x64/node.exe`
-  - `vendor/node-win-ia32/node.exe`
+Use Node 18 for 32-bit support (Node ≥20 dropped 32-bit Windows). Place runtimes under your install directory:
+- `vendor/node-win-x64/node.exe`
+- `vendor/node-win-ia32/node.exe`
+
+#### Automated Runtime Download
+
+**Cross-platform script (Node.js):**
+```bash
+node scripts/download-node-runtimes.js
+```
+
+**Windows Batch script:**
+```bash
+scripts\download-node-runtimes.bat
+```
+
+**PowerShell script:**
+```bash
+scripts\download-node-runtimes.ps1
+```
+
+#### Manual Download
+
+1. Visit: https://nodejs.org/dist/v18.19.0/
+2. Download: `node-v18.19.0-win-x64.zip` and `node-v18.19.0-win-x86.zip`
+3. Extract `node.exe` to `vendor/node-win-x64/` and `vendor/node-win-ia32/`
+
+#### Package Manager Installation
+
+**Using Chocolatey:**
+```bash
+choco install nodejs --version=18.19.0
+copy "C:\Program Files\nodejs\node.exe" vendor\node-win-x64\node.exe
+```
+
+**Using Scoop:**
+```bash
+scoop install nodejs@18.19.0
+copy "$env:USERPROFILE\scoop\apps\nodejs\current\node.exe" vendor\node-win-x64\node.exe
+```
+
+#### Runtime Verification
+
+Test that the runtimes are correctly placed:
+```bash
+# Check file types
+file vendor/node-win-x64/node.exe  # Should show: PE32+ executable (console) x86-64
+file vendor/node-win-ia32/node.exe # Should show: PE32 executable (console) Intel 80386
+
+# Test versions (on Windows)
+vendor\node-win-x64\node.exe --version
+vendor\node-win-ia32\node.exe --version
+```
+
+#### Final Directory Structure
+```
+vendor/
+├── node-win-x64/
+│   └── node.exe          # 64-bit Node.js 18.19.0 runtime
+└── node-win-ia32/
+    └── node.exe          # 32-bit Node.js 18.19.0 runtime
+```
 
 ### 4) Install as a Windows Service
 
-Option A: Programmatic with `node-windows`:
+GMgmt can be installed as a Windows Service to run automatically in the background, start on system boot, and restart automatically if it crashes.
 
+#### Prerequisites
+
+- **Windows Operating System** (Windows 7/8/10/11 or Windows Server)
+- **Administrator Privileges** (required for install/uninstall operations)
+- **Node.js Runtime** (bundled in `vendor/` directory)
+- **node-windows Package** (installed via npm)
+
+#### Option A: Automated Service Management (Recommended)
+
+**Install node-windows dependency:**
 ```bash
 npm install node-windows --save
 ```
 
-```js
-// scripts/service-install.js
-const path = require('path');
-const Service = require('node-windows').Service;
-const svc = new Service({
-  name: 'GMgmt',
-  description: 'Gym Management Service',
-  script: path.join(__dirname, '..', 'src', 'app.js'),
-  workingDirectory: path.join(__dirname, '..'),
-  env: [{ name: 'NODE_ENV', value: 'production' }]
-});
-svc.on('install', () => svc.start());
-svc.install();
-```
-
-Run:
-
+**Service Management Commands:**
 ```bash
-node scripts/service-install.js
+# Install service (run as Administrator)
+npm run service:install
+
+# Check service status
+npm run service:status
+
+# Start/stop/restart service
+npm run service:start
+npm run service:stop
+npm run service:restart
+
+# Uninstall service (run as Administrator)
+npm run service:uninstall
+
+# Interactive service manager
+npm run service:manage install
+npm run service:manage status
+npm run service:manage restart
 ```
 
-Option B: Using NSSM (no code dependency):
+**Service Configuration:**
+- **Service Name**: `GMgmt`
+- **Description**: `Gym Management Software - Node.js backend service`
+- **Startup Type**: Automatic
+- **Account**: Local System
+- **Working Directory**: Project root
+- **Environment**: `NODE_ENV=production`, `PORT=3001`
+- **Recovery**: Automatic restart on failure
+
+**Manual Service Management:**
+```bash
+# Using Windows commands
+net start GMgmt
+net stop GMgmt
+sc query GMgmt
+
+# Using Services Manager
+services.msc  # Find "GMgmt" service
+```
+
+#### Option B: Using NSSM (Alternative)
 
 ```bash
 nssm install GMgmt "C:\\Program Files\\gmgmt\\vendor\\node-win-x64\\node.exe" "C:\\Program Files\\gmgmt\\src\\app.js"
@@ -1685,34 +1774,149 @@ nssm set GMgmt AppStderr "C:\\ProgramData\\gmgmt\\logs\\err.log"
 nssm start GMgmt
 ```
 
+#### Firewall Configuration
+
 Allow the API port through Windows Firewall:
 
 ```bash
 netsh advfirewall firewall add rule name="GMgmt API" dir=in action=allow protocol=TCP localport=3001
 ```
 
+#### Service Scripts
+
+The following scripts are available in the `scripts/` directory:
+
+- **`service-install.js`**: Installs GMgmt as Windows Service
+- **`service-uninstall.js`**: Removes Windows Service completely
+- **`service-manage.js`**: Unified interface for all service operations
+
+#### Troubleshooting
+
+**Service Won't Start:**
+1. Check Event Logs: `eventvwr.msc` → Windows Logs → Application
+2. Verify file paths exist: `src/app.js`, Node.js runtime in `vendor/`
+3. Check port availability: `netstat -an | findstr :3001`
+4. Test manual startup: `npm start`
+
+**Permission Issues:**
+1. Run install/uninstall as Administrator
+2. Check file permissions for service account
+3. Verify database path access: `%ProgramData%\gmgmt\data\`
+
+**Service Recovery:**
+- **First Failure**: Restart service
+- **Second Failure**: Restart service  
+- **Subsequent Failures**: Restart service
+- **Reset Period**: 1 day
+
 ### 5) Build the Installer (NSIS)
 
-Your installer should:
+Create Windows installers using NSIS (Nullsoft Scriptable Install System) for both x64 and x86 architectures.
 
-- Copy app files to `C:\\Program Files\\gmgmt` (x64) or `C:\\Program Files (x86)\\gmgmt` (x86)
-- Copy the correct Node runtime (`vendor/node-win-<arch>/node.exe`)
-- Create `%ProgramData%\\gmgmt\\{data,logs}`
-- Write `%ProgramData%\\gmgmt\\.env`
-- Install and start the Windows Service (via script or NSSM)
-- Add a firewall rule for TCP 3001
-- Create Start Menu shortcuts (e.g., open `http://localhost:3001` in default browser)
-- Uninstaller should stop/remove the service and optionally preserve `%ProgramData%\\gmgmt` data
+#### Prerequisites
 
-Example NSIS snippet:
+- **NSIS**: Download and install from https://nsis.sourceforge.io/
+- **Windows Operating System**: Required for NSIS compilation
+- **Node.js Runtimes**: Must be downloaded to `vendor/` directory
+- **Built Frontend**: React build must exist in `client/build/`
 
-```nsis
-Section
-  CreateDirectory "$%ProgramData%\gmgmt\data"
-  CreateDirectory "$%ProgramData%\gmgmt\logs"
-  nsExec::ExecToLog 'netsh advfirewall firewall add rule name="GMgmt API" dir=in action=allow protocol=TCP localport=3001'
-SectionEnd
+#### Automated Installer Build
+
+**Build for both architectures:**
+```bash
+npm run build:installer
 ```
+
+**Build for specific architecture:**
+```bash
+npm run build:installer:x64    # 64-bit only
+npm run build:installer:x86    # 32-bit only
+npm run build:installer:both   # Both architectures
+```
+
+**Clean build:**
+```bash
+npm run build:installer:clean  # Clean dist/ directory first
+```
+
+#### Manual Build Process
+
+1. **Install NSIS**: Download from https://nsis.sourceforge.io/
+2. **Prepare Files**: Ensure all requirements are met
+3. **Run Build Script**: `node scripts/build-installer.js --arch both`
+4. **Find Installers**: Check `dist/x64/` and `dist/x86/` directories
+
+#### Installer Features
+
+**What the installer includes:**
+- Complete GMgmt application files
+- Node.js runtime (architecture-specific)
+- Windows Service installation
+- Firewall rule configuration
+- Start Menu shortcuts
+- Uninstaller with data preservation option
+
+**Installation locations:**
+- **Application**: `C:\Program Files\gmgmt\` (x64) or `C:\Program Files (x86)\gmgmt\` (x86)
+- **Data**: `%ProgramData%\gmgmt\data\gmgmt.sqlite`
+- **Logs**: `%ProgramData%\gmgmt\logs\`
+- **Configuration**: `%ProgramData%\gmgmt\.env`
+
+**Service Configuration:**
+- **Service Name**: `GMgmt`
+- **Startup Type**: Automatic
+- **Port**: 3001 (with firewall rule)
+- **Recovery**: Automatic restart on failure
+
+#### Installer Script Details
+
+The installer script (`installer/gmgmt-installer.nsi`) includes:
+
+- **Modern UI**: Professional installation interface
+- **Architecture Detection**: Automatic x64/x86 detection
+- **Component Selection**: Optional service and firewall installation
+- **Service Management**: Automatic Windows Service installation
+- **Firewall Configuration**: TCP port 3001 rule
+- **Start Menu Integration**: Application shortcuts
+- **Uninstaller**: Complete removal with data preservation option
+
+#### Build Output
+
+After successful build, you'll find:
+```
+dist/
+├── x64/
+│   └── GMgmt-Setup-x64.exe    # 64-bit installer
+└── x86/
+    └── GMgmt-Setup-x86.exe    # 32-bit installer
+```
+
+#### Testing Installers
+
+1. **Test on Clean System**: Use Windows VM or clean installation
+2. **Verify Service Installation**: Check Windows Services Manager
+3. **Test Application**: Access http://localhost:3001
+4. **Test Uninstaller**: Verify complete removal
+
+#### Troubleshooting
+
+**Build Fails:**
+1. Check NSIS installation: `makensis /VERSION`
+2. Verify Node.js runtimes exist in `vendor/`
+3. Ensure frontend is built: `cd client && npm run build`
+4. Check file permissions
+
+**Installer Issues:**
+1. Run installer as Administrator
+2. Check Windows Event Logs
+3. Verify firewall settings
+4. Test manual service installation
+
+**Service Won't Start:**
+1. Check Event Logs: `eventvwr.msc`
+2. Verify file paths and permissions
+3. Test manual startup: `npm start`
+4. Check port availability
 
 ### 6) 32-bit vs 64-bit builds
 
