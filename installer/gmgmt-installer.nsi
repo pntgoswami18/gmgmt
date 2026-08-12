@@ -7,6 +7,10 @@
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 !include "WinVer.nsh"
+; ${RunningX64} (used by .onInit's architecture guard) lives in x64.nsh, not
+; WinVer.nsh - without this include it stays unexpanded and LogicLib's ${If}
+; fails with: macro "_If" requires 4 parameter(s), passed 2!
+!include "x64.nsh"
 
 ;--------------------------------
 ; General
