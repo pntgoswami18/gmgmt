@@ -61,9 +61,17 @@ Var StartMenuFolder
 !insertmacro MUI_PAGE_INSTFILES
 
 ; Finish page
-!define MUI_FINISHPAGE_RUN "$INSTDIR\node.exe"
+;
+; MUI_FINISHPAGE_RUN is meant for a single standalone executable - pairing it
+; with MUI_FINISHPAGE_RUN_PARAMETERS to invoke "node.exe <script>" runs into
+; MUI2's internal Exec call being built from a single quoted string, and the
+; PARAMETERS value's own embedded quotes closing that string early ("Exec
+; expects 1 parameters, got 2" at compile time). RUN_FUNCTION (defined below,
+; near the other Functions) sidesteps this entirely by making the Exec call
+; ourselves.
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION "RunServiceInstall"
 !define MUI_FINISHPAGE_RUN_TEXT "Install as Windows Service"
-!define MUI_FINISHPAGE_RUN_PARAMETERS '"$INSTDIR\scripts\service-install.js"'
 !define MUI_FINISHPAGE_LINK "Open GMgmt in browser"
 !define MUI_FINISHPAGE_LINK_LOCATION "http://localhost:3001"
 
@@ -276,4 +284,15 @@ Function .onInstSuccess
   
   !insertmacro MUI_STARTMENU_WRITE_END
 
+FunctionEnd
+
+; Callback for the finish page's "Install as Windows Service" checkbox (see
+; MUI_FINISHPAGE_RUN_FUNCTION above). Runs the bundled node.exe - SecCore's
+; `File "vendor\node-win-${ARCH}\node.exe"` (no /r, no /oname) flattens to
+; just the basename under $INSTDIR per NSIS's File instruction semantics, so
+; the installed runtime is $INSTDIR\node.exe, not the source-tree subpath -
+; against service-install.js, so the service doesn't depend on a
+; system-wide Node.js install.
+Function RunServiceInstall
+  Exec '"$INSTDIR\node.exe" "$INSTDIR\scripts\service-install.js"'
 FunctionEnd
