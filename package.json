@@ -4,7 +4,7 @@
   "description": "Gym Management Software",
   "main": "src/app.js",
   "scripts": {
-    "prepare": "husky",
+    "prepare": "node -e \"try{require.resolve('husky')}catch(e){process.exit(0)};require('child_process').execSync('husky',{stdio:'inherit'})\"",
     "prestart": "node tools/face-model/predeploy-models.js",
     "start": "node src/app.js",
     "predev": "node tools/face-model/predeploy-models.js",
