@@ -161,10 +161,15 @@ Section "Windows Service" SecService
   ; Install Windows Service (using the bundled node.exe, not a system PATH
   ; lookup, so this works on a machine with no Node.js installed)
   DetailPrint "Installing GMgmt Windows Service..."
-  nsExec::ExecToLog '"$INSTDIR\node.exe" "$INSTDIR\scripts\service-install.js"'
+  nsExec::ExecToStack '"$INSTDIR\node.exe" "$INSTDIR\scripts\service-install.js"'
   Pop $0
+  Pop $1
+  DetailPrint "$1"
+  FileOpen $2 "$INSTDIR\install-service.log" w
+  FileWrite $2 "$1"
+  FileClose $2
   ${If} $0 != 0
-    MessageBox MB_ICONEXCLAMATION "Failed to install Windows Service. You may need to run as Administrator."
+    MessageBox MB_ICONEXCLAMATION "Failed to install Windows Service (exit code $0). See $INSTDIR\install-service.log for details."
   ${EndIf}
 
 SectionEnd
@@ -234,15 +239,15 @@ Section "Uninstall"
   RMDir "$SMPROGRAMS\$StartMenuFolder"
   
   ; Ask about preserving data
-  MessageBox MB_YESNO "Do you want to preserve GMgmt data in %ProgramData%\gmgmt?" IDYES PreserveData IDNO DeleteData
-  
+  MessageBox MB_YESNO "Do you want to preserve your GMgmt data?" IDYES PreserveData IDNO DeleteData
+
   PreserveData:
-    MessageBox MB_OK "GMgmt data preserved in %ProgramData%\gmgmt"
+    MessageBox MB_OK "Your GMgmt data has been preserved."
     Goto EndUninstall
-  
+
   DeleteData:
     RMDir /r "$%ProgramData%\gmgmt"
-    MessageBox MB_OK "GMgmt data removed from %ProgramData%\gmgmt"
+    MessageBox MB_OK "Your GMgmt data has been removed."
   
   EndUninstall:
 
