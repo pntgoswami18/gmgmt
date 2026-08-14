@@ -230,10 +230,45 @@ function copyBuildInputs(archDir, architecture) {
   console.log('✅ Build inputs copied');
 }
 
+// better-sqlite3 (and any other native module) is compiled against
+// whatever `node` ran `npm install` - usually the developer's system Node,
+// which is rarely the same version as the portable runtime in vendor/ that
+// actually executes the shipped app. A binary built for the wrong ABI loads
+// silently during `npm install` but crashes the service at first require(),
+// which only surfaces as a crash-looping Windows Service days later. Check
+// it loads under the exact runtime being shipped, before it gets bundled.
+function verifyNativeModules(architecture) {
+  console.log('🔍 Verifying native modules against the bundled runtime...');
+
+  const runtimeDir = architecture === 'x64' ? 'node-win-x64' : 'node-win-ia32';
+  const bundledNode = path.join('vendor', runtimeDir, 'node.exe');
+
+  try {
+    execSync(`"${bundledNode}" -e "require('better-sqlite3')(':memory:')"`, {
+      stdio: 'pipe',
+      cwd: process.cwd(),
+    });
+    console.log('✅ Native modules load under the bundled runtime');
+  } catch (error) {
+    const bundledVersion = execSync(`"${bundledNode}" --version`, { encoding: 'utf8' }).trim();
+    console.error(`❌ better-sqlite3 does not load under the bundled runtime (${bundledVersion}).`);
+    console.error('   It was likely compiled against your system Node instead. Rebuild it');
+    console.error("   against the bundled runtime's ABI before packaging:");
+    console.error(
+      `     $env:npm_config_target="${bundledVersion.replace(/^v/, '')}"; $env:npm_config_arch="${architecture}"; ` +
+        `$env:npm_config_target_arch="${architecture}"; $env:npm_config_target_platform="win32"; ` +
+        `$env:npm_config_runtime="node"; $env:npm_config_disturl="https://nodejs.org/dist"; npm rebuild better-sqlite3`
+    );
+    process.exit(1);
+  }
+}
+
 function buildInstaller(architecture) {
   console.log(`🔨 Building installer for ${architecture}...`);
 
   try {
+    verifyNativeModules(architecture);
+
     const archDir = path.join(CONFIG.buildDir, architecture);
     copyBuildInputs(archDir, architecture);
 
