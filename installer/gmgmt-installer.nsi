@@ -97,20 +97,34 @@ Section "GMgmt Core" SecCore
 
   SectionIn RO
   
-  ; Set output path to the installation directory
-  SetOutPath "$INSTDIR"
-  
-  ; Copy application files
+  ; Copy application files. Each `File /r "dir\*"` extracts relative to the
+  ; CURRENT SetOutPath, flattening the source dir's own name away - so
+  ; SetOutPath must be pointed at the matching $INSTDIR subfolder before
+  ; each call, or src/node_modules/public/scripts all merge into one flat
+  ; directory (which is what happened before this fix: scripts\*.js ended up
+  ; sitting directly in $INSTDIR, so "$INSTDIR\scripts\service-install.js"
+  ; didn't exist and the service install step failed with MODULE_NOT_FOUND).
+  SetOutPath "$INSTDIR\src"
   File /r "src\*"
+
+  SetOutPath "$INSTDIR\node_modules"
   File /r "node_modules\*"
+
+  SetOutPath "$INSTDIR\public"
   File /r "public\*"
+
+  SetOutPath "$INSTDIR\scripts"
   File /r "scripts\*"
+
+  SetOutPath "$INSTDIR\client\build"
   File /r "client\build\*"
+
+  SetOutPath "$INSTDIR"
   File "package.json"
   File "package-lock.json"
   File "README.md"
   File "LICENSE.txt"
-  
+
   ; Copy the bundled Node.js runtime for this build's architecture.
   ; ${ARCH} is substituted with a literal "x64"/"x86" by build-installer.js
   ; before makensis ever sees this file, so only the matching runtime's
