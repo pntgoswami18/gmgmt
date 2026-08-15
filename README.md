@@ -1664,21 +1664,21 @@ scripts\download-node-runtimes.ps1
 
 #### Manual Download
 
-1. Visit: https://nodejs.org/dist/v18.19.0/
-2. Download: `node-v18.19.0-win-x64.zip` and `node-v18.19.0-win-x86.zip`
+1. Visit: https://nodejs.org/dist/v22.23.2/
+2. Download: `node-v22.23.2-win-x64.zip` and `node-v22.23.2-win-x86.zip`
 3. Extract `node.exe` to `vendor/node-win-x64/` and `vendor/node-win-ia32/`
 
 #### Package Manager Installation
 
 **Using Chocolatey:**
 ```bash
-choco install nodejs --version=18.19.0
+choco install nodejs --version=22.23.2
 copy "C:\Program Files\nodejs\node.exe" vendor\node-win-x64\node.exe
 ```
 
 **Using Scoop:**
 ```bash
-scoop install nodejs@18.19.0
+scoop install nodejs@22.23.2
 copy "$env:USERPROFILE\scoop\apps\nodejs\current\node.exe" vendor\node-win-x64\node.exe
 ```
 
@@ -1699,9 +1699,9 @@ vendor\node-win-ia32\node.exe --version
 ```
 vendor/
 ├── node-win-x64/
-│   └── node.exe          # 64-bit Node.js 18.19.0 runtime
+│   └── node.exe          # 64-bit Node.js 22.23.2 runtime
 └── node-win-ia32/
-    └── node.exe          # 32-bit Node.js 18.19.0 runtime
+    └── node.exe          # 32-bit Node.js 22.23.2 runtime
 ```
 
 ### 4) Install as a Windows Service
@@ -1758,7 +1758,7 @@ npm run service:manage restart
 # Using Windows commands
 net start GMgmt
 net stop GMgmt
-sc query GMgmt
+sc query gmgmt.exe
 
 # Using Services Manager
 services.msc  # Find "GMgmt" service

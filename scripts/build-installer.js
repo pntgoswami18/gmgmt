@@ -98,21 +98,21 @@ function checkRequirements() {
     process.exit(1);
   }
 
-  // Check if Node.js runtimes exist
-  const x64Runtime = path.join('vendor', 'node-win-x64', 'node.exe');
-  const x86Runtime = path.join('vendor', 'node-win-ia32', 'node.exe');
-
-  if (!fs.existsSync(x64Runtime)) {
-    console.error('❌ x64 Node.js runtime not found:', x64Runtime);
-    console.error('   Run: node scripts/download-node-runtimes.js');
-    process.exit(1);
-  }
-
-  if (!fs.existsSync(x86Runtime)) {
-    console.error('❌ x86 Node.js runtime not found:', x86Runtime);
-    console.error('   Run: node scripts/download-node-runtimes.js');
-    process.exit(1);
-  }
+  // Check the Node.js runtime(s) for the architecture(s) actually being
+  // built exist (a single-arch build only needs its own runtime).
+  const targetArchs = options.arch === 'both' ? CONFIG.architectures : [options.arch];
+  targetArchs.forEach((arch) => {
+    const runtime = path.join(
+      'vendor',
+      arch === 'x64' ? 'node-win-x64' : 'node-win-ia32',
+      'node.exe'
+    );
+    if (!fs.existsSync(runtime)) {
+      console.error(`❌ ${arch} Node.js runtime not found:`, runtime);
+      console.error('   Run: node scripts/download-node-runtimes.js');
+      process.exit(1);
+    }
+  });
 
   console.log('✅ Node.js runtimes found');
 
@@ -166,6 +166,22 @@ function checkProductionNodeModules() {
   }
 
   console.log('✅ node_modules contains no devDependencies');
+
+  // The inverse check: every production dependency must actually be
+  // installed. A tree missing e.g. node-windows (added to package.json but
+  // never npm-installed) would bundle fine and then fail at runtime on the
+  // customer machine with MODULE_NOT_FOUND.
+  const missingDeps = Object.keys(pkg.dependencies || {}).filter(
+    (name) => !fs.existsSync(path.join('node_modules', name))
+  );
+  if (missingDeps.length > 0) {
+    console.error('❌ Production dependencies missing from node_modules:');
+    missingDeps.forEach((name) => console.error('   -', name));
+    console.error('   Run: npm ci --omit=dev');
+    process.exit(1);
+  }
+
+  console.log('✅ All production dependencies are installed');
 }
 
 function cleanBuildDirectory() {
@@ -211,9 +227,12 @@ function copyBuildInputs(archDir, architecture) {
     recursive: true,
   });
 
-  ['package.json', 'package-lock.json', 'README.md', 'LICENSE.txt'].forEach((file) => {
-    fs.copyFileSync(file, path.join(archDir, file));
-  });
+  // env.sample must ship: serviceEnv.js uses it to seed %ProgramData%\gmgmt\.env
+  ['package.json', 'package-lock.json', 'README.md', 'LICENSE.txt', 'env.sample'].forEach(
+    (file) => {
+      fs.copyFileSync(file, path.join(archDir, file));
+    }
+  );
 
   fs.mkdirSync(path.join(archDir, CONFIG.installerDir), { recursive: true });
   fs.copyFileSync(CONFIG.icon, path.join(archDir, CONFIG.installerDir, path.basename(CONFIG.icon)));
@@ -259,7 +278,11 @@ function verifyNativeModules(architecture) {
         `$env:npm_config_target_arch="${architecture}"; $env:npm_config_target_platform="win32"; ` +
         `$env:npm_config_runtime="node"; $env:npm_config_disturl="https://nodejs.org/dist"; npm rebuild better-sqlite3`
     );
-    process.exit(1);
+    // Throw (don't process.exit) so buildAllInstallers' per-arch handling
+    // still applies - a single node_modules tree can only ever match one
+    // architecture, so in an `--arch both` run the other arch must get its
+    // chance to fail/succeed on its own and the summary must reflect it.
+    throw new Error(`native module verification failed for ${architecture}`);
   }
 }
 
@@ -313,6 +336,14 @@ function buildAllInstallers() {
 
   const targetArchs = options.arch === 'both' ? CONFIG.architectures : [options.arch];
   const createdInstallers = [];
+  const failedArchs = [];
+
+  if (targetArchs.length > 1) {
+    console.log('ℹ️  Note: a single node_modules tree contains native modules for one');
+    console.log('   architecture only. Building both installers requires an');
+    console.log('   arch-matched `npm rebuild better-sqlite3` between runs - expect');
+    console.log('   the non-matching architecture to fail its native-module check.');
+  }
 
   for (const arch of targetArchs) {
     try {
@@ -320,10 +351,18 @@ function buildAllInstallers() {
       createdInstallers.push(installerPath);
     } catch (error) {
       console.error(`❌ Build failed for ${arch}`);
-      if (targetArchs.length === 1) {
-        process.exit(1);
-      }
+      failedArchs.push(arch);
     }
+  }
+
+  if (failedArchs.length > 0) {
+    console.error(`\n❌ Build failed for: ${failedArchs.join(', ')}`);
+    if (createdInstallers.length > 0) {
+      console.error('   Successfully built installers are listed below, but the overall');
+      console.error('   build is reported as failed.');
+      showBuildSummary(createdInstallers);
+    }
+    process.exit(1);
   }
 
   return createdInstallers;
