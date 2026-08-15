@@ -30,3 +30,8 @@ public/models/
 # Local dev-server launch config — holds machine-specific runtimeExecutable
 # paths (e.g. an absolute nvm node binary), so it must not be committed.
 .claude/launch.json
+
+# Windows installer build artifacts (downloaded/generated, not source)
+vendor/
+dist/
+temp/
