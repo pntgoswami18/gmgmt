@@ -156,10 +156,12 @@ int fingerprintID = -1;
 String deviceStatus = "ready";
 struct tm timeinfo;  // Global variable for time functions
 
-// Member authorization cache
+// Member authorization cache. Since the door-unlock fail-closed fix,
+// checkFingerprint() always calls validateWithServer() for the auth decision —
+// this cache no longer gates unlock and exists only for the cache_size
+// diagnostic returned by /api/cache/invalidate.
 MemberAuth memberCache[MAX_CACHED_MEMBERS];
 int cacheSize = 0;
-bool cacheInitialized = false;
 
 // Non-blocking door unlock variables
 bool doorUnlockActive = false;
@@ -226,7 +228,6 @@ void emergencyUnlockWithReason(String reason);
 // Cache management functions
 bool validateWithServer(int biometricId);
 void updateMemberCache();
-void handleCacheUpdate(String jsonResponse);
 int handleCacheUpdatePage(String jsonResponse, bool applyChanges = true);
 void initializeCache();
 void clearCache();
@@ -2703,7 +2704,6 @@ void clearCache() {
     memberCache[i].expiryTime = 0;
     memberCache[i].memberId = 0;
   }
-  cacheInitialized = true;
 }
 
 bool validateWithServer(int biometricId) {
@@ -2930,10 +2930,4 @@ int handleCacheUpdatePage(String jsonResponse, bool applyChanges) {
     Serial.printf("✅ Cache page validated - %d members parsed\n", added);
   }
   return added;
-}
-
-// Legacy single-call handler (used by cache invalidation endpoint)
-void handleCacheUpdate(String jsonResponse) {
-  clearCache();
-  handleCacheUpdatePage(jsonResponse);
 }
