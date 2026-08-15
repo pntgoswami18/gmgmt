@@ -425,6 +425,8 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 3. Search and install the following libraries:
   - `ArduinoJson` by Benoit Blanchon (version 6.x)
   - `Adafruit Fingerprint Sensor Library` by Adafruit (compatible with R307 sensor)
+  - `WiFiManager` by tzapu (captive-portal WiFi provisioning — see [WiFi Provisioning](#wifi-provisioning-captive-portal) below)
+  - `ESPmDNS` (bundled with the ESP32 Arduino core — no separate install needed)
 
 **Method 2: Using Arduino IDE Board Manager**
 
@@ -449,9 +451,22 @@ ESP32 devices communicate via TCP/IP using JSON messages:
 6. Select the correct port: **Tools → Port → (your ESP32 port)**
 7. Click **Upload** button
 8. **Configure Device** (if using Option A):
-  - Open Serial Monitor at **115200 baud** to see device IP
-  - Navigate to `http://ESP32_IP/config` in your browser
-  - Enter your WiFi credentials and server settings
+  - Power on the device. If it can't connect with the placeholder credentials in `config.h.example`/`config.h`, it automatically opens a WiFi provisioning captive portal — see [WiFi Provisioning (Captive Portal)](#wifi-provisioning-captive-portal) below
+  - Alternatively, once the device is already on a known network, open `http://ESP32_IP/config` in your browser to update WiFi/server settings directly
+
+#### WiFi Provisioning (Captive Portal)
+
+On first boot (or any time its stored WiFi credentials stop working), the device opens its own WiFi network named **`GMGMT-DoorLock-XXXX`** instead of going dark:
+
+1. From a phone or laptop, connect to that WiFi network (open by default — set `PROVISIONING_AP_PASSWORD` in `config.h` to require a password)
+2. A captive portal should open automatically; if not, browse to `http://192.168.4.1`
+3. Pick your gym's WiFi network and enter its password, plus the gym server's IP/port, device ID, and (optional) device secret
+4. The device joins the WiFi network and pings `GET /api/biometric/ping` on the server you entered before exiting the portal
+   - **Success**: the portal closes and the device connects normally
+   - **WiFi joined but server unreachable**: the portal reopens with an on-page error so you can correct the server address/port and try again
+5. Settings are saved to the device's NVS (`Preferences`), same as the existing `/config` web form — no re-flash needed to move a device to different WiFi later, just repeat this flow
+
+This only triggers on a genuine first-connect failure — a transient WiFi drop on an already-configured device retries the existing connection instead (see `reconnectWiFi()` in `esp32_door_lock.ino`).
 
 #### 3. OTA Firmware Updates (After Initial USB Flash)
 
@@ -994,10 +1009,12 @@ Safety Features:
 The ESP32 supports dynamic, environment-driven configuration:
 
 1. **Web Interface**: `http://ESP32_IP/config` - User-friendly configuration form
-2. **API Endpoints**: REST API for programmatic configuration
-3. **Remote Management**: Configure from gym management system
-4. **Development Defaults**: Optional `config.h` file for custom defaults
-5. **Device Secret**: Optional `Device Secret` field on the same config form — leave blank unless the backend enforces `DEVICE_SHARED_SECRET` (see [Authentication & Security](#api-endpoints)). Must match the backend's value exactly.
+2. **WiFi Provisioning Portal**: Captive-portal AP shown automatically when the device can't join WiFi — see [WiFi Provisioning (Captive Portal)](#wifi-provisioning-captive-portal)
+3. **API Endpoints**: REST API for programmatic configuration
+4. **Remote Management**: Configure from gym management system
+5. **Development Defaults**: Optional `config.h` file for custom defaults
+6. **Device Secret**: Optional `Device Secret` field on the same config form — leave blank unless the backend enforces `DEVICE_SHARED_SECRET` (see [Authentication & Security](#api-endpoints)). Must match the backend's value exactly.
+7. **Automatic Discovery**: Once on the network, devices advertise themselves via mDNS (`_gmgmt-doorlock._tcp`) so **Settings → ESP32 Devices → Add Device** finds them before their first heartbeat, without typing an IP address.
 
 #### 6. Critical Port Configuration
 
@@ -1127,7 +1144,9 @@ curl -X POST http://YOUR_SERVER_IP:3001/api/biometric/esp32-webhook \
 
 #### WiFi Connection Issues
 
-- **Web Configuration**: Access `http://ESP32_IP/config` to update WiFi credentials
+- **Web Configuration**: Access `http://ESP32_IP/config` to update WiFi credentials (device must already be on a reachable network)
+- **Can't reach the device at all**: If the stored WiFi credentials failed, the device should have opened its own `GMGMT-DoorLock-XXXX` AP — see [WiFi Provisioning (Captive Portal)](#wifi-provisioning-captive-portal). If that AP never appears, check the Serial Monitor for a boot loop or crash before the portal starts.
+- **Portal loops with "server unreachable"**: The device joined WiFi fine but couldn't reach `GET /api/biometric/ping` at the server IP/port you entered — double-check the address, that the backend is running with `ENABLE_BIOMETRIC=true`, and that nothing (firewall, VLAN isolation on the provisioning AP's network) blocks the device from reaching it.
 - **Serial Monitor**: Check for detailed WiFi connection logs at 115200 baud
 - **Connection Status**: Look for detailed error messages like `NO_SSID_AVAILABLE`, `WRONG_PASSWORD`, `CONNECT_FAILED`
 
@@ -1785,6 +1804,8 @@ For technical support or feature requests, please refer to the API documentation
 #### API Endpoints
 
 - **Device Management**: `/api/biometric/devices/*` for device management
+  - `GET /api/biometric/devices/discover` - mDNS-discovered devices not yet in the `devices` table (used by the Add Device UI)
+- **Reachability Probe**: `GET /api/biometric/ping` - unauthenticated; used by the device's WiFi provisioning portal to verify it can reach the server before exiting
 - **ESP32 Configuration**: 
   - `GET /api/config` - Retrieve device configuration
   - `POST /api/config` - Update device configuration

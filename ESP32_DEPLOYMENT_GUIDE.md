@@ -58,6 +58,37 @@ sends an `X-Device-Secret` header on its outbound calls once configured.
 The OTA update code path in the `.ino` firmware itself is not compiled/tested
 by anything in this repo — verify on real hardware before relying on it.
 
+## WiFi provisioning (captive portal)
+
+If a device's stored/`config.h` WiFi credentials fail to connect, it opens its
+own `GMGMT-DoorLock-XXXX` WiFi AP (via the `WiFiManager` Arduino library —
+install it alongside the existing ArduinoJson/Adafruit Fingerprint libraries)
+instead of going dark. Connecting to that AP opens a captive portal for
+entering the gym's WiFi credentials plus server IP/port/device ID/secret.
+
+Before exiting the portal, the device calls `GET /api/biometric/ping`
+(unauthenticated — see `PUBLIC_PATHS` in `src/app.js`) to verify it can
+actually reach the server, not just that WiFi joined. On failure it reopens
+the portal with an on-page error instead of silently retrying with a config
+that will never work. Settings are saved to the device's `Preferences` (NVS)
+the same way the existing `/config` web form does, so re-provisioning a
+device (new WiFi, new server) never requires a re-flash.
+
+This only triggers on a genuine first-connect failure, never on a transient
+drop of an already-working connection (`reconnectWiFi()` handles that case
+separately).
+
+## Device discovery
+
+`src/services/deviceDiscoveryService.js` browses mDNS for devices
+advertising `_gmgmt-doorlock._tcp` (the firmware does this once WiFi is up —
+see `startMDNSAdvertising()` in the `.ino`) and exposes currently-visible,
+not-yet-registered ones via `GET /api/biometric/devices/discover`. It's only
+a LAN-presence list for the window before a device's first heartbeat — the
+`devices` table (populated by the webhook/heartbeat, as always) remains the
+source of truth once a device has checked in at least once. Only started
+when `ENABLE_BIOMETRIC=true`.
+
 ## Testing
 
 ```bash
