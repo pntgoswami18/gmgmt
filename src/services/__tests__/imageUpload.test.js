@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
 const { matchesSignature } = require('../../utils/imageSignature');
 const { writeUploadedFile } = require('../../config/multer');
@@ -140,28 +141,30 @@ test('settingsController.uploadLogo — 400s when the uploaded content is spoofe
   assert.match(res._body.message, /does not match/i);
 });
 
-test('uploadMemberPhoto handler — a non-validation error (e.g. disk write failure) surfaces as 500, not 400', async () => {
+test('uploadMemberPhoto handler — a non-validation error (e.g. disk write failure) surfaces as 500, not 400', async (t) => {
   // Distinguishes the fix from the old behavior, where the controller mapped
   // ANY error out of writeUploadedFile — including real I/O failures — to 400.
-  // Making public/uploads/ read-only forces a genuine fs.writeFile failure
-  // (not a signature-validation failure) on an otherwise-valid PNG.
-  const uploadsDir = './public/uploads/';
-  const originalMode = fs.statSync(uploadsDir).mode;
-  fs.chmodSync(uploadsDir, 0o444);
-  try {
-    const handler =
-      memberController.uploadMemberPhoto[memberController.uploadMemberPhoto.length - 1];
-    const req = {
-      params: {},
-      body: { prefix: 'member-unknown' },
-      file: { originalname: 'photo.png', buffer: PNG_BYTES },
-    };
-    const res = mockRes();
+  // Stubs fs.writeFile to force a genuine I/O failure (not a signature-validation
+  // failure) on an otherwise-valid PNG. Deliberately avoids chmod'ing the real,
+  // shared public/uploads/ directory: node:test runs test files as separate
+  // concurrent processes, and any other file touching that directory mid-test
+  // (e.g. via multer, or firmware.js's module-load-time mkdirSync) would hit
+  // spurious EACCES errors from this test's permission change.
+  t.mock.method(fsp, 'writeFile', async () => {
+    const err = new Error('EACCES: permission denied, open');
+    err.code = 'EACCES';
+    throw err;
+  });
 
-    await handler(req, res);
+  const handler = memberController.uploadMemberPhoto[memberController.uploadMemberPhoto.length - 1];
+  const req = {
+    params: {},
+    body: { prefix: 'member-unknown' },
+    file: { originalname: 'photo.png', buffer: PNG_BYTES },
+  };
+  const res = mockRes();
 
-    assert.equal(res._status, 500);
-  } finally {
-    fs.chmodSync(uploadsDir, originalMode);
-  }
+  await handler(req, res);
+
+  assert.equal(res._status, 500);
 });
