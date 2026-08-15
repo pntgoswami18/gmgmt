@@ -1,13 +1,20 @@
 /*
  * ESP32 Door Lock Configuration Template
- * 
+ *
  * Instructions:
- * 1. Copy this file to "config.h" 
+ * 1. Copy this file to "config.h"
  * 2. Update the values below with your actual configuration
  * 3. Add "config.h" to your .gitignore to keep credentials secure
- * 
- * Note: These are fallback/default values. The ESP32 will load 
+ *
+ * Note: These are fallback/default values. The ESP32 will load
  * saved preferences first, then use these if no saved config exists.
+ *
+ * If the values below fail to connect at boot, the device opens its own
+ * WiFi provisioning AP (e.g. "GMGMT-DoorLock-A1B2") with a captive-portal
+ * config page — no re-flash needed. This requires the WiFiManager library
+ * (tzapu/WiFiManager), installable via the Arduino Library Manager or
+ * PlatformIO's lib_deps, in addition to the libraries already required by
+ * esp32_door_lock.ino.
  */
 
 #ifndef CONFIG_H
@@ -37,5 +44,11 @@
 
 // Door unlock duration (milliseconds)
 #define DOOR_UNLOCK_TIME 3000
+
+// ==================== WiFi Provisioning (AP mode) ====================
+// Uncomment to password-protect the provisioning captive portal AP (min 8
+// chars). Leave commented for an open AP — simpler for field setup, but
+// anyone in range can join the portal while a device is unconfigured.
+// #define PROVISIONING_AP_PASSWORD "ChangeMe123"
 
 #endif // CONFIG_H

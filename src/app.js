@@ -115,6 +115,12 @@ const DEVICE_PATHS = new Set([
   '/api/biometric/validate',
   '/api/biometric/cache-update',
 ]);
+// Reachability probe hit by an ESP32's WiFi provisioning captive portal
+// before it has any working credentials (device secret included) — carries
+// no data beyond "pong", so it skips auth entirely rather than going through
+// requireDeviceSecret (which would 401 an unconfigured device once
+// DEVICE_SHARED_SECRET is set, defeating the point of the check).
+const PUBLIC_PATHS = new Set(['/api/biometric/ping']);
 // Face check-in station routes: the kiosk browser runs unattended with no
 // staff session, so it authenticates with the device secret instead. Unlike
 // the legacy ESP32 routes above, these do NOT inherit the unset-means-
@@ -139,6 +145,9 @@ if (!process.env.DEVICE_SHARED_SECRET) {
 }
 app.use('/api', (req, res, next) => {
   const requestPath = req.originalUrl.split('?')[0];
+  if (PUBLIC_PATHS.has(requestPath)) {
+    return next();
+  }
   if (FACE_STATION_PATHS.has(requestPath)) {
     if (!process.env.DEVICE_SHARED_SECRET) {
       return res.status(503).json({
@@ -286,6 +295,11 @@ const startServer = async () => {
         // Store reference for potential cleanup
         app.biometricIntegration = biometricIntegration;
         logger.info('✅ Biometric integration started successfully');
+
+        // Active LAN discovery of ESP32 devices via mDNS — lets the frontend
+        // find a freshly-provisioned device before its first heartbeat.
+        const deviceDiscoveryService = require('./services/deviceDiscoveryService');
+        deviceDiscoveryService.start();
       } catch (error) {
         logger.error({ err: error }, 'failed to start biometric integration');
       }

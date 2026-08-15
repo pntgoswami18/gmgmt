@@ -50,6 +50,8 @@
 #include <Update.h>
 #include <HTTPUpdate.h>
 #include <HTTPUpdate.h>
+#include <WiFiManager.h>       // tzapu/WiFiManager — captive-portal WiFi provisioning fallback
+#include <ESPmDNS.h>           // mDNS advertisement so the backend can auto-discover this device
 #include <time.h>
 
 // Include configuration file (comment out if config.h doesn't exist)
@@ -245,6 +247,12 @@ void updateAccessDeniedState();
 // FreeRTOS async HTTP task
 void httpSendTask(void *parameter);
 bool enqueueHttpMessage(const String &jsonData);
+
+// WiFi provisioning (captive portal) and mDNS advertisement
+String getDeviceApName();
+bool pingBackend(const String& ip, int port);
+void runProvisioningPortal();
+void startMDNSAdvertising();
 
 // Web server handlers (referenced by initializeWebServer before their definitions)
 void initializeWebServer();
@@ -516,9 +524,14 @@ void setup() {
   initializePins();
   initializeFingerprint();
   
-  // Connect to WiFi (now with loaded configuration)
+  // Connect to WiFi (now with loaded configuration). Blocks until connected —
+  // falls into the provisioning captive portal internally on failure.
   connectToWiFi();
-  
+
+  // Advertise via mDNS so the backend can discover this device before its
+  // first heartbeat lands.
+  startMDNSAdvertising();
+
   // Initialize time
   // Configure NTP with local timezone from config.h
   Serial.println("Configuring NTP time synchronization...");
@@ -768,16 +781,152 @@ void connectToWiFi() {
     Serial.printf("Attempted SSID: %s\n", wifi_ssid.c_str());
     Serial.printf("Time Elapsed: %d ms (timeout: %d ms)\n", millis() - startTime, WIFI_TIMEOUT);
     Serial.println();
-    Serial.println("TROUBLESHOOTING TIPS:");
-    Serial.println("1. Check SSID spelling and case sensitivity");
-    Serial.println("2. Verify password is correct");
-    Serial.println("3. Ensure network is 2.4GHz (ESP32 doesn't support 5GHz)");
-    Serial.println("4. Check if network has MAC address filtering");
-    Serial.println("5. Verify network is not hidden");
-    Serial.println("6. Check router logs for connection attempts");
+    Serial.println("Entering WiFi provisioning mode — connect to the");
+    Serial.println("device's own WiFi network to configure it.");
     Serial.println("========================================");
-    Serial.println("Continuing in OFFLINE mode...");
+
+    // Only reached on a genuine first-connect failure with the stored/config.h
+    // creds — a transient drop of an already-working connection is handled by
+    // reconnectWiFi() in loop() and never enters provisioning mode.
+    runProvisioningPortal();
+
+    Serial.println("========================================");
+    Serial.println("Provisioning complete — WiFi CONNECTED!");
+    Serial.printf("SSID: %s\n", WiFi.SSID().c_str());
+    Serial.printf("IP Address: %s\n", WiFi.localIP().toString().c_str());
+    Serial.println("========================================");
   }
+}
+
+// ==================== WIFI PROVISIONING (CAPTIVE PORTAL) ====================
+// Builds a stable, human-distinguishable AP name from the chip's MAC so
+// multiple unconfigured devices in the same install don't collide.
+String getDeviceApName() {
+  uint64_t chipId = ESP.getEfuseMac();
+  char suffix[5];
+  snprintf(suffix, sizeof(suffix), "%04X", (uint16_t)(chipId & 0xFFFF));
+  return "GMGMT-DoorLock-" + String(suffix);
+}
+
+// Lightweight reachability check against the backend, used during
+// provisioning to catch "WiFi joined but server unreachable" before the
+// captive portal is torn down — wrong IP/port/firewall is the failure mode
+// that actually happens in the field, not just a bad WiFi password.
+bool pingBackend(const String& ip, int port) {
+  if (ip.length() == 0 || port <= 0) return false;
+
+  WiFiClient client;
+  HTTPClient pingHttp;
+  String url = String("http://") + ip + ":" + port + "/api/biometric/ping";
+
+  if (!pingHttp.begin(client, url)) return false;
+  pingHttp.setTimeout(5000);
+  int code = pingHttp.GET();
+  pingHttp.end();
+
+  return code == 200;
+}
+
+// Opens the WiFiManager captive portal (AP + web form) and loops until both
+// WiFi join AND backend reachability succeed. Blocking by design — the
+// fingerprint/relay loop has nothing useful to do without WiFi anyway, and a
+// blocking portal is what lets WiFiManager keep the AP alive to report
+// connect failures back to the same page instead of going dark.
+void runProvisioningPortal() {
+  String apName = getDeviceApName();
+  String portalMessage = "";
+
+  while (true) {
+    WiFiManager wm;
+    wm.setConfigPortalBlocking(true);
+    wm.setConnectTimeout(20);       // seconds per WiFi join attempt from the portal
+    wm.setConfigPortalTimeout(0);   // stay open indefinitely — device is unusable without config
+
+    WiFiManagerParameter param_server_ip("server_ip", "Gym Server IP", gym_server_ip.c_str(), 40);
+    WiFiManagerParameter param_server_port("server_port", "Gym Server Port", String(gym_server_port).c_str(), 6);
+    WiFiManagerParameter param_device_id("device_id", "Device ID", device_id.c_str(), 40);
+    WiFiManagerParameter param_device_secret("device_secret", "Device Secret (optional)", device_secret.c_str(), 64);
+
+    WiFiManagerParameter* statusParam = NULL;
+    if (portalMessage.length() > 0) {
+      String html = "<p style='color:#c0392b;font-weight:bold;'>" + portalMessage + "</p>";
+      statusParam = new WiFiManagerParameter(html.c_str());
+      wm.addParameter(statusParam);
+    }
+
+    wm.addParameter(&param_server_ip);
+    wm.addParameter(&param_server_port);
+    wm.addParameter(&param_device_id);
+    wm.addParameter(&param_device_secret);
+
+    Serial.printf("📡 Starting provisioning portal: SSID '%s' — browse to 192.168.4.1 if it doesn't open automatically\n", apName.c_str());
+
+#ifdef PROVISIONING_AP_PASSWORD
+    bool connected = wm.startConfigPortal(apName.c_str(), PROVISIONING_AP_PASSWORD);
+#else
+    bool connected = wm.startConfigPortal(apName.c_str());
+#endif
+
+    if (statusParam != NULL) {
+      delete statusParam;
+      statusParam = NULL;
+    }
+
+    if (!connected) {
+      // setConfigPortalTimeout(0) means this should not happen in practice —
+      // guard against library edge cases by just reopening the portal.
+      Serial.println("⚠️ Provisioning portal exited without a WiFi connection — restarting portal");
+      continue;
+    }
+
+    // WiFi joined — pull the submitted values back out of the custom fields
+    gym_server_ip = String(param_server_ip.getValue());
+    gym_server_port = String(param_server_port.getValue()).toInt();
+    device_id = String(param_device_id.getValue());
+    device_secret = String(param_device_secret.getValue());
+    wifi_ssid = WiFi.SSID();
+    wifi_password = WiFi.psk();
+
+    Serial.printf("✅ WiFi joined: %s — testing gym server at %s:%d...\n",
+                  wifi_ssid.c_str(), gym_server_ip.c_str(), gym_server_port);
+
+    if (pingBackend(gym_server_ip, gym_server_port)) {
+      Serial.println("✅ Gym server reachable — provisioning verified");
+      saveConfiguration();
+      return;
+    }
+
+    Serial.printf("❌ WiFi OK but gym server unreachable at %s:%d — reopening portal\n",
+                  gym_server_ip.c_str(), gym_server_port);
+    portalMessage = "Joined WiFi &quot;" + wifi_ssid + "&quot; but could not reach the gym server at " +
+                    gym_server_ip + ":" + String(gym_server_port) +
+                    ". Double-check the address and port, then save again.";
+
+    // WiFiManager only shows the portal again while not connected — force a
+    // disconnect (and forget the STA config) so the loop re-opens the AP.
+    WiFi.disconnect(false, true);
+    delay(500);
+  }
+}
+
+// Advertises this device as _gmgmt-doorlock._tcp on the LAN so the backend
+// can discover it (and its device_id) without the device having sent a
+// heartbeat yet. Safe to call again after every reconnect — MDNS.begin() is
+// idempotent enough for our purposes since we only call it once per boot.
+void startMDNSAdvertising() {
+  String hostname = "gmgmt-doorlock-" + device_id;
+  hostname.replace(" ", "-");
+  hostname.toLowerCase();
+
+  if (!MDNS.begin(hostname.c_str())) {
+    Serial.println("⚠️ mDNS responder failed to start — device discovery from the backend will fall back to heartbeat registration");
+    return;
+  }
+
+  MDNS.addService("gmgmt-doorlock", "tcp", 80);
+  MDNS.addServiceTxt("gmgmt-doorlock", "tcp", "device_id", device_id);
+  MDNS.addServiceTxt("gmgmt-doorlock", "tcp", "firmware_version", FIRMWARE_VERSION);
+  Serial.printf("✅ mDNS advertising as %s.local (_gmgmt-doorlock._tcp)\n", hostname.c_str());
 }
 
 void reconnectWiFi() {
