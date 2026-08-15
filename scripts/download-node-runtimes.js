@@ -171,6 +171,15 @@ async function downloadNodeRuntimes() {
     console.log('   vendor/node-win-ia32/node.exe --version');
   } catch (error) {
     console.error('❌ Error downloading Node.js runtimes:', error.message);
+    downloads.forEach((download) => {
+      const zipFile = path.join('temp', download.filename);
+      if (fs.existsSync(zipFile)) {
+        fs.unlinkSync(zipFile);
+      }
+    });
+    if (fs.existsSync('temp')) {
+      fs.rmdirSync('temp');
+    }
     process.exit(1);
   }
 }

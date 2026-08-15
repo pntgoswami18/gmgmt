@@ -26,6 +26,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const {
   ensureServiceEnvironment,
+  getDataDir,
   getBundledNodeExe,
   waitForServiceRunning,
   SERVICE_QUERY_NAME,
@@ -70,11 +71,16 @@ try {
   process.exit(1);
 }
 
-// Create service instance. Env/working-directory setup only matters for
-// `install`, but is harmless for the other commands (they only need `name`
-// to identify the existing service).
+// Create service instance. Env/working-directory setup (which has the side
+// effect of creating %ProgramData%\gmgmt and generating fresh secrets/admin
+// credentials on first run) only matters for `install` - other commands only
+// need `name` to identify the existing service, so skip it for those to
+// avoid provisioning production secrets as a side effect of e.g. `status`.
 const projectRoot = path.join(__dirname, '..');
-const workingDirectory = ensureServiceEnvironment(projectRoot);
+const workingDirectory =
+  command && command.toLowerCase() === 'install'
+    ? ensureServiceEnvironment(projectRoot)
+    : getDataDir();
 const execPath = getBundledNodeExe(projectRoot);
 
 // NODE_ENV/PORT are deliberately not pinned via `env` - they would be baked

@@ -46,6 +46,10 @@ for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
     case '--arch':
       options.arch = args[++i];
+      if (!['x64', 'x86', 'both'].includes(options.arch)) {
+        console.error(`Invalid --arch value: ${options.arch}. Must be one of: x64, x86, both.`);
+        process.exit(1);
+      }
       break;
     case '--clean':
       options.clean = true;

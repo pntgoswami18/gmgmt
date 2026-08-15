@@ -11,7 +11,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 
 // Values from env.sample / the installer's seeded .env that must never be
 // used as real secrets - shipping a fixed, publicly-known JWT signing key
@@ -37,7 +37,7 @@ function getBundledNodeExe(projectRoot) {
 function ensureServiceEnvironment(projectRoot) {
   const dataDir = getDataDir();
   fs.mkdirSync(dataDir, { recursive: true });
-  lockDownDataDir(dataDir);
+  const locked = lockDownDataDir(dataDir);
   fs.mkdirSync(path.join(dataDir, 'data'), { recursive: true });
   fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
 
@@ -54,7 +54,13 @@ function ensureServiceEnvironment(projectRoot) {
     }
   }
 
-  ensureGeneratedSecrets(envPath, dataDir);
+  if (locked) {
+    ensureGeneratedSecrets(envPath, dataDir);
+  } else {
+    console.error(
+      `❌ Refusing to write secrets/credentials into ${dataDir} because its permissions could not be restricted.`
+    );
+  }
 
   return dataDir;
 }
@@ -71,14 +77,24 @@ function ensureServiceEnvironment(projectRoot) {
  * this fix), not just newly created ones.
  */
 function lockDownDataDir(dataDir) {
-  if (process.platform !== 'win32') return;
+  if (process.platform !== 'win32') return true;
   try {
-    execSync(
-      `icacls "${dataDir}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T`,
+    execFileSync(
+      'icacls',
+      [
+        dataDir,
+        '/inheritance:r',
+        '/grant:r',
+        '*S-1-5-18:(OI)(CI)F',
+        '*S-1-5-32-544:(OI)(CI)F',
+        '/T',
+      ],
       { stdio: 'pipe' }
     );
+    return true;
   } catch (error) {
     console.log(`⚠️  Failed to restrict permissions on ${dataDir}: ${error.message}`);
+    return false;
   }
 }
 

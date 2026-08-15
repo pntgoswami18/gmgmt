@@ -114,6 +114,11 @@ Section "GMgmt Core" SecCore
   nsExec::ExecToLog 'net stop GMgmt'
   Sleep 2000
 
+  ; On a reinstall/upgrade, remove the previous install tree before
+  ; extracting new files so files removed/renamed since the old build
+  ; (stale scripts\*.js, old native .node binaries, etc.) don't survive
+  ; alongside the new ones.
+  RMDir /r "$INSTDIR"
 
   ; Copy application files. Each `File /r "dir\*"` extracts relative to the
   ; CURRENT SetOutPath, flattening the source dir's own name away - so
@@ -200,6 +205,10 @@ Section "Windows Service" SecService
   ; children so an upgrade over a pre-hardening install is covered too.
   CreateDirectory "$APPDATA\gmgmt"
   nsExec::ExecToLog 'icacls "$APPDATA\gmgmt" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T'
+  Pop $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to lock down $APPDATA\gmgmt permissions (icacls exit code $0). Secrets in this folder may be readable by other local users."
+  ${EndIf}
   CreateDirectory "$APPDATA\gmgmt\data"
   CreateDirectory "$APPDATA\gmgmt\logs"
 
@@ -243,6 +252,8 @@ Section "Firewall Rule" SecFirewall
 
   ; Add firewall rule for the API/web port
   DetailPrint "Adding Windows Firewall rule..."
+  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="GMgmt API"'
+  Pop $0
   nsExec::ExecToLog 'netsh advfirewall firewall add rule name="GMgmt API" dir=in action=allow protocol=TCP localport=3001'
   Pop $0
   ${If} $0 != 0
@@ -251,6 +262,8 @@ Section "Firewall Rule" SecFirewall
 
   ; Add firewall rule for the biometric TCP listener (ESP32 door locks)
   DetailPrint "Adding Windows Firewall rule for biometric integration..."
+  nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="GMgmt Biometric"'
+  Pop $0
   nsExec::ExecToLog 'netsh advfirewall firewall add rule name="GMgmt Biometric" dir=in action=allow protocol=TCP localport=8080'
   Pop $0
   ${If} $0 != 0
