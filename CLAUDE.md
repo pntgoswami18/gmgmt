@@ -71,6 +71,7 @@ React (port 3000)
 - **`src/services/paymentDeactivationService.js`** — Runs every 6 hours (plus 2 AM daily sweep) to auto-deactivate members with overdue invoices. Triggers ESP32 cache invalidation on deactivation.
 - **`src/services/settingsCache.js`** — In-memory cache for app settings to avoid repeated DB reads. Initialized at server startup.
 - **`src/services/emailService.js`** — Nodemailer integration for welcome emails, booking confirmations, payment notifications.
+- **`src/services/deviceDiscoveryService.js`** — Browses mDNS (`_gmgmt-doorlock._tcp`) for ESP32 devices advertising themselves, so the frontend's Add Device flow can find a device before its first heartbeat. Only started when `ENABLE_BIOMETRIC=true`. Not the source of truth for device identity — that's still the `devices` table, populated by heartbeats/webhooks.
 
 ### Database Schema
 Schema is defined and auto-migrated in `src/config/sqlite.js`. Key tables: `members`, `attendance`, `classes`, `class_schedules`, `bookings`, `membership_plans`, `invoices`, `payments`, `member_biometrics`, `biometric_events`, `firmware_versions`, `security_logs`, `referrals`, `settings`.
@@ -82,6 +83,8 @@ Large monolithic components handle full features — `Member.js` (~140KB), `Biom
 
 ### ESP32 Door Lock
 Firmware lives in `esp32_door_lock/esp32_door_lock.ino`. The device connects to the backend TCP port, sends JSON events (fingerprint scans, access results), and receives commands (remote unlock, enroll). OTA firmware updates are managed via the `firmware_versions` table and served as binary files from `public/uploads/`.
+
+**WiFi provisioning**: if the device's stored/config.h WiFi credentials fail to connect, it falls back to a WiFiManager captive portal (`GMGMT-DoorLock-XXXX` AP) instead of going dark — no re-flash needed to move a device to new WiFi. The portal verifies backend reachability via `GET /api/biometric/ping` (unauthenticated — see `PUBLIC_PATHS` in `src/app.js`) before exiting. Requires the `WiFiManager` (tzapu) Arduino library in addition to the existing ones — see `esp32_door_lock/config.h.example`.
 
 ## Environment Variables
 

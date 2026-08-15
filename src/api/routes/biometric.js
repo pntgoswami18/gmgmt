@@ -19,7 +19,9 @@ const {
   startRemoteEnrollment,
   getDeviceStatus,
   getAllDevices,
+  getDiscoveredDevices,
   esp32Webhook,
+  pingBiometricService,
   // Hybrid cache endpoints
   validateBiometricId,
   updateMemberCache,
@@ -34,6 +36,10 @@ const {
   getModelManifest,
   getFaceConfig,
 } = require('../controllers/faceBiometricController');
+
+// Reachability probe for ESP32 WiFi provisioning (captive portal) — see
+// PUBLIC_PATHS in app.js for why this skips auth entirely.
+router.get('/ping', pingBiometricService);
 
 // System status and info
 router.get('/status', getSystemStatus);
@@ -61,6 +67,7 @@ router.post('/devices/:deviceId/unlock', unlockDoorRemotely);
 router.post('/devices/:deviceId/enroll', startRemoteEnrollment);
 router.get('/devices/:deviceId/status', getDeviceStatus);
 router.get('/devices', getAllDevices);
+router.get('/devices/discover', getDiscoveredDevices);
 
 // ESP32 Webhook - receives data from ESP32 devices
 router.post('/esp32-webhook', esp32Webhook);

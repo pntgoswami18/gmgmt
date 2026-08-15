@@ -1096,6 +1096,18 @@ const getDeviceStatus = async (req, res) => {
   }
 };
 
+/**
+ * Trivial reachability check called by an ESP32 device's WiFi provisioning
+ * portal (WiFiManager captive portal, see esp32_door_lock.ino) before it
+ * exits and tears down its AP. Deliberately unauthenticated: at that point
+ * the device has no working X-Device-Secret/session context yet, and the
+ * whole point is letting an unconfigured device confirm it can reach this
+ * server before committing to the new WiFi credentials.
+ */
+const pingBiometricService = (req, res) => {
+  res.status(200).json({ success: true, message: 'pong' });
+};
+
 const getAllDevices = async (req, res) => {
   try {
     if (!biometricIntegration) {
@@ -1141,6 +1153,40 @@ const getAllDevices = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get devices',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Devices currently visible on the LAN via mDNS (see deviceDiscoveryService)
+ * that are not yet in the `devices` table — i.e. freshly provisioned but
+ * haven't sent a heartbeat/webhook yet. Once a device sends its first
+ * webhook it self-registers into `devices` and disappears from this list
+ * (getAllDevices/the existing device list picks it up instead), so this
+ * endpoint is only meant for the brief "just provisioned" window in the
+ * frontend's Add Device flow.
+ */
+const getDiscoveredDevices = async (req, res) => {
+  try {
+    const deviceDiscoveryService = require('../../services/deviceDiscoveryService');
+    const discovered = deviceDiscoveryService.getDiscoveredDevices();
+
+    if (discovered.length === 0) {
+      return res.json({ success: true, devices: [] });
+    }
+
+    const knownResult = await pool.query('SELECT device_id FROM devices');
+    const knownIds = new Set((knownResult.rows || []).map((r) => r.device_id));
+
+    const unclaimed = discovered.filter((d) => !knownIds.has(d.device_id));
+
+    res.json({ success: true, devices: unclaimed });
+  } catch (error) {
+    logger.error({ err: error }, 'error getting discovered devices');
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get discovered devices',
       error: error.message,
     });
   }
@@ -2261,7 +2307,9 @@ module.exports = {
   startRemoteEnrollment,
   getDeviceStatus,
   getAllDevices,
+  getDiscoveredDevices,
   esp32Webhook,
+  pingBiometricService,
   // Hybrid cache endpoints
   validateBiometricId,
   updateMemberCache,
