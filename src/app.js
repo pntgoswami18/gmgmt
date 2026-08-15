@@ -378,6 +378,13 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// Only auto-start when run directly (`node src/app.js` / `npm start`), not
+// when required as a module — lets tests `require('../../app')` to exercise
+// the real Express middleware stack without booting the real DB, WebSocket
+// server, and long-lived background intervals (payment deactivation, etc.)
+// as a side effect of require().
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = app;

@@ -78,3 +78,51 @@ test('getDiscoveredDevices returns an empty list when nothing is currently visib
     deviceDiscoveryService.getDiscoveredDevices = original;
   }
 });
+
+test('getDiscoveredDevices returns an empty unclaimed list when every discovered device is already known (exercises the filter, not the length===0 short-circuit)', async () => {
+  db.prepare("INSERT INTO devices (device_id, status) VALUES ('DOOR_KNOWN_1', 'online')").run();
+  db.prepare("INSERT INTO devices (device_id, status) VALUES ('DOOR_KNOWN_2', 'online')").run();
+
+  const original = deviceDiscoveryService.getDiscoveredDevices;
+  deviceDiscoveryService.getDiscoveredDevices = () => [
+    { device_id: 'DOOR_KNOWN_1', ip_address: '10.0.0.5', firmware_version: '1.0' },
+    { device_id: 'DOOR_KNOWN_2', ip_address: '10.0.0.6', firmware_version: '1.0' },
+  ];
+
+  try {
+    const { req, res, getJson, getStatus } = mockReqRes();
+    await getDiscoveredDevices(req, res);
+
+    assert.equal(getStatus(), 200);
+    const payload = getJson();
+    assert.equal(payload.success, true);
+    assert.deepEqual(payload.devices, []);
+  } finally {
+    deviceDiscoveryService.getDiscoveredDevices = original;
+  }
+});
+
+test('getDiscoveredDevices returns 500 when the devices-table lookup fails', async () => {
+  const originalDiscovered = deviceDiscoveryService.getDiscoveredDevices;
+  deviceDiscoveryService.getDiscoveredDevices = () => [
+    { device_id: 'DOOR_NEW', ip_address: '10.0.0.6', firmware_version: '1.0' },
+  ];
+
+  const { pool } = require('../../../config/sqlite');
+  const originalPoolQuery = pool.query;
+  pool.query = async () => {
+    throw new Error('database is locked');
+  };
+
+  try {
+    const { req, res, getJson, getStatus } = mockReqRes();
+    await getDiscoveredDevices(req, res);
+
+    assert.equal(getStatus(), 500);
+    const payload = getJson();
+    assert.equal(payload.success, false);
+  } finally {
+    deviceDiscoveryService.getDiscoveredDevices = originalDiscovered;
+    pool.query = originalPoolQuery;
+  }
+});

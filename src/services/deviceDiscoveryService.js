@@ -12,6 +12,13 @@ const logger = require('../utils/logger').child({ service: 'deviceDiscoveryServi
 // Entries expire on their own via bonjour-service's 'down' event (TTL
 // expiry / explicit goodbye packet) rather than a manual sweep, since that
 // mirrors actual LAN presence more closely than a fixed timeout would.
+// Bounds memory growth from a flood of forged/duplicate mDNS announcements —
+// mDNS carries no authentication, so any host on the LAN can broadcast
+// arbitrary up/down events (see class comment); this cap keeps that a
+// nuisance rather than an unbounded-memory DoS. Far above any real
+// deployment's device count.
+const MAX_DISCOVERED_DEVICES = 200;
+
 class DeviceDiscoveryService {
   constructor() {
     this._bonjour = null;
@@ -53,6 +60,11 @@ class DeviceDiscoveryService {
   _handleUp(service) {
     const deviceId = service.txt && service.txt.device_id;
     if (!deviceId) return; // not one of ours, or advertised before TXT records were set
+
+    if (!this._devices.has(deviceId) && this._devices.size >= MAX_DISCOVERED_DEVICES) {
+      logger.warn({ deviceId }, 'discovered device cap reached — ignoring new mDNS announcement');
+      return;
+    }
 
     const ip = (service.addresses || []).find((a) => a.includes('.')) || service.addresses?.[0];
 
