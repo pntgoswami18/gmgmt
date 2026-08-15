@@ -60,6 +60,13 @@ function ensureServiceEnvironment(projectRoot) {
     console.error(
       `❌ Refusing to write secrets/credentials into ${dataDir} because its permissions could not be restricted.`
     );
+    // Callers (service-install.js, service-manage.js) use the returned
+    // dataDir directly as the service's workingDirectory without checking
+    // for a hardening failure - installing/starting the service against a
+    // directory that may still have broken/world-readable ACLs would run
+    // it against a state this function was supposed to prevent. Abort here
+    // instead of returning a dataDir that looks the same either way.
+    process.exit(1);
   }
 
   return dataDir;
@@ -72,25 +79,32 @@ function ensureServiceEnvironment(projectRoot) {
  * and the member/biometric SQLite DB. This is the single enforcement
  * point: both the NSIS installer's service-install step and a bare
  * `npm run service:install` funnel through ensureServiceEnvironment, so
- * neither path can create the directory without hardening it first. /T
- * re-applies to any pre-existing children (e.g. from an install predating
- * this fix), not just newly created ones.
+ * neither path can create the directory without hardening it first.
+ *
+ * Two icacls calls, not one - confirmed on real hardware that combining
+ * them breaks existing files. `/grant:r "SID:(OI)(CI)F" /T` applies the
+ * (OI)(CI) *container*-inherit flags directly to every object the /T walk
+ * touches, including pre-existing leaf FILES (e.g. a gmgmt.sqlite from an
+ * install predating this fix) - Windows doesn't accept those flags on a
+ * non-container object, and the grant silently fails to attach, leaving
+ * the file with an empty DACL that denies even SYSTEM. Splitting into (1)
+ * set the inheritable grant on the directory itself, then (2) `/reset /T`
+ * to make every descendant re-inherit cleanly from it, avoids ever
+ * applying container flags to a file directly.
  */
 function lockDownDataDir(dataDir) {
   if (process.platform !== 'win32') return true;
   try {
     execFileSync(
       'icacls',
-      [
-        dataDir,
-        '/inheritance:r',
-        '/grant:r',
-        '*S-1-5-18:(OI)(CI)F',
-        '*S-1-5-32-544:(OI)(CI)F',
-        '/T',
-      ],
+      [dataDir, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'],
       { stdio: 'pipe' }
     );
+    // Target dataDir\* (contents only), not dataDir itself - /reset on
+    // dataDir would revert the explicit grant just set above back to
+    // inheriting from dataDir's own parent (%ProgramData%, not locked
+    // down), undoing the lockdown before it ever takes effect.
+    execFileSync('icacls', [`${dataDir}\\*`, '/reset', '/T'], { stdio: 'pipe' });
     return true;
   } catch (error) {
     console.log(`⚠️  Failed to restrict permissions on ${dataDir}: ${error.message}`);

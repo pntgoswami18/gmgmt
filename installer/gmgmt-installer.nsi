@@ -201,13 +201,31 @@ Section "Windows Service" SecService
   ; paths that don't go through this NSIS section at all) applies the same
   ; icacls lockdown before writing any secrets. This early call is
   ; defense-in-depth for the .env write immediately below, in case that
-  ; ever changes to include real values. /T re-applies to any pre-existing
-  ; children so an upgrade over a pre-hardening install is covered too.
+  ; ever changes to include real values.
+  ;
+  ; Two separate icacls calls, not one with /T - confirmed on real
+  ; hardware that granting "SID:(OI)(CI)F" (container-inherit flags)
+  ; directly to every object a /T walk touches breaks pre-existing leaf
+  ; FILES (e.g. gmgmt.sqlite from an install predating this fix): Windows
+  ; doesn't accept container-inherit flags on a non-container object, so
+  ; the grant silently fails to attach and the file is left with an empty
+  ; DACL that denies even SYSTEM. Set the inheritable grant on the
+  ; directory itself first, then /reset /T so every descendant - old or
+  ; new - re-inherits cleanly from it instead of being granted directly.
   CreateDirectory "$APPDATA\gmgmt"
-  nsExec::ExecToLog 'icacls "$APPDATA\gmgmt" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T'
+  nsExec::ExecToLog 'icacls "$APPDATA\gmgmt" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"'
   Pop $0
   ${If} $0 != 0
     MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to lock down $APPDATA\gmgmt permissions (icacls exit code $0). Secrets in this folder may be readable by other local users."
+  ${EndIf}
+  ; Reset $APPDATA\gmgmt\* (contents only), not $APPDATA\gmgmt itself - /reset
+  ; on the folder itself would revert the explicit grant set above back to
+  ; inheriting from $APPDATA's own (unsecured) default DACL, undoing the
+  ; lockdown before it ever takes effect.
+  nsExec::ExecToLog 'icacls "$APPDATA\gmgmt\*" /reset /T'
+  Pop $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Failed to finish locking down $APPDATA\gmgmt permissions (icacls exit code $0). Secrets in this folder may be readable by other local users."
   ${EndIf}
   CreateDirectory "$APPDATA\gmgmt\data"
   CreateDirectory "$APPDATA\gmgmt\logs"
