@@ -524,109 +524,90 @@ Once the ESP32 has been flashed over USB at least once with the OTA partition sc
 
 > **📋 ESP32 Pin Reference**: For detailed pin capabilities and limitations, see the [ESP32 Pin Reference](http://wiki.fluidnc.com/en/hardware/esp32_pin_reference) documentation.
 
-```text
-ESP32 Pin Connections Schematic
-================================
+**Color legend** (used across every diagram in this section): 🔴 power · ⚫ ground · 🔵 GPIO / data signal · 🟠 high-voltage (12V) · component LEDs are colored to match the physical LED they drive.
 
-Power Supply:
-┌─────────────────┐    ┌─────────────────┐
-│   12V Power     │    │     5V Power    │
-│   Supply        │    │    Supply       │
-└─────────┬───────┘    └─────────┬───────┘
-          │                      │
-          │                      │
-          ▼                      ▼
-    ┌─────────────┐        ┌─────────────┐
-    │   Door Lock │        │   R307      │
-    │   Relay     │        │  Fingerprint│
-    │             │        │   Sensor    │
-    └─────┬───────┘        └─────┬───────┘
-          │                      │
-          │                      │
-          │                      │
-          ▼                      ▼
-    ┌─────-───────┐        ┌─────-───────┐
-    │   Pin 18    │        │   Pin 16    │
-    │  (Relay)    │        │   (RX)      │
-    └─────────────┘        └─────────────┘
+```mermaid
+flowchart TD
+    classDef power fill:#c0392b,stroke:#7b241c,color:#fff,stroke-width:2px
+    classDef ground fill:#2c3e50,stroke:#1b2631,color:#fff,stroke-width:2px
+    classDef signal fill:#2980b9,stroke:#1b4f72,color:#fff,stroke-width:2px
+    classDef highv fill:#e67e22,stroke:#9c5b0f,color:#fff,stroke-width:2px
+    classDef component fill:#ecf0f1,stroke:#95a5a6,color:#2c3e50,stroke-width:2px
+    classDef greenled fill:#27ae60,stroke:#1e8449,color:#fff,stroke-width:2px
+    classDef redled fill:#e74c3c,stroke:#943126,color:#fff,stroke-width:2px
+    classDef blueled fill:#3498db,stroke:#21618c,color:#fff,stroke-width:2px
 
-ESP32 Development Board:
-┌─────────────────────────────────────────────────┐
-│                                                 │
-│  ┌─────────────────────────────────────────┐    │
-│  │              ESP32                      │    │
-│  │                                         │    │
-│  │  ┌─────-┐ ┌────────┐ ┌─────┐ ┌─────┐    │    │
-│  │  │Pin4  │ │Pin5    │ │Pin16│ │Pin17│    │    │
-│  │  │Enroll│ │Override│ │RX   │ │TX   │    │    │
-│  │  └─────-┘ └────────┘ └─────┘ └─────┘    │    │
-│  │                                         │    │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐        │    │
-│  │  │Pin18│ │Pin19│ │Pin21│ │Pin22│        │    │
-│  │  │Relay│ │Green│ │Red  │ │Blue │        │    │
-│  │  │     │ │LED  │ │LED  │ │LED  │        │    │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘        │    │
-│  │                                         │    │
-│  │  ┌─────-┐                               │    │
-│  │  │Pin23 │                               │    │
-│  │  │Buzzer│                               │    │
-│  │  └─────-┘                               │    │
-│  └─────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────┘
+    PWR12["12V Power Supply"]:::power --> RELAY["Door Lock Relay Module"]:::component
+    PWR5["5V Power Supply"]:::power --> SENSOR["R307 Fingerprint Sensor"]:::component
+    GNDALL["Common Ground"]:::ground
 
-Detailed Pin Mapping:
-┌─────────────┬─────────────┬─────────────────────┐
-│   ESP32 Pin │ Component   │     Connection      │
-├─────────────┼─────────────┼─────────────────────┤
-│   Pin 4     │ Enroll      │ Push Button (GND)   │
-│   Pin 5     │ Override    │ Push Button (GND)   │
-│   Pin 16    │ R307 RX     │ Sensor TX           │
-│   Pin 17    │ R307 TX     │ Sensor RX           │
-│   Pin 18    │ Door Lock   │ Relay Module        │
-│   Pin 19    │ Green LED   │ LED + Resistor      │
-│   Pin 21    │ Red LED     │ LED + Resistor      │
-│   Pin 22    │ Blue LED    │ LED + Resistor      │
-│   Pin 23    │ Buzzer      │ Buzzer Module       │
-│   VIN       │ Power       │ 5V Supply           │
-│   GND       │ Ground      │ Common Ground       │
-│   3.3V      │ Logic       │ 3.3V Logic Level    │
-└─────────────┴─────────────┴─────────────────────┘
+    subgraph ESP32["ESP32 Dev Board"]
+        direction LR
+        P4["GPIO 4 — Enroll"]:::signal
+        P5["GPIO 5 — Override"]:::signal
+        P16["GPIO 16 — RX"]:::signal
+        P17["GPIO 17 — TX"]:::signal
+        P18["GPIO 18 — Relay"]:::signal
+        P19["GPIO 19 — Green LED"]:::signal
+        P21["GPIO 21 — Red LED"]:::signal
+        P22["GPIO 22 — Blue LED"]:::signal
+        P23["GPIO 23 — Buzzer"]:::signal
+    end
 
-
-Wiring Notes:
-• All components share a common ground (GND)
-• R307 sensor operates at 5V but ESP32 pins are 3.3V tolerant
-• Relay module requires 12V for door lock operation
-• LEDs require current-limiting resistors (220Ω recommended)
-• Buttons connect between GPIO pins and GND
-• Buzzer can be active (3.3V) or passive (requires driver circuit)
+    ENROLLBTN["Enroll Button"]:::component --> P4
+    OVERRIDEBTN["Override Button"]:::component --> P5
+    SENSOR -- "TX (sensor→ESP32)" --> P16
+    P17 -- "TX (ESP32→sensor RX)" --> SENSOR
+    P18 --> RELAY
+    P19 --> GLED["Green LED"]:::greenled
+    P21 --> RLED["Red LED"]:::redled
+    P22 --> BLED["Blue LED"]:::blueled
+    P23 --> BUZZ["Buzzer"]:::component
+    GNDALL -.shared by all components.- ESP32
 ```
+
+**Detailed pin mapping**
+
+| ESP32 Pin | Component | Connection      | Wire/Signal role |
+|-----------|-----------|------------------|-------------------|
+| Pin 4     | Enroll    | Push Button → GND | 🔵 signal |
+| Pin 5     | Override  | Push Button → GND | 🔵 signal |
+| Pin 16    | R307 RX   | Sensor TX (yellow) | 🔵 signal |
+| Pin 17    | R307 TX   | Sensor RX (green)  | 🔵 signal |
+| Pin 18    | Door Lock | Relay Module IN   | 🔵 signal |
+| Pin 19    | Green LED | LED + Resistor     | 🟢 LED |
+| Pin 21    | Red LED   | LED + Resistor     | 🔴 LED |
+| Pin 22    | Blue LED  | LED + Resistor     | 🔵 LED |
+| Pin 23    | Buzzer    | Buzzer Module      | 🔵 signal |
+| VIN       | Power     | 5V Supply          | 🔴 power |
+| GND       | Ground    | Common Ground      | ⚫ ground |
+| 3.3V      | Logic     | 3.3V Logic Level   | 🔴 power |
+
+**Wiring notes**
+- All components share a common ground (GND)
+- R307 sensor operates at 5V but ESP32 pins are 3.3V tolerant
+- Relay module requires 12V for door lock operation
+- LEDs require current-limiting resistors (220Ω recommended)
+- Buttons connect between GPIO pins and GND
+- Buzzer can be active (3.3V) or passive (requires driver circuit)
 
 ##### 4.6 Push Button Connection Schematics
 
 ###### Enroll Button (Pin 4) - Fingerprint Enrollment Control
 
-```text
-Enroll Button Wiring Diagram (Pin 4)
-====================================
+```mermaid
+flowchart LR
+    classDef signal fill:#2980b9,stroke:#1b4f72,color:#fff,stroke-width:2px
+    classDef ground fill:#2c3e50,stroke:#1b2631,color:#fff,stroke-width:2px
+    classDef component fill:#ecf0f1,stroke:#95a5a6,color:#2c3e50,stroke-width:2px
 
-┌────────────────────────────────────────────────┐
-│                Enroll Button                   │
-│  ┌─────────────────────────────────────────┐   │
-│  │                                         │   │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐        │   │
-│  │  │     │ │     │ │     │ │     │        │   │
-│  │  │     │ │     │ │     │ │     │        │   │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘        │   │
-│  └─────────────────────────────────────────┘   │
-└────────────────────────────────────────────────┘
-         │         │         │         │
-         │         │         │         │
-         ▼         ▼         ▼         ▼
-    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
-    │ Pin 4   │ │  GND    │ │         │ │         │
-    │(GPIO4)  │ │(Common) │ │         │ │         │
-    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+    BTN["Enroll Button<br/>(momentary, normally open)"]:::component
+    P4["ESP32 GPIO 4<br/>(internal pull-up)"]:::signal
+    GND["GND<br/>(common)"]:::ground
+
+    P4 ---|terminal A| BTN
+    BTN ---|terminal B| GND
+```
 
 Connection Details:
 • Pin 4 (GPIO4) → One terminal of push button
@@ -657,32 +638,22 @@ Button Specifications:
 • Rating: 3.3V, 50mA minimum
 • Mounting: Panel mount or PCB mount
 • Actuation force: 100-200g typical
-```
 
 ###### Override Button (Pin 5) - Emergency Door Unlock
 
-```text
-Override Button Wiring Diagram (Pin 5)
-=====================================
+```mermaid
+flowchart LR
+    classDef signal fill:#2980b9,stroke:#1b4f72,color:#fff,stroke-width:2px
+    classDef ground fill:#2c3e50,stroke:#1b2631,color:#fff,stroke-width:2px
+    classDef component fill:#ecf0f1,stroke:#95a5a6,color:#2c3e50,stroke-width:2px
 
-┌──────────────────────────────────────────────┐
-│               Override Button                │
-│  ┌───────────────────────────────────────┐   │
-│  │                                       │   │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
-│  │  │     │ │     │ │     │ │     │      │   │
-│  │  │     │ │     │ │     │ │     │      │   │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  └───────────────────────────────────────┘   │
-└──────────────────────────────────────────────┘
-         │         │         │         │
-         │         │         │         │
-         ▼         ▼         ▼         ▼
-    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
-    │ Pin 5   │ │  GND    │ │         │ │         │
-    │(GPIO5)  │ │(Common) │ │         │ │         │
-    └─────────┘ └─────────┘ └─────────┘ └─────────┘
+    BTN["Override Button<br/>(momentary, normally open)"]:::component
+    P5["ESP32 GPIO 5<br/>(internal pull-up)"]:::signal
+    GND["GND<br/>(common)"]:::ground
 
+    P5 ---|terminal A| BTN
+    BTN ---|terminal B| GND
+```
 
 Connection Details:
 • Pin 5 (GPIO5) → One terminal of push button
@@ -721,7 +692,6 @@ Button Specifications:
 • Actuation force: 100-200g typical
 • Color: Red recommended for emergency override
 • Protection: Consider adding protective cover or key switch
-```
 
 ##### 4.7 Button Integration with ESP32 Firmware
 
@@ -884,125 +854,85 @@ void loop() {
 
 ###### R307 Fingerprint Sensor Connection
 
-```text
-R307 Fingerprint Sensor Wiring Diagram
-======================================
+```mermaid
+flowchart LR
+    classDef power fill:#c0392b,stroke:#7b241c,color:#fff,stroke-width:2px
+    classDef ground fill:#2c3e50,stroke:#1b2631,color:#fff,stroke-width:2px
+    classDef txwire fill:#f1c40f,stroke:#9a7d0a,color:#000,stroke-width:2px
+    classDef rxwire fill:#27ae60,stroke:#1e8449,color:#fff,stroke-width:2px
 
-┌──────────────────────────────────────────────┐
-│                    R307 Sensor               │
-│  ┌───────────────────────────────────────┐   │
-│  │                                       │   │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
-│  │  │ VCC │ │ TX  │ │ RX  │ │ GND │      │   │
-│  │  │     │ │     │ │     │ │     │      │   │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  └───────────────────────────────────────┘   │
-└──────────────────────────────────────────────┘
-         │         │         │         │
-         │         │         │         │
-         ▼         ▼         ▼         ▼
-    ┌─────────┐ ┌────────┐ ┌────────┐ ┌─────────┐
-    │   5V    │ │ Pin 16 │ │ Pin 17 │ │  GND    │
-    │ Supply  │ │ (RX)   │ │ (TX)   │ │(Common) │
-    └─────────┘ └────────┘ └────────┘ └─────────┘
+    VCC["R307 VCC<br/>(red wire)"]:::power -->|5V| PWR["5V Supply"]:::power
+    TX["R307 TX<br/>(yellow wire)"]:::txwire -->|"sensor → ESP32"| RX16["ESP32 GPIO 16 (RX)"]:::txwire
+    ESPTX["ESP32 GPIO 17 (TX)"]:::rxwire -->|"ESP32 → sensor"| RX["R307 RX<br/>(green wire)"]:::rxwire
+    GND1["R307 GND<br/>(black wire)"]:::ground -->|common ground| GND2["ESP32 GND"]:::ground
+```
 
 Connection Details:
-• VCC → 5V Power Supply (from ESP32 VIN or external 5V)
-• TX  → ESP32 Pin 16 (RX) - Sensor sends data to ESP32
-• RX  → ESP32 Pin 17 (TX) - ESP32 sends commands to sensor
-• GND → Common Ground (shared with ESP32 GND)
+- VCC (red) → 5V Power Supply (from ESP32 VIN or external 5V)
+- TX (yellow) → ESP32 Pin 16 (RX) - Sensor sends data to ESP32
+- RX (green) → ESP32 Pin 17 (TX) - ESP32 sends commands to sensor
+- GND (black) → Common Ground (shared with ESP32 GND)
+
+> Some R307 cables also break out white and blue wires (touch-wake / 3.3V) for capacitive-touch variants — pictured on the sensor's back-side JST connector. The current firmware only wires the 4 UART pins above; leave white/blue unconnected unless you add touch-wake support.
 
 Note: R307 operates at 5V logic level, but ESP32 pins are 3.3V tolerant
-```
 
 ###### 5V Relay Module Connection
 
-```text
-5V Relay Module Wiring Diagram
-==============================
+```mermaid
+flowchart LR
+    classDef power fill:#c0392b,stroke:#7b241c,color:#fff,stroke-width:2px
+    classDef ground fill:#2c3e50,stroke:#1b2631,color:#fff,stroke-width:2px
+    classDef signal fill:#2980b9,stroke:#1b4f72,color:#fff,stroke-width:2px
+    classDef highv fill:#e67e22,stroke:#9c5b0f,color:#fff,stroke-width:2px
 
-┌──────────────────────────────────────────────┐
-│                 5V Relay Module              │
-│  ┌───────────────────────────────────────┐   │
-│  │                                       │   │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
-│  │  │ VCC │ │ GND │ │ IN  │ │ COM │      │   │
-│  │  │     │ │     │ │     │ │     │      │   │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  └───────────────────────────────────────┘   │
-└──────────────────────────────────────────────┘
-         │         │         │         │
-         │         │         │         │
-         ▼         ▼         ▼         ▼
-    ┌─────────┐ ┌─────────┐ ┌────────┐ ┌────────┐
-    │   5V    │ │  GND    │ │ Pin 18 │ │ 12V    │
-    │ Supply  │ │(Common) │ │(Signal)│ │Supply  │
-    └─────────┘ └─────────┘ └────────┘ └────────┘
+    VCC["Relay VCC"]:::power --> PWR5["5V Supply"]:::power
+    GND1["Relay GND"]:::ground --> GND2["Common Ground"]:::ground
+    IN["Relay IN"]:::signal --> P18["ESP32 GPIO 18"]:::signal
+    COM["Relay COM"]:::highv --> PWR12["12V Supply"]:::highv
+```
 
 Connection Details:
-• VCC → 5V Power Supply (from ESP32 VIN or external 5V)
-• GND → Common Ground (shared with ESP32 GND)
-• IN  → ESP32 Pin 18 (Digital Output Signal)
-• COM → 12V Power Supply (for relay coil operation)
+- VCC → 5V Power Supply (from ESP32 VIN or external 5V)
+- GND → Common Ground (shared with ESP32 GND)
+- IN → ESP32 Pin 18 (Digital Output Signal)
+- COM → 12V Power Supply (for relay coil operation)
 
 Relay Operation:
-• When Pin 18 is HIGH (3.3V), relay activates (NO contact closes)
-• When Pin 18 is LOW (0V), relay deactivates (NO contact opens)
-• Relay provides electrical isolation between ESP32 and door lock circuit
-```
+- When Pin 18 is HIGH (3.3V), relay activates (NO contact closes)
+- When Pin 18 is LOW (0V), relay deactivates (NO contact opens)
+- Relay provides electrical isolation between ESP32 and door lock circuit
 
 ###### Electromagnetic Door Lock Circuit
 
-```text
-Electromagnetic Door Lock Circuit
-================================
+```mermaid
+flowchart TD
+    classDef highv fill:#e67e22,stroke:#9c5b0f,color:#fff,stroke-width:2px
+    classDef ground fill:#2c3e50,stroke:#1b2631,color:#fff,stroke-width:2px
+    classDef relay fill:#8e44ad,stroke:#5b2c6f,color:#fff,stroke-width:2px
 
-┌──────────────────────────────────────────────┐
-│               12V Power Supply               │
-│  ┌───────────────────────────────────────┐   │
-│  │                                       │   │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │   │
-│  │  │ +12V│ │     │ │     │ │ GND │      │   │
-│  │  │     │ │     │ │     │ │     │      │   │
-│  │  └─────┘ └─────┘ └─────┘ └─────┘      │   │
-│  └───────────────────────────────────────┘   │
-└──────────────────────────────────────────────┘
-         │                           │
-         │                           │
-         ▼                           ▼
-    ┌─────────┐               ┌─────────┐
-    │ Relay   │               │  GND    │
-    │  NO     │               │(Common) │
-    │Contact  │               │         │
-    └────┬────┘               └────┬────┘
-         │                         │
-         │                         │
-         ▼                         ▼
-    ┌─────────┐               ┌─────────┐
-    │Electro- │               │Electro- │
-    │magnetic │               │magnetic │
-    │Door Lock│               │Door Lock│
-    │  +12V   │               │  GND    │
-    └─────────┘               └─────────┘
+    PWR["12V+ Supply"]:::highv --> NO["Relay NO Contact"]:::relay
+    NO --> LOCKPOS["Door Lock +12V Terminal"]:::highv
+    PWRN["12V- / Common Ground"]:::ground --> LOCKGND["Door Lock GND Terminal"]:::ground
+```
 
 Connection Details:
-• 12V+ → Relay NO (Normally Open) Contact
-• Relay NO Contact → Electromagnetic Door Lock +12V Terminal
-• 12V- → Common Ground (shared with ESP32 GND)
-• Door Lock GND → Common Ground
+- 12V+ → Relay NO (Normally Open) Contact
+- Relay NO Contact → Electromagnetic Door Lock +12V Terminal
+- 12V- → Common Ground (shared with ESP32 GND)
+- Door Lock GND → Common Ground
 
 Circuit Operation:
-• When relay activates (Pin 18 HIGH), NO contact closes
-• 12V flows through relay to door lock, activating the electromagnet
-• Door lock releases (unlocks) when electromagnet is energized
-• When relay deactivates (Pin 18 LOW), NO contact opens
-• Door lock remains locked (electromagnet de-energized)
+- When relay activates (Pin 18 HIGH), NO contact closes
+- 12V flows through relay to door lock, activating the electromagnet
+- Door lock releases (unlocks) when electromagnet is energized
+- When relay deactivates (Pin 18 LOW), NO contact opens
+- Door lock remains locked (electromagnet de-energized)
 
 Safety Features:
-• Relay provides electrical isolation between low-voltage ESP32 and high-voltage door lock
-• Door lock automatically locks when power is removed (fail-safe operation)
-• No current flows through door lock when relay is inactive
-```
+- Relay provides electrical isolation between low-voltage ESP32 and high-voltage door lock
+- Door lock automatically locks when power is removed (fail-safe operation)
+- No current flows through door lock when relay is inactive
 
 #### 5. Configuration Management
 
