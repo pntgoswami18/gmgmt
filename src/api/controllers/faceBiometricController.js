@@ -523,14 +523,35 @@ const getModelManifest = async (req, res) => {
   }
 };
 
+// Models are deployed asynchronously at server boot (see src/app.js) — this
+// lets the kiosk tell "still downloading, retry shortly" apart from
+// "deployed but disabled" instead of just getting a bare 404 from
+// GET /api/biometric/face/model-manifest.
+//
+// manifest.json is written last by deploy-models.js's deploy(), after the
+// litert-wasm/mediapipe-wasm runtime directories have already been removed
+// and recreated — so checking the manifest alone can't tell a fully deployed
+// public/models apart from one mid-redeploy with a stale manifest still on
+// disk but its wasm directories briefly empty/missing. Check those too.
+function areModelsReady() {
+  const modelsDir = path.join(__dirname, '../../../public/models');
+  const manifestPath = path.join(modelsDir, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) return false;
+  for (const dir of ['litert-wasm', 'mediapipe-wasm']) {
+    const dirPath = path.join(modelsDir, dir);
+    if (!fs.existsSync(dirPath)) return false;
+    try {
+      if (fs.readdirSync(dirPath).length === 0) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 // GET /api/biometric/face/config — check-in station bootstrap config.
 const getFaceConfig = async (req, res) => {
   try {
-    // Models are deployed asynchronously at server boot (see src/app.js) —
-    // this lets the kiosk tell "still downloading, retry shortly" apart from
-    // "deployed but disabled" instead of just getting a bare 404 from
-    // GET /api/biometric/face/model-manifest.
-    const manifestPath = path.join(__dirname, '../../../public/models/manifest.json');
     res.json({
       success: true,
       data: {
@@ -541,7 +562,7 @@ const getFaceConfig = async (req, res) => {
         checkoutMinDwellMinutes: settingsCache.getInt('face_checkout_min_dwell_minutes', 15),
         doorDeviceConfigured: settingsCache.get('face_door_device_id', '') !== '',
         deviceSecretConfigured: !!process.env.DEVICE_SHARED_SECRET,
-        modelsReady: fs.existsSync(manifestPath),
+        modelsReady: areModelsReady(),
       },
     });
   } catch (error) {

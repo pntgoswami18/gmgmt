@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
 const { setup, teardown } = require('./testDb');
 const settingsCache = require('../settingsCache');
 
@@ -652,6 +654,42 @@ test('getFaceStatus and getFaceConfig report current state', async () => {
   assert.equal(res._body.data.matchThreshold, 0.55);
   assert.equal(res._body.data.livenessMode, 'challenge');
   assert.equal(typeof res._body.data.deviceSecretConfigured, 'boolean');
+});
+
+test('getFaceConfig: modelsReady reflects presence of deployed model assets, not just manifest.json', async () => {
+  const modelsDir = path.join(__dirname, '../../../public/models');
+  const backupDir = `${modelsDir}.test-backup`;
+
+  const hadExisting = fs.existsSync(modelsDir);
+  if (hadExisting) fs.renameSync(modelsDir, backupDir);
+
+  try {
+    fs.mkdirSync(modelsDir, { recursive: true });
+
+    // No manifest.json at all -> not ready.
+    let res = mockRes();
+    await faceController.getFaceConfig({}, res);
+    assert.equal(res._body.data.modelsReady, false);
+
+    // manifest.json present but the wasm runtime dirs are missing (the
+    // mid-redeploy / stale-manifest window) -> still not ready.
+    fs.writeFileSync(path.join(modelsDir, 'manifest.json'), '{}');
+    res = mockRes();
+    await faceController.getFaceConfig({}, res);
+    assert.equal(res._body.data.modelsReady, false);
+
+    // Fully deployed: manifest + both non-empty wasm dirs -> ready.
+    fs.mkdirSync(path.join(modelsDir, 'litert-wasm'), { recursive: true });
+    fs.writeFileSync(path.join(modelsDir, 'litert-wasm', 'a.wasm'), 'x');
+    fs.mkdirSync(path.join(modelsDir, 'mediapipe-wasm'), { recursive: true });
+    fs.writeFileSync(path.join(modelsDir, 'mediapipe-wasm', 'b.wasm'), 'x');
+    res = mockRes();
+    await faceController.getFaceConfig({}, res);
+    assert.equal(res._body.data.modelsReady, true);
+  } finally {
+    fs.rmSync(modelsDir, { recursive: true, force: true });
+    if (hadExisting) fs.renameSync(backupDir, modelsDir);
+  }
 });
 
 test('getFaceConfig: deviceSecretConfigured reflects DEVICE_SHARED_SECRET without echoing it', async () => {

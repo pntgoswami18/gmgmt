@@ -93,10 +93,55 @@ function checkPrerequisites() {
   return missing.length === 0 ? { ready: true } : { ready: false, missing };
 }
 
+/**
+ * Returns true if public/models already holds a deployment that matches the
+ * currently pinned versions/hashes — i.e. a fresh deploy() call would be a
+ * no-op. This lets deploy() skip its destructive rm+cp/copy work (and the
+ * brief asset-unavailability window that work opens up) on an ordinary
+ * restart, instead of unconditionally redoing it every time the process
+ * boots. Never throws — a bad/partial manifest just means "not up to date".
+ */
+function isUpToDate() {
+  try {
+    const manifestOut = path.join(OUT, 'manifest.json');
+    if (!fs.existsSync(manifestOut)) return false;
+    const manifest = JSON.parse(fs.readFileSync(manifestOut, 'utf8'));
+    if (manifest.modelVersion !== MODEL_VERSION) return false;
+    if (!manifest.landmarker || manifest.landmarker.sha256 !== LANDMARKER_SHA256) return false;
+
+    const expectedEmbedderSha = fs.existsSync(EMBEDDER_LOCAL)
+      ? sha256File(EMBEDDER_LOCAL)
+      : EMBEDDER_SHA256;
+    if (!manifest.embedder || manifest.embedder.sha256 !== expectedEmbedderSha) return false;
+
+    const embedderOut = path.join(OUT, 'face_embedder_v1_fp32.tflite');
+    if (!fs.existsSync(embedderOut) || sha256File(embedderOut) !== expectedEmbedderSha) {
+      return false;
+    }
+
+    const landmarkerOut = path.join(OUT, 'face_landmarker.task');
+    if (!fs.existsSync(landmarkerOut)) return false;
+
+    const litertOut = path.join(OUT, 'litert-wasm');
+    const mediapipeOut = path.join(OUT, 'mediapipe-wasm');
+    if (!fs.existsSync(litertOut) || fs.readdirSync(litertOut).length === 0) return false;
+    if (!fs.existsSync(mediapipeOut) || fs.readdirSync(mediapipeOut).length === 0) return false;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function deploy() {
   const prereqs = checkPrerequisites();
   if (!prereqs.ready) {
     throw new Error(`missing ${prereqs.missing[0]} — run 'npm install' in client/ first`);
+  }
+
+  if (isUpToDate()) {
+    log('public/models already up to date — skipping redeploy');
+    return;
   }
 
   fs.mkdirSync(OUT, { recursive: true });
@@ -152,7 +197,7 @@ async function deploy() {
   log('done — GET /api/biometric/face/model-manifest will now serve this deployment');
 }
 
-module.exports = { deploy, checkPrerequisites };
+module.exports = { deploy, checkPrerequisites, isUpToDate };
 
 if (require.main === module) {
   deploy().catch((err) => die(err.stack || err.message));
