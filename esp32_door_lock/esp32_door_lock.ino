@@ -408,26 +408,32 @@ void loadConfiguration() {
   // Not part of config.h — always a runtime credential set via the config portal.
   device_secret = preferences.getString("device_secret", "");
 
+  // WiFi credentials are persisted (and applied here) independently of the rest
+  // of the provisioning form — see runProvisioningPortal(): a device can join a
+  // network successfully but still have the gym-server/device-secret fields
+  // rejected, which used to mean NEITHER got saved, forcing WiFi to be
+  // re-entered on every retry even though it had already been proven to work.
+  if (preferences.getBool("wifi_configured", false)) {
+    String pref_wifi_ssid = preferences.getString("wifi_ssid", "");
+    String pref_wifi_password = preferences.getString("wifi_password", "");
+    if (pref_wifi_ssid.length() > 0) {
+      wifi_ssid = pref_wifi_ssid;
+      wifi_password = pref_wifi_password;
+      Serial.println("  Using previously-joined WiFi network from preferences");
+    }
+  }
+
   // Allow preferences to override config.h ONLY if explicitly saved through web interface
   // Check if user has customized configuration via web interface
   if (preferences.getBool("user_configured", false)) {
     Serial.println("User customization detected, checking for preference overrides...");
-    
-    String pref_wifi_ssid = preferences.getString("wifi_ssid", "");
-    String pref_wifi_password = preferences.getString("wifi_password", "");
+
+    // wifi_ssid/wifi_password are handled above by the wifi_configured check —
+    // they persist independently of the rest of the form, so they're not
+    // repeated here.
     String pref_server_ip = preferences.getString("server_ip", "");
     int pref_server_port = preferences.getInt("server_port", 0);
     String pref_device_id = preferences.getString("device_id", "");
-    
-    // Only override config.h values if preferences contain non-empty values
-    if (pref_wifi_ssid.length() > 0 && pref_wifi_ssid != DEFAULT_WIFI_SSID) {
-      wifi_ssid = pref_wifi_ssid;
-      Serial.println("  Overriding WiFi SSID from preferences");
-    }
-    if (pref_wifi_password.length() > 0 && pref_wifi_password != DEFAULT_WIFI_PASSWORD) {
-      wifi_password = pref_wifi_password;
-      Serial.println("  Overriding WiFi password from preferences");
-    }
     if (pref_server_ip.length() > 0 && pref_server_ip != DEFAULT_GYM_SERVER_IP) {
       gym_server_ip = pref_server_ip;
       Serial.println("  Overriding server IP from preferences");
@@ -958,6 +964,17 @@ void runProvisioningPortal() {
     device_secret = String(param_device_secret.getValue());
     wifi_ssid = WiFi.SSID();
     wifi_password = WiFi.psk();
+
+    // Persist the WiFi credentials now, independent of whether the gym-server
+    // ping/secret checks below pass. Previously this only happened inside
+    // saveConfiguration() once the ENTIRE form succeeded, so a wrong device
+    // secret or unreachable server threw away a WiFi join that had just been
+    // proven to work — every retry meant re-entering the WiFi password too,
+    // and a reboot before the full form succeeded reverted to config.h's
+    // compiled-in network instead of the one just joined.
+    preferences.putString("wifi_ssid", wifi_ssid);
+    preferences.putString("wifi_password", wifi_password);
+    preferences.putBool("wifi_configured", true);
 
     Serial.printf("✅ WiFi joined: %s — testing gym server at %s:%d...\n",
                   wifi_ssid.c_str(), gym_server_ip.c_str(), gym_server_port);
