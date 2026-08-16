@@ -11,12 +11,21 @@ const {
 } = require('../../services/authService');
 const logger = require('../../utils/logger').child({ service: 'authController' });
 
-const COOKIE_OPTIONS = {
+const BASE_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production',
   maxAge: 12 * 60 * 60 * 1000,
 };
+
+// `secure` must reflect whether THIS request is actually HTTPS, not just
+// NODE_ENV — this app's typical deployment (Windows Service, LAN-only,
+// no TLS termination) runs with NODE_ENV=production over plain HTTP. Hardcoding
+// secure:true there set a cookie the browser would silently refuse to send
+// back on every subsequent request: login looked successful (200 + Set-Cookie)
+// but the session never actually persisted.
+function cookieOptions(req) {
+  return { ...BASE_COOKIE_OPTIONS, secure: req.secure };
+}
 
 exports.login = async (req, res) => {
   try {
@@ -49,8 +58,9 @@ exports.login = async (req, res) => {
 
     await recordSuccessfulLogin(staff);
     const token = signToken(staff);
-    const maxAge = getTokenExpiryMs(token) ?? COOKIE_OPTIONS.maxAge;
-    res.cookie(TOKEN_COOKIE_NAME, token, { ...COOKIE_OPTIONS, maxAge });
+    const options = cookieOptions(req);
+    const maxAge = getTokenExpiryMs(token) ?? options.maxAge;
+    res.cookie(TOKEN_COOKIE_NAME, token, { ...options, maxAge });
     res.json({
       success: true,
       staff: { id: staff.id, username: staff.username, role: staff.role },
@@ -62,7 +72,7 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = (req, res) => {
-  res.clearCookie(TOKEN_COOKIE_NAME, COOKIE_OPTIONS);
+  res.clearCookie(TOKEN_COOKIE_NAME, cookieOptions(req));
   res.json({ success: true });
 };
 
