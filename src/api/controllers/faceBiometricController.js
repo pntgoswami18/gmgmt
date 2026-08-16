@@ -526,6 +526,11 @@ const getModelManifest = async (req, res) => {
 // GET /api/biometric/face/config — check-in station bootstrap config.
 const getFaceConfig = async (req, res) => {
   try {
+    // Models are deployed asynchronously at server boot (see src/app.js) —
+    // this lets the kiosk tell "still downloading, retry shortly" apart from
+    // "deployed but disabled" instead of just getting a bare 404 from
+    // GET /api/biometric/face/model-manifest.
+    const manifestPath = path.join(__dirname, '../../../public/models/manifest.json');
     res.json({
       success: true,
       data: {
@@ -536,6 +541,7 @@ const getFaceConfig = async (req, res) => {
         checkoutMinDwellMinutes: settingsCache.getInt('face_checkout_min_dwell_minutes', 15),
         doorDeviceConfigured: settingsCache.get('face_door_device_id', '') !== '',
         deviceSecretConfigured: !!process.env.DEVICE_SHARED_SECRET,
+        modelsReady: fs.existsSync(manifestPath),
       },
     });
   } catch (error) {

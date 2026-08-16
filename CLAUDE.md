@@ -86,6 +86,22 @@ Firmware lives in `esp32_door_lock/esp32_door_lock.ino`. The device connects to 
 
 **WiFi provisioning**: if the device's stored/config.h WiFi credentials fail to connect, it falls back to a WiFiManager captive portal (`GMGMT-DoorLock-XXXX` AP) instead of going dark — no re-flash needed to move a device to new WiFi. The portal verifies backend reachability via `GET /api/biometric/ping` (unauthenticated — see `PUBLIC_PATHS` in `src/app.js`) before exiting. Requires the `WiFiManager` (tzapu) Arduino library in addition to the existing ones — see `esp32_door_lock/config.h.example`.
 
+### Face Check-In (browser, `public/models/`)
+Browser-based face embedding check-in needs three model artifacts served from
+the gitignored `public/models/`: a MediaPipe landmarker + WASM runtimes
+(fetched/bundled automatically), and `face_embedder_v1_fp32.tflite` (SFace,
+converted offline by `tools/face-model/convert.py` — a maintainer-only Python/
+TensorFlow pipeline, not something a deployment target runs). The embedder is
+published as a sha256-pinned GitHub Release asset
+([`face-model-v1`](https://github.com/pntgoswami18/gmgmt/releases/tag/face-model-v1))
+and fetched by `tools/face-model/deploy-models.js`. Deployment runs
+automatically both via `npm start`/`npm run dev` (`prestart`/`predev`) and
+from `src/app.js` at boot — the latter is what actually covers the installed
+Windows Service, which launches `node.exe src/app.js` directly and bypasses
+npm hooks entirely. See `tools/face-model/README.md` and
+`docs/face-checkin-handoff.md` §3.4 for the full deploy story and how to
+publish a new embedder build.
+
 ## Environment Variables
 
 Key variables (see `.env.sample` for full list):

@@ -196,6 +196,12 @@ FAR/FRR sweep. 2200 pairs, zero detection failures.
 
 ## Running the pipeline
 
+This is one-time/occasional maintainer tooling for building or updating the
+embedder — **not** something a deployment target runs. `deploy-models.js`
+fetches the already-built, already-validated `face_embedder_v1_fp32.tflite`
+from a pinned GitHub Release asset instead (see "Publishing a new embedder
+build" below) — it doesn't need this pipeline to have run locally.
+
 ```bash
 node download-models.js                  # pinned artifacts (not in git)
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
@@ -203,6 +209,26 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 .venv/bin/python evaluate.py              # LFW FAR/FRR -> recommended threshold
 .venv/bin/python evaluate.py --norm opencv  # reference-implementation control
 ```
+
+### Publishing a new embedder build
+
+After a `convert.py` run produces a `build/face_embedder_v1_fp32.tflite` you
+want to ship (fidelity gate passed, evaluated against LFW), publish it so
+`deploy-models.js` can fetch it on machines that don't have this pipeline set
+up:
+
+```bash
+shasum -a 256 build/face_embedder_v1_fp32.tflite
+gh release create face-model-vN build/face_embedder_v1_fp32.tflite \
+  --title "face-model-vN: <one-line description of what changed>" \
+  --notes "sha256: <the hash above>; see tools/face-model/README.md Phase 1 results"
+```
+
+Then update `EMBEDDER_URL` and `EMBEDDER_SHA256` in `deploy-models.js`
+together, deliberately — bumping only one would either serve the old model
+from a new URL or hard-fail every deploy on a checksum mismatch. Bump
+`MODEL_VERSION` too if the new build is a genuinely different model revision
+(not just a rebuild of the same weights).
 
 ## Running the spike
 
@@ -231,3 +257,9 @@ rather than transcribed numbers.
 - `convert.py` — Phase 1 SFace ONNX → `.tflite` conversion + fidelity gate
 - `evaluate.py` — Phase 1 LFW FAR/FRR evaluation harness
 - `requirements.txt` — pinned Python env for the Phase 1 pipeline
+- `deploy-models.js` — Phase 3 deploy step; fetches the pinned embedder release
+  asset (or uses a local `build/` copy if present) + landmarker + WASM runtimes
+  into `public/models/` — see "Publishing a new embedder build" above and
+  `docs/face-checkin-handoff.md` §3.4
+- `predeploy-models.js` — soft wrapper around `deploy-models.js`, invoked from
+  `package.json`'s `prestart`/`predev` and from `src/app.js` at boot

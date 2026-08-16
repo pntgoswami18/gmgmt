@@ -267,6 +267,24 @@ const startServer = async () => {
     const { ensureBootstrapAdmin } = require('./services/authService');
     await ensureBootstrapAdmin();
 
+    // Deploy face check-in model assets if missing (sha256-verified download
+    // of the pinned embedder + landmarker into public/models). This mirrors
+    // package.json's `prestart`/`predev` npm hooks, which cover `npm start`/
+    // `npm run dev` but never fire for the installed Windows Service (it
+    // launches `node.exe src/app.js` directly — see scripts/service-install.js).
+    // Runs in the background so a slow/offline model fetch never blocks server
+    // boot; face check-in just stays unreachable (404) until it finishes.
+    // runPredeploy() already swallows its own errors, but require() itself can
+    // throw at load time, so this stays defensive like the other optional
+    // subsystems below (biometric integration, payment deactivation).
+    try {
+      require('../tools/face-model/predeploy-models')
+        .runPredeploy()
+        .catch((err) => logger.warn({ err }, 'face model predeploy failed'));
+    } catch (err) {
+      logger.warn({ err }, 'face model predeploy failed to start');
+    }
+
     server.listen(PORT, '0.0.0.0', () => {
       logger.info(`Server running on port ${PORT} and accessible from all interfaces`);
       logger.info(`🔌 WebSocket server ready for real-time enrollment updates`);
