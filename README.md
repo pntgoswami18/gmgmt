@@ -638,7 +638,6 @@ Button Specifications:
 • Rating: 3.3V, 50mA minimum
 • Mounting: Panel mount or PCB mount
 • Actuation force: 100-200g typical
-```
 
 ###### Override Button (Pin 5) - Emergency Door Unlock
 
@@ -693,7 +692,6 @@ Button Specifications:
 • Actuation force: 100-200g typical
 • Color: Red recommended for emergency override
 • Protection: Consider adding protective cover or key switch
-```
 
 ##### 4.7 Button Integration with ESP32 Firmware
 
