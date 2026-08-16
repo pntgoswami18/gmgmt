@@ -254,6 +254,37 @@ wss.on('connection', (ws, req) => {
   );
 });
 
+// Deploy face check-in model assets if missing (sha256-verified download of
+// the pinned embedder + landmarker into public/models). This mirrors
+// package.json's `prestart`/`predev` npm hooks, which cover `npm start`/
+// `npm run dev` but never fire for the installed Windows Service (it
+// launches `node.exe src/app.js` directly — see scripts/service-install.js).
+// Runs in the background so a slow/offline model fetch never blocks server
+// boot; face check-in just stays unreachable (404) until it finishes.
+// runPredeploy() already swallows its own errors, but require() itself can
+// throw at load time, so this stays defensive like the other optional
+// subsystems in startServer() (biometric integration, payment deactivation).
+//
+// Extracted to its own function (rather than inlined in startServer) so it
+// can be unit-tested directly — startServer() itself is not exported and
+// pulls in DB init, settings cache, and long-lived intervals that make it
+// unsuitable to invoke from a unit test.
+function bootFaceModelPredeploy() {
+  try {
+    // runPredeploy() currently catches and swallows its own errors
+    // internally, so this .catch() never fires today — it's kept as a
+    // defense-in-depth guard (see
+    // src/services/__tests__/appBootFaceModelPredeploy.test.js) in case that
+    // internal contract ever changes, so a future rejection still can't
+    // become an unhandled promise rejection here.
+    require('../tools/face-model/predeploy-models')
+      .runPredeploy()
+      .catch((err) => logger.warn({ err }, 'face model predeploy failed'));
+  } catch (err) {
+    logger.warn({ err }, 'face model predeploy failed to start');
+  }
+}
+
 const startServer = async () => {
   try {
     await initializeDatabase();
@@ -266,6 +297,8 @@ const startServer = async () => {
 
     const { ensureBootstrapAdmin } = require('./services/authService');
     await ensureBootstrapAdmin();
+
+    bootFaceModelPredeploy();
 
     server.listen(PORT, '0.0.0.0', () => {
       logger.info(`Server running on port ${PORT} and accessible from all interfaces`);
@@ -395,3 +428,7 @@ if (require.main === module) {
 }
 
 module.exports = app;
+// Test-only hook (unit tests need to exercise this in isolation — see
+// bootFaceModelPredeploy's comment above for why startServer() itself isn't
+// a viable test target). Not part of the app's public surface.
+module.exports._bootFaceModelPredeploy = bootFaceModelPredeploy;
