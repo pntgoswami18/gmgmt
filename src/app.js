@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -171,9 +172,16 @@ app.use('/api', (req, res, next) => {
   return requireAuth(req, res, next);
 });
 
-app.use('/uploads', express.static('public/uploads'));
+// Resolved relative to this file, not process.cwd() - the installed Windows
+// Service runs with its working directory set to %ProgramData%\gmgmt (so
+// .env/data live outside the install dir), which left a cwd-relative
+// 'public/uploads' pointing at a directory that doesn't exist there. Express
+// silently falls through a static-middleware miss to the next matching
+// route, which was the SPA catch-all below - so every uploaded file (e.g.
+// the gym logo) served back index.html instead of the actual image.
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 // Face model binaries (.tflite + manifest) for the check-in/enrollment clients.
-app.use('/models', express.static('public/models'));
+app.use('/models', express.static(path.join(__dirname, '../public/models')));
 
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/bookings', bookingRoutes);
@@ -190,7 +198,6 @@ app.use('/api/referrals', referralRoutes);
 app.use('/api/payment-deactivation', paymentDeactivationRoutes);
 
 // Serve frontend build after API routes so /api/* is not intercepted
-const path = require('path');
 app.use(express.static(path.join(__dirname, '../client/build')));
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../client/build/index.html'));
