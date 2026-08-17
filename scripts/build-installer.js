@@ -231,6 +231,32 @@ function copyBuildInputs(archDir, architecture) {
     recursive: true,
   });
 
+  // gmgmt-installer.nsi bundles only these two client/node_modules wasm
+  // subfolders (deploy-models.js's LITERT_WASM_SRC/MEDIAPIPE_WASM_SRC) and
+  // three tools/face-model files (src/app.js's boot-time predeploy require
+  // chain) - not the `dirs` sweep above, since client/node_modules and
+  // tools/ are otherwise multi-hundred-MB/multi-GB dev-only trees. They
+  // must be staged here too, at the exact relative paths the .nsi's File
+  // directives expect, or makensis fails with a missing-file compile error.
+  const wasmDirs = [
+    ['client', 'node_modules', '@litertjs', 'core', 'wasm'],
+    ['client', 'node_modules', '@mediapipe', 'tasks-vision', 'wasm'],
+  ];
+  wasmDirs.forEach((parts) => {
+    fs.cpSync(path.join(...parts), path.join(archDir, ...parts), { recursive: true });
+  });
+
+  const faceModelFiles = [
+    ['tools', 'face-model', 'deploy-models.js'],
+    ['tools', 'face-model', 'predeploy-models.js'],
+    ['tools', 'face-model', 'lib', 'fetchVerify.js'],
+  ];
+  faceModelFiles.forEach((parts) => {
+    const dest = path.join(archDir, ...parts);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(path.join(...parts), dest);
+  });
+
   // env.sample must ship: serviceEnv.js uses it to seed %ProgramData%\gmgmt\.env
   ['package.json', 'package-lock.json', 'README.md', 'LICENSE.txt', 'env.sample'].forEach(
     (file) => {
