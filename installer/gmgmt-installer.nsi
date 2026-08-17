@@ -142,6 +142,20 @@ Section "GMgmt Core" SecCore
   SetOutPath "$INSTDIR\client\build"
   File /r "client\build\*"
 
+  ; deploy-models.js copies these two directories (LITERT_WASM_SRC /
+  ; MEDIAPIPE_WASM_SRC) into public/models/ at deploy time - full
+  ; client/node_modules is a dev-only, multi-hundred-MB build dependency
+  ; never otherwise shipped, so only these two wasm subfolders are bundled,
+  ; at the exact relative path deploy-models.js already expects (no code
+  ; change needed there). Confirmed missing on a real installed service:
+  ; checkPrerequisites() reported "prerequisites not met" for exactly these
+  ; two paths, the same class of bug as tools/ below.
+  SetOutPath "$INSTDIR\client\node_modules\@litertjs\core\wasm"
+  File /r "client\node_modules\@litertjs\core\wasm\*"
+
+  SetOutPath "$INSTDIR\client\node_modules\@mediapipe\tasks-vision\wasm"
+  File /r "client\node_modules\@mediapipe\tasks-vision\wasm\*"
+
   ; Only the three files src/app.js actually requires at boot to deploy face
   ; check-in model assets (tools/face-model/deploy-models.js's own header
   ; comment documents the require chain) - NOT the rest of tools/, which is
