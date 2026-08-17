@@ -102,6 +102,14 @@ npm hooks entirely. See `tools/face-model/README.md` and
 `docs/face-checkin-handoff.md` §3.4 for the full deploy story and how to
 publish a new embedder build.
 
+`DEVICE_SHARED_SECRET` (gates the kiosk's `/face/sync` and `/face/check-in`
+endpoints) is auto-generated on Windows Service installs — `scripts/lib/
+serviceEnv.js`'s `ensureGeneratedSecrets()` writes a random one into `.env`
+on first boot if it's missing, so a fresh install never runs those endpoints
+unauthenticated. This only runs on the service install/management path
+(`service-install.js`/`service-manage.js`); a plain `npm start`/dev boot
+still leaves it unset by default. See `docs/face-checkin-handoff.md` §3.5.
+
 ## Environment Variables
 
 Key variables (see `.env.sample` for full list):
