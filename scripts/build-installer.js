@@ -300,12 +300,20 @@ function verifyNativeModules(architecture) {
     console.log('✅ Native modules load under the bundled runtime');
   } catch (error) {
     const bundledVersion = execSync(`"${bundledNode}" --version`, { encoding: 'utf8' }).trim();
+    // npm/node-gyp's arch identifier for 32-bit Windows is "ia32", not "x86"
+    // (our own --arch flag's spelling). Passing "x86" through as-is used to
+    // send node-gyp looking up an unrecognized arch and fail deep inside
+    // node-gyp with "Cannot destructure property 'libUrl' of 'release[arch]'
+    // as it is undefined" - a confusing error pointing nowhere near the
+    // actual cause. x64's identifier is spelled the same in both places, so
+    // only x86 needs translating.
+    const npmArch = architecture === 'x86' ? 'ia32' : architecture;
     console.error(`❌ better-sqlite3 does not load under the bundled runtime (${bundledVersion}).`);
     console.error('   It was likely compiled against your system Node instead. Rebuild it');
     console.error("   against the bundled runtime's ABI before packaging:");
     console.error(
-      `     $env:npm_config_target="${bundledVersion.replace(/^v/, '')}"; $env:npm_config_arch="${architecture}"; ` +
-        `$env:npm_config_target_arch="${architecture}"; $env:npm_config_target_platform="win32"; ` +
+      `     $env:npm_config_target="${bundledVersion.replace(/^v/, '')}"; $env:npm_config_arch="${npmArch}"; ` +
+        `$env:npm_config_target_arch="${npmArch}"; $env:npm_config_target_platform="win32"; ` +
         `$env:npm_config_runtime="node"; $env:npm_config_disturl="https://nodejs.org/dist"; npm rebuild better-sqlite3`
     );
     // Throw (don't process.exit) so buildAllInstallers' per-arch handling
