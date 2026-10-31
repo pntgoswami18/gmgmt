@@ -14,6 +14,7 @@ let validateBiometricId;
 let stopEnrollment;
 let cancelEnrollment;
 let setBiometricIntegration;
+let esp32Webhook;
 let sqliteModule;
 
 const todayStr = () => toLocalDateStr(new Date());
@@ -68,7 +69,7 @@ async function windowAwayFromNow(prefix, lo, hi) {
 }
 
 function mockReqRes(body) {
-  const req = { body };
+  const req = { body, ip: '192.168.1.50', get: () => 'ESP32-DoorLock/1.0' };
   let jsonPayload = null;
   let statusCode = 200;
   const res = {
@@ -109,6 +110,7 @@ test.before(async () => {
     stopEnrollment,
     cancelEnrollment,
     setBiometricIntegration,
+    esp32Webhook,
   } = require('../biometricController'));
   db.prepare(
     "INSERT INTO membership_plans (id, name, price, duration_days) VALUES (1, 'Monthly', 500, 30)"
@@ -308,5 +310,78 @@ test('regression: cancelEnrollment sends cancel_enrollment only to real online d
   } finally {
     setBiometricIntegration(null);
     db.prepare("DELETE FROM devices WHERE device_id = 'ESP32_real2'").run();
+  }
+});
+
+// Heartbeat processing is deferred via setImmediate; wait for it to flush.
+const flushHeartbeat = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+test('regression: heartbeat is stamped with server time, so a device with no NTP (2025 fallback clock) still reads online', async () => {
+  const BiometricIntegration = require('../../../services/biometricIntegration');
+  const integration = new BiometricIntegration();
+  setBiometricIntegration(integration);
+  try {
+    // What getISO8601Time() sends when NTP fails: 2025-01-01 + uptime
+    const staleDeviceTimestamp = '2025-01-01T00:05:00';
+    const { req, res, getJson } = mockReqRes({
+      deviceId: 'ESP32_nontp',
+      deviceType: 'esp32_door_lock',
+      event: 'heartbeat',
+      status: 'online',
+      timestamp: staleDeviceTimestamp,
+      ip_address: '192.168.1.50',
+    });
+    const before = Math.floor(Date.now() / 1000);
+    await esp32Webhook(req, res);
+    await flushHeartbeat();
+    const after = Math.floor(Date.now() / 1000);
+
+    const body = getJson();
+    assert.equal(body.success, true);
+    assert.ok(
+      body.serverEpoch >= before && body.serverEpoch <= after,
+      `serverEpoch must be current server time: ${body.serverEpoch}`
+    );
+
+    const row = db
+      .prepare("SELECT timestamp, raw_data FROM biometric_events WHERE device_id = 'ESP32_nontp' AND event_type = 'heartbeat'")
+      .get();
+    assert.notEqual(row.timestamp, staleDeviceTimestamp, 'device clock must not be used as event time');
+    assert.ok(
+      Math.abs(Date.parse(row.timestamp) - Date.now()) < 5000,
+      `stored timestamp must be server receive time: ${row.timestamp}`
+    );
+    assert.equal(
+      JSON.parse(row.raw_data).timestamp,
+      staleDeviceTimestamp,
+      'device-reported timestamp is kept in raw_data for diagnostics'
+    );
+
+    const status = await integration.getDeviceStatus('ESP32_nontp');
+    assert.equal(status.status, 'online');
+  } finally {
+    setBiometricIntegration(null);
+    db.prepare("DELETE FROM biometric_events WHERE device_id = 'ESP32_nontp'").run();
+    db.prepare("DELETE FROM devices WHERE device_id = 'ESP32_nontp'").run();
+  }
+});
+
+test('heartbeat with no device timestamp at all still gets a server-time stamp', async () => {
+  const BiometricIntegration = require('../../../services/biometricIntegration');
+  const integration = new BiometricIntegration();
+  setBiometricIntegration(integration);
+  try {
+    const { req, res, getJson } = mockReqRes({ deviceId: 'ESP32_nots', event: 'heartbeat' });
+    await esp32Webhook(req, res);
+    await flushHeartbeat();
+    assert.equal(typeof getJson().serverEpoch, 'number');
+    const row = db
+      .prepare("SELECT timestamp FROM biometric_events WHERE device_id = 'ESP32_nots'")
+      .get();
+    assert.ok(Math.abs(Date.parse(row.timestamp) - Date.now()) < 5000);
+  } finally {
+    setBiometricIntegration(null);
+    db.prepare("DELETE FROM biometric_events WHERE device_id = 'ESP32_nots'").run();
+    db.prepare("DELETE FROM devices WHERE device_id = 'ESP32_nots'").run();
   }
 });

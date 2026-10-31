@@ -53,6 +53,8 @@
 #include <WiFiManager.h>       // tzapu/WiFiManager — captive-portal WiFi provisioning fallback
 #include <ESPmDNS.h>           // mDNS advertisement so the backend can auto-discover this device
 #include <time.h>
+#include <sys/time.h>
+#include <esp_sntp.h>          // sntp_get_sync_status() — tell real NTP sync from server-supplied time
 
 // Include configuration file (comment out if config.h doesn't exist)
 #include "config.h"
@@ -221,6 +223,7 @@ void sendHeartbeat();
 void sendToServer(String jsonData);
 void sendToServerAsync(String jsonData);
 void resyncNTPTime(); // Add NTP resync function declaration
+void applyServerTime(const String& response);
 void startNonBlockingUnlock(unsigned long duration, bool emergency = false);
 void updateDoorUnlockState();
 void emergencyUnlockWithReason(String reason);
@@ -331,6 +334,30 @@ void waitForNTPTime() {
                     WiFi.gatewayIP().toString().c_str());
     }
   }
+}
+
+// Fallback clock source for networks with no internet (NTP unreachable): the
+// heartbeat response carries the gym server's epoch, which is on the same LAN.
+// Real SNTP wins whenever it has completed; SNTP keeps polling in the
+// background, so it overrides this as soon as internet access returns.
+void applyServerTime(const String& response) {
+  if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) return;
+
+  StaticJsonDocument<384> doc;
+  if (deserializeJson(doc, response) != DeserializationError::Ok) return;
+
+  long long serverEpoch = doc["serverEpoch"] | 0LL;
+  // Reject anything outside 2020-2038 (same sanity window as getISO8601Time)
+  if (serverEpoch < 1577836800LL || serverEpoch > 2145916800LL) return;
+
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  long long drift = serverEpoch - (long long)now.tv_sec;
+  if (drift > -2 && drift < 2) return;  // already close enough; avoid needless steps
+
+  struct timeval tv = { (time_t)serverEpoch, 0 };
+  settimeofday(&tv, NULL);
+  Serial.printf("🕒 Clock set from gym server (NTP unavailable), drift was %lld s\n", drift);
 }
 
 // Function to manually resynchronize NTP time
@@ -1822,6 +1849,8 @@ void sendToServer(String jsonData) {
     
     if (httpResponseCode != 200) {
       Serial.printf("Server response: %s\n", response.c_str());
+    } else if (response.indexOf("serverEpoch") >= 0) {
+      applyServerTime(response);
     }
   } else {
     Serial.printf("HTTP POST failed to %s: %s\n", url.c_str(), http.errorToString(httpResponseCode).c_str());

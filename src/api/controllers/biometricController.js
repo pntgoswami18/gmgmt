@@ -1291,12 +1291,16 @@ const esp32Webhook = async (req, res) => {
 
     if (event === 'heartbeat') {
       eventType = 'heartbeat';
-      // For heartbeat events, respond immediately and process asynchronously
+      // Server receive time is the authority: device clocks are unreliable
+      // (NTP fails on internet-less networks), and online/offline status is
+      // derived from this stamp. serverEpoch lets the device fix its own clock.
+      const receivedAt = new Date();
       res.json({
         success: true,
         message: 'Heartbeat received',
         device_id: deviceId,
         timestamp: timestamp,
+        serverEpoch: Math.floor(receivedAt.getTime() / 1000),
       });
 
       // Process heartbeat asynchronously to avoid blocking response
@@ -1343,7 +1347,7 @@ const esp32Webhook = async (req, res) => {
             biometric_id: null,
             event_type: eventType,
             device_id: deviceId || 'unknown',
-            timestamp: timestamp || new Date().toISOString(),
+            timestamp: receivedAt.toISOString(),
             success: true,
             raw_data: JSON.stringify({
               ...eventData,

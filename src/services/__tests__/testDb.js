@@ -34,8 +34,13 @@ function buildSchema(db) {
     CREATE TABLE IF NOT EXISTS devices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       device_id TEXT UNIQUE NOT NULL,
+      device_type TEXT NOT NULL DEFAULT 'esp32_door_lock',
+      device_name TEXT,
+      ip_address TEXT,
+      firmware_version TEXT,
       status TEXT DEFAULT 'offline',
-      last_heartbeat TEXT
+      last_heartbeat TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS members (
